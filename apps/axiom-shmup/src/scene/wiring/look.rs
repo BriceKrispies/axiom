@@ -224,6 +224,14 @@ pub struct SkyRadiance {
     pub ambient_sky: Color,
     /// Hemisphere ambient, ground term — the sky reflected off the street.
     pub ambient_ground: Color,
+    /// The gradient's upper stop — straight up, **as the dome draws it**.
+    ///
+    /// The same direction as [`Self::ambient_sky`] and deliberately a different
+    /// number: this one carries the source's sky shoulder
+    /// ([`dome_shoulder`]) and the ambient must not, because one is what the
+    /// sky pass paints and the other is what lights the street. `dome.js`
+    /// keeps the same two apart for the same reason.
+    pub dome_zenith: Color,
 }
 
 /// Owns the ported [`SkySystem`], steps it, and publishes what a frame needs.
@@ -592,10 +600,37 @@ fn raymarch(system: &SkySystem, transmittance: &Lut2D, multiscatter: &Lut2D) -> 
     // sky reflected off the ground albedo the shared block publishes.
     let up = radiance(Vec3::new(0.0, 1.0, 0.0));
     SkyRadiance {
-        clear_color: scene_radiance(radiance(clear_dir)),
+        // Drawn: the clear colour is the sky the camera looks into and the
+        // colour distance recedes toward, so it has to be the sky the sky pass
+        // paints — shoulder included, or the fog fades to a colour the dome
+        // never shows and the horizon is a seam.
+        clear_color: scene_radiance(dome_shoulder(system, radiance(clear_dir))),
+        dome_zenith: scene_radiance(dome_shoulder(system, up)),
+        // Lighting: the raw integral, no shoulder. See `dome_shoulder`.
         ambient_sky: scene_radiance(up),
         ambient_ground: scene_radiance(up.mul(shared.ground_albedo)),
     }
+}
+
+/// **The dome's own shoulder** — `skRolloff` (`sky/dome.js:140-154`), applied
+/// where the source applies it and at the knee the source publishes.
+///
+/// `SkySystem` publishes `shared.sky_rolloff` as `(knee, exponent)` — the knee
+/// riding the beam's own luminance, so it lands at the same code value at every
+/// hour — and `crate::sky::dome::rolloff` is the ported power compressor. Both
+/// were complete and **called by nothing**: the port authored `FrameSky` from
+/// the raw scattering integral, and a raw daylight sky is several stops above
+/// anything the source ever draws.
+///
+/// It is a *display* shoulder, not a light. `dome.js` composites the decks and
+/// the horizon murk, rolls the result off, and only then adds the discs — "they
+/// are supposed to clip and bloom, and they are the only thing in the sky that
+/// is." So this is applied to everything the sky pass DRAWS and to nothing that
+/// LIGHTS: [`SkyDriver::ambient`] is the source's separate `ambientColor` path
+/// and stays on the raw integral.
+pub fn dome_shoulder(system: &SkySystem, radiance: Vec3) -> Vec3 {
+    let (knee, exponent) = system.shared.sky_rolloff;
+    crate::sky::dome::rolloff(radiance, knee, exponent)
 }
 
 /// The port's framebuffer radiance, on the engine's scene scale — **linear and
@@ -964,6 +999,59 @@ mod tests {
         SkyDriver::new(Quality::High, HOUR)
     }
 
+    /// TEMPORARY EXPLORATION — deleted before the change lands.
+    #[test]
+    fn explore_haze_asymptote() {
+        use crate::sky::volumetrics::{fog_ambient, fog_inscatter_phase};
+        let sky = authored_hour();
+        let sh = sky.system.shared;
+        let (tl, ml) = sky.luts();
+        let sun = sky.system.sun_direction();
+        let moon = sky.system.moon_direction();
+        let radiance = |dir: Vec3| -> Vec3 {
+            raymarch_sky(
+                sh.view_pos, dir, sun, sh.sun_irradiance, moon, sh.moon_irradiance,
+                DIRECTION_STEPS, sh.mie_scale,
+                |p, d| { let (u, v) = lut_uv(p, d); tl.sample(u, v) },
+                |p, d| { let (u, v) = lut_uv(p, d); ml.sample(u, v) },
+            )
+        };
+        let probe = |horizon_band: bool| -> Vec3 {
+            let n = 64usize;
+            let mut sum = Vec3::splat(0.0);
+            let mut wsum = 0.0;
+            for i in 0..n {
+                let fi = (i as f64 + 0.5) / n as f64;
+                let phi = i as f64 * 2.399_963_23;
+                let ct = if horizon_band { -0.12 + (0.35 - -0.12) * fi } else { (1.0 - fi).sqrt() };
+                let st = (1.0 - ct * ct).max(0.0).sqrt();
+                let d = Vec3::new(st * phi.cos(), ct, st * phi.sin());
+                let w = if horizon_band { 1.0 } else { ct.max(0.0) };
+                sum = sum.add(radiance(d).scale(w));
+                wsum += w;
+            }
+            sum.scale(1.0 / wsum.max(1e-4))
+        };
+        let ambient = [probe(false), probe(true)];
+        println!("ambient cool {:?}", ambient[0]);
+        println!("ambient hor  {:?}", ambient[1]);
+        println!("key_irr {:?}", sh.key_irr);
+        println!("key_dir {:?}", sh.key_dir);
+        println!("sun {sun:?}");
+        println!("clear_color(scene) {:?}", sky.clear_color().to_array());
+        let f = sky.system.fog;
+        for cos in [-1.0_f64, -0.7, -0.3, 0.0, 0.3, 0.7, 1.0] {
+            let insc = sh
+                .key_irr
+                .scale(fog_inscatter_phase(cos, f.phase_forward, f.phase_backward, f.phase_back_weight, f.shaft_gain) * 0.55)
+                .add(fog_ambient(cos, ambient, sh.key_irr).scale(f.ambient_gain))
+                .scale(f.scatter / f.extinction);
+            println!("cos {cos:+.1}: raw {:?} scene {:?}", insc, scene_radiance(insc).to_array());
+        }
+        panic!("explore");
+    }
+
+
     /// **The defect this file was rewritten to fix, written down as a number.**
     ///
     /// The frame was tone mapped twice: `display` (as `scene_radiance` was then
@@ -1008,12 +1096,20 @@ mod tests {
             "the zenith is darker than the horizon at this hour"
         );
 
-        // And the sun disc is scene-referred: a linear four-figure radiance that
-        // the old `0..1` clamp flattened to display white before AgX could
-        // decide where display white was.
+        // And the sun disc is scene-referred, above display white, and NOT the
+        // old `0..1` clamp.
+        //
+        // It is not the raw four-figure disc radiance either: `sky_draw` puts it
+        // through the source's own sky shoulder, because `FrameSky` spends one
+        // lane on the disc, the halo AND the cloud's key (see the note there).
+    // What has to hold is that it is still well past display white — the
+        // authored exposure carries it over AgX's `MAX_EV` (16.29 linear) so it
+        // clips and blooms, which is what the source says a disc is for — and
+        // that it is not sitting on a ceiling of exactly one, which is where the
+        // old clamp pinned it.
         let body = crate::scene::wiring::sky_draw::visible_sky(&sky).body_color();
         assert!(
-            luma(body) > 10.0,
+            luma(body) > 1.2,
             "the sun disc is clamped, not radiance: {body:?}"
         );
     }

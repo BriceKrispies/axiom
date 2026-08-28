@@ -116,34 +116,43 @@ pub fn shmup_start() {
     //
     // ---- MEASURED, on matched framing ------------------------------------
     //
-    // `uv run scripts/parity_shot.py hero`, 1280x720, camera PINNED and clock
-    // PINNED against the original's own `hero` shot (`apps/shmup/src/dev/shots.js`,
-    // which also carries `time: 16.5` — the hour `look::HOUR` now matches).
+    // `uv run scripts/parity_shot.py hero`, 1280x720, every axis PINNED (camera,
+    // clock, input, resolution, frame index) against the original's own `hero`
+    // shot (`apps/shmup/src/dev/shots.js`, which also carries `time: 16.5` — the
+    // hour `look::HOUR` now matches).
     //
-    // The fit is not a mean-of-the-frame: the two towns are not byte-identical
+    // The fit is not a mean-of-the-frame: the two towns are not the same town
     // (the port draws 1.64x the instances), so a whole-frame mean mixes the
-    // exposure gap with a dressing gap. It is taken on the two regions least
-    // sensitive to dressing — `skyHi`, which is the sky pass and nothing else,
-    // and `sunlit`, a large facade dominated by the key — inverted through AgX's
-    // own curve rather than compared as bytes:
+    // exposure gap with a dressing gap. It is taken on the regions least
+    // sensitive to dressing — `skyHi`, which is the sky pass and nothing else;
+    // `sunlit`, a large facade dominated by the key; and `fg` — inverted through
+    // AgX's own curve rather than compared as bytes:
     //
     //     contrast(t) = byte / 255      (the composite's `pow(.,2.2)` and the
     //                                    sRGB encode cancel exactly)
     //     scene       = 2^(t * 16.5 - 12.47393)
     //
-    //     region    original -> port      needs
-    //     skyHi      188.89     93.57     +3.101 stops   (x8.578)
-    //     sunlit     175.03     71.98     +3.385 stops   (x10.446)
+    // Two rounds. The first, against an authored `1.1301`, read `skyHi +3.101`
+    // and `sunlit +3.385` stops short — agreeing to 0.28 stop, which is the
+    // load-bearing result: the sky and the key are on ONE scale to within a
+    // third of a stop, exactly what `look::SCENE_RADIANCE_SCALE` exists to
+    // guarantee. A missing `PI` there would have shown up here as a 1.65-stop
+    // disagreement between those two rows, and did not.
     //
-    // Those two agree to 0.28 stop, and that agreement is the load-bearing
-    // result: it says the sky and the key light are on ONE scale to within a
-    // third of a stop, which is what `look::SCENE_RADIANCE_SCALE` exists to
-    // guarantee and what the old double-tone-map destroyed. A missing `PI` there
-    // would show up here as a 1.65-stop disagreement between these two rows.
+    // The second round, after `look::dome_shoulder` restored the sky's own
+    // published roll-off, reads:
     //
-    // So the remaining error is a single global exposure, and the fit is their
-    // geometric mean: `x9.466` on an authored `1.1301`.
-    const METERING_FIT: f64 = 1.348;
+    //     region    original -> port      residual
+    //     skyHi      188.9      191.4     -0.09 stops
+    //     sunlit     175.0      181.0     -0.20 stops
+    //     fg          70.7       76.8     -0.23 stops
+    //
+    // so this trims by their mean, -0.17 stops (x0.889), from 1.348.
+    //
+    // `street` is deliberately excluded and still reads +0.90: the original's
+    // road is grey asphalt and the port's is sand. That is an albedo, not an
+    // exposure, and metering on it would drag the whole frame to hide it.
+    const METERING_FIT: f64 = 1.199;
     let exposure = (crate::scene::wiring::look::KEY_INTENSITY_FULL_SCALE * METERING_FIT) as f32;
     windowing.set_tonemap(FrameTonemap::blended(
         Ratio::new(1.0).expect("an authored tone-map strength is finite"),

@@ -99,7 +99,7 @@ use std::f64::consts::PI;
 use axiom::prelude::{FrameSky, Ratio};
 use axiom_kernel::Radians;
 
-use crate::scene::wiring::look::{scene_radiance, SkyDriver};
+use crate::scene::wiring::look::{dome_shoulder, scene_radiance, SkyDriver};
 use crate::sky::atmosphere::{luminance, lut_uv, raymarch_sky, Vec3};
 use crate::sky::clouds::CUMULUS_KM;
 use crate::sky::dome::aureole;
@@ -213,15 +213,19 @@ pub fn visible_sky(driver: &SkyDriver) -> FrameSky {
     };
 
     // ---- the two stops -------------------------------------------------------
-    // Both are already on the driver: `ambient_sky` IS the displayed radiance
-    // straight up, and `clear_color` IS the displayed radiance in the 12-degree
-    // band. Recomputing either here would be the fifth hand-inlined duplicate
-    // this wave exists to remove.
-    let zenith = rgb(driver.radiance().ambient_sky.to_array());
+    // Both are already on the driver: `dome_zenith` IS the drawn radiance
+    // straight up and `clear_color` IS the drawn radiance in the 12-degree band,
+    // each with the source's own sky shoulder already applied. Recomputing
+    // either here would be the fifth hand-inlined duplicate this wave exists to
+    // remove; taking the *ambient* pair instead would paint the sky with the
+    // numbers that light the street, which is several stops brighter than
+    // anything `dome.js` draws.
+    let zenith = rgb(driver.radiance().dome_zenith.to_array());
     let horizon = rgb(driver.radiance().clear_color.to_array());
 
     let column = probe_column(sun);
-    let haze = haze_height(&radiance, column, luma(horizon), luma(zenith));
+    let shoulder = |c: Vec3| dome_shoulder(system, c);
+    let haze = haze_height(&radiance, &shoulder, column, luma(horizon), luma(zenith));
 
     // ---- the body ------------------------------------------------------------
     let moon_key = system.key_light == KeyLight::Moon;
@@ -239,16 +243,31 @@ pub fn visible_sky(driver: &SkyDriver) -> FrameSky {
     let body_linear = disc_radiance
         .mul(to_body)
         .div(Vec3::splat(draw_scale * draw_scale));
-    // Scene-referred and deliberately unbounded: the sun's disc radiance is a
-    // four-figure linear value, and `FrameSky`'s body colour is a raw `[f32; 3]`
-    // for exactly that reason (its own tests author a sun at `[3.0, 2.8, 2.4]`).
-    // While this went through a Reinhard the disc was flattened to 1.0 — display
-    // white — which is also what made `halo_fit` below meaningless.
-    let body_color = rgb(scene_radiance(body_linear).to_array());
+    // Scene-referred, and shouldered — which is a decision, not an oversight.
+    //
+    // `FrameSky` spends ONE lane on `body_color` and reads it THREE times
+    // (`frame_sky.rs`): the disc, the halo, and the cloud's sunward face
+    // (`gradient * CLOUD_FILL_GAIN + body_color * sunlit`). The source keeps
+    // those apart — `dome.js` composites the decks, rolls the sky off, and adds
+    // the discs afterwards precisely so the disc alone escapes the shoulder.
+    //
+    // Under one lane the cloud wins, for three reasons. Cloud is most of the
+    // visible sky at this weather; the raw disc radiance is ~400 scene units, so
+    // `body_color * sunlit` puts every lit cumulus tens of stops over white and
+    // the deck reads as a flat cut-out; and the shouldered disc is still ~1.7
+    // scene units, which at the authored exposure is past AgX's `MAX_EV` (16.29
+    // linear) and therefore still clips to display white and blooms — exactly
+    // what the source says the disc is for. So the shoulder costs the disc
+    // nothing visible and saves the clouds.
+    //
+    // The honest fix is an engine one: a cloud-light lane on `FrameSky` distinct
+    // from the body's own radiance. That is a new capability, not a line here.
+    let body_color = rgb(scene_radiance(shoulder(body_linear)).to_array());
 
     // ---- the halo ------------------------------------------------------------
     let (halo_falloff, halo_strength) = halo_fit(
         &radiance,
+        &shoulder,
         transmittance,
         shared.view_pos,
         body_dir,
@@ -309,6 +328,7 @@ fn probe_column(sun: Vec3) -> Vec3 {
 /// dome carry the port's *shape* and not just its two colours.
 fn haze_height(
     radiance: &impl Fn(Vec3) -> Vec3,
+    shoulder: &impl Fn(Vec3) -> Vec3,
     column: Vec3,
     horizon_luma: f64,
     zenith_luma: f64,
@@ -318,7 +338,7 @@ fn haze_height(
     let sample = |up: f64| {
         let flat = (1.0 - up * up).max(0.0).sqrt();
         let dir = Vec3::new(column.x * flat, up, column.z * flat);
-        luma(rgb(scene_radiance(radiance(dir)).to_array()))
+        luma(rgb(scene_radiance(shoulder(radiance(dir))).to_array()))
     };
 
     let mut prev_up = up_at(0);
@@ -367,6 +387,7 @@ fn haze_height(
 /// worse than no halo.
 fn halo_fit(
     radiance: &impl Fn(Vec3) -> Vec3,
+    shoulder: &impl Fn(Vec3) -> Vec3,
     transmittance: &Lut2D,
     view_pos: Vec3,
     body_dir: Vec3,
@@ -380,8 +401,8 @@ fn halo_fit(
         let (u, v) = lut_uv(view_pos, dir);
         let along = transmittance.sample(u, v);
         let glow = aureole(dir.y, irradiance, along, theta.cos(), mie_scale);
-        let lit = luma(rgb(scene_radiance(base.add(glow)).to_array()));
-        let plain = luma(rgb(scene_radiance(base).to_array()));
+        let lit = luma(rgb(scene_radiance(shoulder(base.add(glow))).to_array()));
+        let plain = luma(rgb(scene_radiance(shoulder(base)).to_array()));
         (lit - plain).max(0.0) / body_luma.max(1.0e-6)
     };
 
