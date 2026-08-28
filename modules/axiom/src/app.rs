@@ -294,6 +294,20 @@ impl App {
                     .iter()
                     .map(|l| (l.kind(), l.vec(), l.color(), l.intensity()))
                     .collect();
+                // The frame's camera, with the intrinsics stated when this frame
+                // had a camera at all. `map_or` over the Option rather than a
+                // branch: a camera-less frame hands the backend the bare
+                // matrices it always did, and one with a camera additionally
+                // states the fov/aspect/near/far/world the backend fits its own
+                // shadow cascades from.
+                let bare = axiom_host::FrameCamera::new(
+                    outcome.camera_view(),
+                    outcome.camera_projection(),
+                    outcome.camera_view_proj(),
+                );
+                let camera = outcome
+                    .camera_lens()
+                    .map_or(bare, |lens| bare.with_lens(lens));
                 (
                     outcome.clear_color(),
                     lights,
@@ -301,11 +315,7 @@ impl App {
                     outcome.mesh_batches(),
                     // Per-instance caster flags (matching `mesh_batches`' order)
                     // drive the Canvas backend's planar contact shadows.
-                    axiom_host::FrameCamera::new(
-                        outcome.camera_view(),
-                        outcome.camera_projection(),
-                        outcome.camera_view_proj(),
-                    ),
+                    camera,
                     outcome.mesh_batch_casters(),
                     // The frame's SDF raymarch scene, composited over the meshes
                     // by the live backend.
@@ -357,16 +367,26 @@ impl App {
                     .iter()
                     .map(|l| (l.kind(), l.vec(), l.color(), l.intensity()))
                     .collect();
+                // The frame's camera, with the intrinsics stated when this frame
+                // had a camera at all. `map_or` over the Option rather than a
+                // branch: a camera-less frame hands the backend the bare
+                // matrices it always did, and one with a camera additionally
+                // states the fov/aspect/near/far/world the backend fits its own
+                // shadow cascades from.
+                let bare = axiom_host::FrameCamera::new(
+                    outcome.camera_view(),
+                    outcome.camera_projection(),
+                    outcome.camera_view_proj(),
+                );
+                let camera = outcome
+                    .camera_lens()
+                    .map_or(bare, |lens| bare.with_lens(lens));
                 (
                     outcome.clear_color(),
                     lights,
                     outcome.light_view_proj(),
                     outcome.mesh_batches(),
-                    axiom_host::FrameCamera::new(
-                        outcome.camera_view(),
-                        outcome.camera_projection(),
-                        outcome.camera_view_proj(),
-                    ),
+                    camera,
                     outcome.mesh_batch_casters(),
                     outcome.sdf_scene().cloned(),
                 )

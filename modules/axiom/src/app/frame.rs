@@ -250,6 +250,7 @@ impl RunningApp {
                 pipeline.report_presented(&report),
                 pipeline.report_recorded(&report),
             )
+            .with_camera_lens(pipeline.report_camera_lens(&report))
             .with_skinned_draws(skinned_draws)
             .with_ambient(ambient)
             .with_depth_fog(depth_fog)
@@ -287,6 +288,53 @@ mod tests {
             .window(Window::new(64, 64))
             .add_plugins(DefaultPlugins)
             .build()
+    }
+
+    /// The camera's intrinsics reach the frame outcome as the app authored
+    /// them, and travel with the pose rather than being frozen at build: the
+    /// world matrix follows the camera when it is moved, and a frame rendered
+    /// before any camera was set states nothing at all.
+    ///
+    /// This is the lane a backend fits its own view volumes from, so "60 degrees
+    /// went in and 60 degrees came out" is the whole contract — a fov recovered
+    /// from the projection instead would be the shortcut it exists to remove.
+    #[test]
+    fn the_frame_outcome_carries_the_camera_intrinsics_the_app_authored() {
+        let mut app = render_app();
+        // Before a camera exists there is nothing to state.
+        assert_eq!(app.tick(0).camera_lens(), None);
+
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 8.0)),
+        );
+        let lens = app
+            .render(1)
+            .camera_lens()
+            .expect("the frame now has a camera");
+        assert!(
+            (lens.fovy().get() - 60_f32.to_radians()).abs() < 1.0e-6,
+            "authored 60 degrees, reported {} rad",
+            lens.fovy().get()
+        );
+        assert_eq!(lens.near().get(), 0.1);
+        assert_eq!(lens.far().get(), 100.0);
+        // A 64x64 window is square, so the aspect is exactly 1.
+        assert_eq!(lens.aspect().get(), 1.0);
+        assert_eq!(
+            [lens.world()[12], lens.world()[13], lens.world()[14]],
+            [0.0, 0.0, 8.0]
+        );
+
+        // The pose travels: move the camera and the stated world matrix moves
+        // with it (the volume fit follows the view, it is not fixed at build).
+        app.set_camera(
+            camera(),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 40.0)),
+        );
+        let moved = app.render(2).camera_lens().expect("still has a camera");
+        assert_eq!(moved.world()[14], 40.0);
+        assert_eq!(moved.fovy(), lens.fovy());
     }
 
     #[test]

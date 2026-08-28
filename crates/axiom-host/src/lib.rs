@@ -165,7 +165,7 @@ pub use frame_capability::BackendCapabilityProfile;
 pub use frame_capability::CapabilityDegradation;
 pub use frame_capability::RenderCapability;
 pub use frame_depth_fog::FrameDepthFog;
-pub use frame_packet::FrameCamera;
+pub use frame_packet::{FrameCamera, FrameCameraLens};
 pub use frame_packet::FrameDrawItem;
 pub use frame_packet::FrameFeatureSet;
 pub use frame_packet::FrameLight;

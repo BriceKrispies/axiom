@@ -136,6 +136,23 @@ impl RenderPipelineApi {
         report.light_view_proj.as_cols_array()
     }
 
+    /// The camera **intrinsics** this frame's projection was built from — the
+    /// vertical fov, aspect, near/far planes and the camera's world matrix — or
+    /// `None` for a camera-less frame.
+    ///
+    /// A composing app attaches these to the frame's
+    /// [`axiom_host::FrameCamera`] (`FrameCamera::with_lens`) so a backend can
+    /// fit view volumes of its own: the frustum's parameters are destroyed by
+    /// the multiply that produces `projection`, and reconstructing them by
+    /// inverting it is the shortcut this lane exists to remove. See
+    /// [`axiom_host::FrameCameraLens`].
+    pub fn report_camera_lens(
+        &self,
+        report: &RenderReport,
+    ) -> Option<axiom_host::FrameCameraLens> {
+        report.camera_lens
+    }
+
     /// How many lights this frame resolved.
     pub fn report_light_count(&self, report: &RenderReport) -> usize {
         report.lights.len()

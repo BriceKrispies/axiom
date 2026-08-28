@@ -127,6 +127,19 @@ pub struct RenderReport {
     /// re-projects fragments into it for the PCF lookup. Identity when there is
     /// no directional light (shadows then have no effect).
     light_view_proj: Mat4,
+    /// The camera **intrinsics** the frame's `projection` was built from, stated
+    /// rather than left to be recovered by inverting it — see
+    /// [`axiom_host::FrameCameraLens`]. `None` for a camera-less frame.
+    ///
+    /// This is the lane that lets a backend fit its own view volumes. The
+    /// single-cascade fit above (`light_view_proj`) is done *here* because this
+    /// is where the intrinsics are in scope; a backend that wants to fit several
+    /// cascades cannot be handed the answer the same way, because the fitting
+    /// code lives in an engine module this feature module has no edge to. So the
+    /// input travels instead of the output: state the facts the fit needs, and
+    /// every cascade matrix and split plane stays inside the backend that
+    /// computes them.
+    camera_lens: Option<axiom_host::FrameCameraLens>,
     /// The frame's backend-neutral SDF scene, if it carries any SDF shapes and a
     /// camera. Assembled by `axiom-render` from the snapshot's SDF shapes and the
     /// same wgpu-ready view-projection the meshes use, so a backend that marches
@@ -369,14 +382,26 @@ impl RenderPipelineApi {
                 cam.aspect().get(),
                 cam.near().get(),
             );
-            (view, projection, view_projection, cam_world, shadow)
+            // The same four intrinsics, published rather than consumed: a
+            // backend fitting its own volumes needs exactly what `shadow_volume`
+            // needed, plus the world pose the fit pushes view-space points
+            // through. Built from the scene camera's own dimensioned values, so
+            // nothing downstream re-derives an angle from a matrix.
+            let lens = axiom_host::FrameCameraLens::new(
+                cam.fovy_radians(),
+                cam.aspect(),
+                cam.near(),
+                cam.far(),
+                cam_world.to_matrix().as_cols_array(),
+            );
+            (view, projection, view_projection, cam_world, shadow, lens)
         });
         // Set the input camera and read the wgpu-ready view-projection (0-or-1
         // over the Option — no branch; absent yields identity, no camera command).
         camera
             .iter()
-            .for_each(|&(view, projection, _, _, _)| input.push_camera(view, projection));
-        let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _, _)| vp);
+            .for_each(|&(view, projection, _, _, _, _)| input.push_camera(view, projection));
+        let view_projection = camera.map_or(Mat4::IDENTITY, |(_, _, vp, _, _, _)| vp);
 
         // Lights are resolved into the report below (a frame-uniform set), not
         // collapsed into one global direction: each scene light keeps its own kind
@@ -583,7 +608,7 @@ impl RenderPipelineApi {
         // the action wherever in the world it happens AND at whatever field of
         // view and aspect the frame is actually being watched at; a camera-less
         // scene has no view to fit to and keeps the origin (`map_or`, no branch).
-        let volume = camera.map_or(ORIGIN_VOLUME, |(_, _, _, _, v)| v);
+        let volume = camera.map_or(ORIGIN_VOLUME, |(_, _, _, _, v, _)| v);
         let light_view_proj =
             shadow_light_view_proj(frame.light_direction, volume).unwrap_or(Mat4::IDENTITY);
 
@@ -592,7 +617,7 @@ impl RenderPipelineApi {
         // only with a camera (the marcher needs the inverse view-projection), and
         // from the *same* wgpu-ready view-projection the meshes use, so the
         // marched SDF depth composites correctly against the rasterized meshes.
-        let sdf = camera.and_then(|(_, _, view_proj, cam_world, _)| {
+        let sdf = camera.and_then(|(_, _, view_proj, cam_world, _, _)| {
             let shapes: Vec<(u32, Mat4, Vec3, Vec4)> = snapshot
                 .sdf_shapes()
                 .iter()
@@ -627,6 +652,7 @@ impl RenderPipelineApi {
             draws,
             lights,
             light_view_proj,
+            camera_lens: camera.map(|(_, _, _, _, _, lens)| lens),
             sdf,
             presented,
             recorded,
@@ -695,6 +721,45 @@ mod tests {
         let rd = d.submit(&frame_with_assets(&d), &mut scene, &mut webgpu);
         assert_eq!(n.report_command_count(&rn), d.report_command_count(&rd));
         assert!(n.report_sdf_scene(&rn).is_none());
+    }
+
+    /// The intrinsics reach the report as the scene authored them — not as
+    /// something reconstructed from the projection. `cube_scene`'s camera is
+    /// `pi/3` at 4:3 over `[0.1, 100]`, five units up +Z, and every one of those
+    /// six numbers comes back unchanged. A camera-less frame states nothing,
+    /// which is what lets a backend degrade instead of guessing a fov.
+    #[test]
+    fn the_report_publishes_the_camera_intrinsics_the_scene_authored() {
+        let mut api = RenderPipelineApi::new();
+        let mut scene = cube_scene();
+        let mut webgpu = WebGpuApi::new_recording();
+        let report = api.submit(&frame_with_assets(&api), &mut scene, &mut webgpu);
+        let lens = api
+            .report_camera_lens(&report)
+            .expect("the scene carries a camera");
+        assert_eq!(lens.fovy().get(), std::f32::consts::FRAC_PI_3);
+        assert_eq!(lens.aspect().get(), 4.0 / 3.0);
+        assert_eq!(lens.near().get(), 0.1);
+        assert_eq!(lens.far().get(), 100.0);
+        // The camera's WORLD matrix, not its view: the translation reads +5 on
+        // z, where the view matrix would read -5.
+        let world = lens.world();
+        assert_eq!([world[12], world[13], world[14]], [0.0, 0.0, 5.0]);
+
+        // The same fov is what the report's projection was built from, so the
+        // lane is consistent with the matrix beside it rather than an
+        // independent claim: `projection[5]` is `1 / tan(fovy / 2)`.
+        let projection = api.report_projection(&report).as_cols_array();
+        assert!(
+            (projection[5] - 1.0 / (lens.fovy().get() * 0.5).tan()).abs() < 1.0e-5,
+            "stated fov {} disagrees with projection[5] {}",
+            lens.fovy().get(),
+            projection[5]
+        );
+
+        let mut empty = SceneApi::new();
+        let none = api.submit(&frame_with_assets(&api), &mut empty, &mut webgpu);
+        assert_eq!(api.report_camera_lens(&none), None);
     }
 
     #[test]

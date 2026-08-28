@@ -252,6 +252,13 @@ pub struct FrameOutcome {
     camera_view_proj: [f32; 16],
     camera_view: [f32; 16],
     camera_projection: [f32; 16],
+    /// The camera **intrinsics** the projection above was built from — vertical
+    /// fov, aspect, near/far and the camera's world matrix — carried so a backend
+    /// can fit view-shaped volumes of its own (cascaded shadow slices are the
+    /// first consumer) without inverting the matrices back into the numbers they
+    /// were built from. `None` in a simulation-only or camera-less frame; see
+    /// [`axiom_host::FrameCameraLens`].
+    camera_lens: Option<axiom_host::FrameCameraLens>,
     /// The frame's backend-neutral SDF scene, if it carries any SDF shapes and a
     /// camera — the raymarched primitives a live/canvas backend composites with
     /// the meshes. `None` when the frame has no SDF content.
@@ -313,6 +320,10 @@ impl FrameOutcome {
             camera_view_proj,
             camera_view,
             camera_projection,
+            // Stated by `with_camera_lens` when the pipeline reported one; a
+            // frame that never sets it behaves exactly as it did before the lane
+            // existed.
+            camera_lens: None,
             sdf,
             // Default to the engine hemisphere; `with_ambient` overrides it with
             // the app's authored value. A frame that never sets ambient renders
@@ -337,6 +348,15 @@ impl FrameOutcome {
 
     /// Attach the frame's skinned draws (each a mesh + its own joint palette).
     /// Empty on a frame with no skinned meshes.
+    /// State the camera intrinsics the frame's projection was built from.
+    pub(crate) fn with_camera_lens(
+        mut self,
+        camera_lens: Option<axiom_host::FrameCameraLens>,
+    ) -> Self {
+        self.camera_lens = camera_lens;
+        self
+    }
+
     pub(crate) fn with_skinned_draws(mut self, skinned_draws: Vec<SkinnedDraw>) -> Self {
         self.skinned_draws = skinned_draws;
         self
@@ -483,6 +503,18 @@ impl FrameOutcome {
     /// ground) projects through this. Identity in a simulation-only frame.
     pub fn camera_view_proj(&self) -> [f32; 16] {
         self.camera_view_proj
+    }
+
+    /// The camera **intrinsics** this frame's projection was built from, when
+    /// the frame had a camera at all.
+    ///
+    /// A composing host attaches these to the frame's
+    /// [`axiom_host::FrameCamera`] (`FrameCamera::with_lens`), which is what lets
+    /// a backend fit view volumes for itself — the frustum's own parameters are
+    /// destroyed by the multiply that produced [`Self::camera_projection`], and
+    /// recovering them by inverting it is the shortcut this lane removes.
+    pub fn camera_lens(&self) -> Option<axiom_host::FrameCameraLens> {
+        self.camera_lens
     }
 
     /// The camera's view matrix, column-major. The other half of

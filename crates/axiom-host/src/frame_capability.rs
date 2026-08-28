@@ -173,6 +173,39 @@ pub enum RenderCapability {
     /// appended above bit 12: the GPU main-pass WGSL reads no bit above `2048`,
     /// so the cross-language contract is unchanged by adding it.
     GBuffer = 1 << 14,
+    /// **Cascaded** directional shadows: the shadow map split into several
+    /// view-fitted slices instead of one volume spanning the whole view.
+    ///
+    /// Deliberately **not** folded into [`Self::Shadows`], which is genuinely a
+    /// different measurement rather than a lesser setting of the same one. That
+    /// bit asks *does this backend cast a directional shadow at all* — the Canvas
+    /// 2D rasterizer answers no and substitutes a planar contact shadow. This one
+    /// asks *can it hold a layered shadow atlas and rasterize the casters once per
+    /// slice*, which is an array render target plus N times the caster draws. A
+    /// backend can answer yes to the first and no to the second, and the frames
+    /// look different in a way neither bit alone could report.
+    ///
+    /// It exists because one cascade is not a tuning choice, it is a resolution
+    /// ceiling with a measurable value. A single volume is fitted to the bounding
+    /// sphere of the whole view slice, so its world texel is set by the *far* end
+    /// of the view while the shadows a viewer reads are at the *near* end. At an
+    /// 80° vertical fov on a 16:9 frame the fitted sphere is 102.7 m across a 60 m
+    /// range, which is a 20 cm texel and a ~1.25 m filtered penumbra on a 1024
+    /// atlas — wider than the objects casting into it, so a building's shadow edge
+    /// smears below visibility rather than reading as an edge. Splitting the same
+    /// atlas budget across view-depth slices spends most of it on the near field,
+    /// where the first slice's texel is centimetres.
+    ///
+    /// Its degradation is a [`CapabilityDegradation::Substitute`], and the
+    /// substitute is the capability directly below it: a backend without this bit
+    /// renders the single-volume [`Self::Shadows`] path it always did, unchanged
+    /// pixel for pixel. Nothing is omitted — the same directional shadow is
+    /// rendered at a coarser fit — which is the same relationship
+    /// [`Self::AerialPerspective`] has with the normalized-depth fog ramp.
+    ///
+    /// Appended above [`Self::GBuffer`]: the GPU main-pass WGSL reads bits up to
+    /// `1 << 12` as hardcoded masks, so adding a bit above them moves nothing.
+    CascadedShadows = 1 << 15,
 }
 
 /// How a backend that lacks a [`RenderCapability`] degrades it. A capability is
@@ -200,7 +233,8 @@ pub enum CapabilityDegradation {
 const SUBSTITUTED_CAPABILITY_BITS: u32 = RenderCapability::Shadows as u32
     | RenderCapability::AerialPerspective as u32
     | RenderCapability::ProceduralSurface as u32
-    | RenderCapability::HdrTargets as u32;
+    | RenderCapability::HdrTargets as u32
+    | RenderCapability::CascadedShadows as u32;
 
 impl RenderCapability {
     /// The declared degradation for a backend that lacks this capability. The
@@ -230,7 +264,8 @@ const ALL_CAPABILITY_BITS: u32 = RenderCapability::Textures as u32
     | RenderCapability::AerialPerspective as u32
     | RenderCapability::ProceduralSurface as u32
     | RenderCapability::HdrTargets as u32
-    | RenderCapability::GBuffer as u32;
+    | RenderCapability::GBuffer as u32
+    | RenderCapability::CascadedShadows as u32;
 
 /// The set of render capabilities a backend will attempt. The hardware GPU backends
 /// use [`Self::all`]; the Canvas 2D software backend uses [`Self::canvas2d`]. Restrict
@@ -322,6 +357,7 @@ impl BackendCapabilityProfile {
             .without(RenderCapability::AerialPerspective)
             .without(RenderCapability::HdrTargets)
             .without(RenderCapability::GBuffer)
+            .without(RenderCapability::CascadedShadows)
     }
 
     /// Whether this profile will attempt `cap`.
@@ -371,7 +407,7 @@ impl BackendCapabilityProfile {
 mod tests {
     use super::*;
 
-    const CAPS: [RenderCapability; 15] = [
+    const CAPS: [RenderCapability; 16] = [
         RenderCapability::Textures,
         RenderCapability::AlphaMask,
         RenderCapability::NormalMapping,
@@ -387,6 +423,7 @@ mod tests {
         RenderCapability::ProceduralSurface,
         RenderCapability::HdrTargets,
         RenderCapability::GBuffer,
+        RenderCapability::CascadedShadows,
     ];
 
     #[test]
@@ -399,7 +436,7 @@ mod tests {
         });
         assert_ne!(all, none);
         assert_eq!(none.bits(), 0);
-        assert_eq!(all.bits(), 0b111_1111_1111_1111);
+        assert_eq!(all.bits(), 0b1111_1111_1111_1111);
         assert!(format!("{all:?}").contains("BackendCapabilityProfile"));
         assert!(format!("{:?}", RenderCapability::Textures).contains("Textures"));
     }
@@ -454,6 +491,15 @@ mod tests {
         // and *several* attachments even less so.
         assert!(!c.contains(RenderCapability::HdrTargets));
         assert!(!c.contains(RenderCapability::GBuffer));
+        // And it casts no directional shadow at all, so it cannot cast one N
+        // times into an array atlas either. Both shadow bits are Substitutes on
+        // this backend, and they substitute different things: `Shadows` becomes
+        // the planar contact shadow, `CascadedShadows` becomes `Shadows`.
+        assert!(!c.contains(RenderCapability::CascadedShadows));
+        assert_eq!(
+            RenderCapability::CascadedShadows.degradation(),
+            CapabilityDegradation::Substitute
+        );
         // The two are separate answers on this backend as much as on any other:
         // one is a Substitute and one is a Drop.
         assert_eq!(
