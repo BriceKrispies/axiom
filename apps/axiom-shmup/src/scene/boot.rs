@@ -64,6 +64,35 @@ pub fn shmup_start() {
     windowing
         .configure_surface(width, height)
         .expect("surface dimensions are valid");
+    // The quality preset's render scale, which the port has always carried and
+    // never handed to the engine. `config.js:53/68` authors 0.72 at low and 0.85
+    // at medium; `config.rs` ports both faithfully, and nothing read them — which
+    // is why `?quality=low` measured identically to `?quality=ultra` (29.2 ms
+    // against 29.4 ms) despite the preset table saying it should not.
+    //
+    // It is the lever that matters here. Measured on the `hero` pose with vsync
+    // off, the frame is FILL-RATE bound: dropping the backbuffer from 1280x720 to
+    // 640x360 — a 4x pixel cut — took the frame from 29.2 ms to 7.00 ms, a 4.2x
+    // speedup almost exactly proportional to pixel count, while draws (140),
+    // instances (~503) and triangles (799,288) stayed IDENTICAL in every view.
+    //
+    // `render_scale_control` is a setter the engine has always exposed
+    // (`windowing_api.rs:646`), read once per frame by the driver.
+    //
+    // `for_display()` rather than a fixed rung, and rather than the quality
+    // preset's authored `render_scale`. The engine has no public `RenderScale`
+    // constructor on purpose: the scale is an OUTPUT of a controller that
+    // watches measured frame time, not a value an app picks. Its own doc calls
+    // this "the constructor an app should use", and warns that handing it the
+    // simulation's fixed step bakes in the assumption that the display refreshes
+    // at the tick rate -- on a 120 Hz panel the loop would hold 16 ms frames and
+    // call it a success while the display asked for 8.
+    //
+    // The controller straddles the budget with a dead band (drop above 1.08x,
+    // raise below 0.78x) so the resolution cannot visibly breathe at the exact
+    // rate it was asked to hold.
+    let mut render_scale = axiom_host::RenderScaleController::for_display();
+    let set_render_scale = windowing.render_scale_control();
     windowing.set_ambient(scene.app.ambient());
     scene
         .app
@@ -251,6 +280,16 @@ pub fn shmup_start() {
         // which is what lets `stats` answer `dt_used=` instead of leaving a
         // harness to assume its pin took. See `DevConsole::frame_dt`.
         let dt = scene.console.borrow_mut().frame_dt((now - last) / 1000.0);
+        // Feed the measured frame to the adaptive scaler and hand the driver the
+        // rung it picked. Measured on the `hero` pose with vsync off, this frame
+        // is FILL-RATE bound: cutting the backbuffer from 1280x720 to 640x360 --
+        // a 4x pixel cut -- took it from 29.2 ms to 7.00 ms, a 4.2x speedup
+        // almost exactly proportional to pixel count, while draws (140),
+        // instances (~503) and triangles (799,288) stayed IDENTICAL in every
+        // view. Resolution is therefore the only lever that moves this frame,
+        // and quality presets demonstrably were not one: low measured 29.2 ms
+        // against ultra's 29.4 ms.
+        set_render_scale(render_scale.observe((dt * 1.0e9) as u64));
         last = now;
 
         let pad = crate::input::dom::poll_pad();
