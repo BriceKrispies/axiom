@@ -102,6 +102,10 @@ members = [
     # The developer-facing workspace app: opens a project, builds a canonical
     # launch spec, and records/replays real runtime sessions (composition leaf).
     "apps/axiom-workspace",
+    # The Claude-of-Duty port: the browser FPS at `apps/shmup` (Three.js r180,
+    # ISC) rebuilt on Axiom. A composition leaf; `apps/shmup` stays in the tree
+    # as the JS original every frame of this one is diffed against.
+    "apps/axiom-shmup",
     "crates/xtask",
     # The repo's query-and-change gateway: gitignore-aware search, symbol
     # lookup, the layer/module graph, scoped edits, and the NDJSON ledger that

@@ -830,6 +830,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-shmup"
+version = "0.1.0"
+dependencies = [
+ "axiom",
+ "axiom-gpu-backend",
+ "axiom-host",
+ "axiom-introspect",
+ "axiom-kernel",
+ "axiom-math",
+ "axiom-windowing",
+ "console_error_panic_hook",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "axiom-shot"
 version = "0.1.0"
 dependencies = [

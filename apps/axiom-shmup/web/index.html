@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shmup</title>
+  <style>
+    /* The page the HUD's own stylesheet assumes.
+
+       `ui/style.css.tpl` lays `.ow-hud` out as `position: fixed; inset: 0`, so
+       every widget positions against the VIEWPORT. The canvas therefore has to
+       BE the viewport: a letterboxed canvas centred inside a `<main>` put the
+       crosshair on the middle of the page rather than the middle of the view,
+       and the surrounding prose sat underneath an overlay that covers it. */
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
+                 background: #07090c; color: #c9d4dd;
+                 font-family: ui-monospace, Menlo, Consolas, monospace; }
+    canvas { display: block; width: 100vw; height: 100vh; background: #040507;
+             touch-action: none; cursor: none; }
+  </style>
+</head>
+<body>
+<canvas id="shmup"></canvas>
+<!-- `scene::wiring::hud::HOST_ID`. The HUD builds its overlay, its four layers
+     and every widget's DOM in here, and injects `style.css.tpl` alongside. -->
+<div id="ui"></div>
+<script type="module">
+  import init, { shmup_start } from "./pkg/axiom_shmup.js";
+  await init();
+  shmup_start();
+</script>
+</body>
+</html>
