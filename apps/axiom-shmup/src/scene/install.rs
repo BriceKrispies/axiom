@@ -31,9 +31,28 @@ struct KeyMaps {
     albedo: u64,
     normal: u64,
     orm: u64,
+    /// Binding 5 and binding 6. Both are **library-wide**, not per-surface:
+    /// `buildDetail`/`buildMacro` are built once by `MaterialSystem` and every
+    /// material in the source samples the same two (`index.js:207-210`), so the
+    /// same pair of ids is copied into every key's entry rather than uploaded
+    /// forty-six times.
+    detail: u64,
+    macro_: u64,
 }
 
-/// Bake the palette's surfaces and register **all three** maps per library name.
+/// Register one baked map's pixels and hand back its id.
+///
+/// A free function rather than a closure over `running`, because the two shared
+/// maps are uploaded ONCE above the per-surface loop and a closure holding the
+/// mutable borrow across both would not compile.
+fn upload_map(running: &mut RunningApp, m: &Rgba8Map) -> u64 {
+    running
+        .add_texture_data(m.width, m.height, m.pixels.clone())
+        .expect("a baked map is width * height * 4 bytes")
+        .id()
+}
+
+/// Bake the palette's surfaces and register **all five** maps per library name.
 ///
 /// This used to bake and upload the albedo alone, behind a comment saying it was
 /// "the only map the engine can be handed" because `axiom_host::MaterialTexture`
@@ -48,6 +67,31 @@ struct KeyMaps {
 /// as three materials instead of three tints of one; the normal is what gives a
 /// wall relief under a moving sun. Both are layers the source's own palette
 /// comment calls out as what "stop a wall reading as one flat colour".
+///
+/// The same argument, one round later, is why the two **shared** maps go up
+/// here too. `bake_library` has always returned `detail` and `macro_field`
+/// beside the per-surface maps and nothing read them, so bindings 5 and 6 held
+/// `scene_renderer`'s 1x1 neutrals — and neither neutral is that layer's
+/// identity:
+///
+/// * the detail neutral's alpha is `0`, and `axiom_detail_micro` decodes it as
+///   `(a - 0.5) * 2 = -1` — a **permanent full trough**. Its justification
+///   (`scene_renderer.rs:1215-1218`) is that `owDetailP.z` is 0 for a material
+///   with no detail block, which is true of most of the engine and false of
+///   every key here: the shmup's palette authors real `detail` blocks, so every
+///   surface was being darkened by `0.95 * detail[2]` and having its AO cut by
+///   `0.30 * detail[2]` at every near-field pixel.
+/// * the macro neutral's alpha is `255`, i.e. `1.0`, against a layer whose
+///   midpoint is `0.5`. `masks.rs:168`'s `smoothstep(0.25, 0.85, mac1.b * 0.65 +
+///   mac2.a * 0.55)` reads `0.876` — past the upper edge — so `wearN` was pinned
+///   at 1.0, and `weathering.rs:229`'s `smoothstep(0.30, 0.66, sN * 0.72 +
+///   sFine * 0.38)` reads `0.911` and was pinned the same way. The street was
+///   running at maximum wear and maximum rain streak, uniformly, with no spatial
+///   structure — which is most of what makes it read as one grey mush.
+///
+/// So this is not "two more textures for crispness". It is the difference
+/// between two layers running on a saturated constant and running on the field
+/// the generator actually baked.
 fn install_surface_textures(running: &mut RunningApp) -> BTreeMap<&'static str, KeyMaps> {
     let names: Vec<&'static str> = Palette::ALL
         .iter()
@@ -59,18 +103,20 @@ fn install_surface_textures(running: &mut RunningApp) -> BTreeMap<&'static str, 
     // One upload per distinct BAKE KEY, then every name that resolved to it
     // points at the same three handles. Forty-six palette entries collapse onto
     // nineteen bakes, and uploading per name would pay for the duplicates.
+    // The two shared maps go up ONCE for the whole library and every key points
+    // at the same pair. `bake_library` returns them beside the per-surface maps
+    // and nothing used to read them, so bindings 5 and 6 held the backend's 1x1
+    // neutrals and the detail and macro layers ran as algebraic identities.
+    let detail = upload_map(running, &library.detail);
+    let macro_ = upload_map(running, &library.macro_field);
     let mut by_key: BTreeMap<String, KeyMaps> = BTreeMap::new();
     library.surfaces.iter().for_each(|(key, maps)| {
-        let mut upload = |m: &crate::materials::upload::Rgba8Map| {
-            running
-                .add_texture_data(m.width, m.height, m.pixels.clone())
-                .expect("a baked map is width * height * 4 bytes")
-                .id()
-        };
         let ids = KeyMaps {
-            albedo: upload(&maps.albedo),
-            normal: upload(&maps.normal),
-            orm: upload(&maps.orm_height),
+            albedo: upload_map(running, &maps.albedo),
+            normal: upload_map(running, &maps.normal),
+            orm: upload_map(running, &maps.orm_height),
+            detail,
+            macro_,
         };
         by_key.insert(key.clone(), ids);
     });
@@ -185,6 +231,11 @@ pub fn install_level(
                 // tints of one flat response.
                 .with_normal_texture(ids.normal)
                 .with_orm_texture(ids.orm)
+                // The micro-detail tile and the macro variation field: the two
+                // layers whose stated job is to stop a wall reading as one flat
+                // colour. Bound to the backend's neutrals they multiply by one.
+                .with_detail_texture(ids.detail)
+                .with_macro_texture(ids.macro_)
                 // The street runs from underfoot to the 168 m horizon, which is
                 // the grazing-angle case anisotropy exists for.
                 .with_texture_sampling(TextureSampling::Anisotropic)

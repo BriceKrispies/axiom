@@ -608,7 +608,24 @@ impl FxDraw {
             (&fx.view_add, true),
         ];
         for (layer, view_space) in layers {
-            for slot in 0..layer.capacity {
+            // `mesh.visible` (`particles.js:431`) — an idle layer is skipped
+            // whole. On a quiet frame this is most of them, and it is the
+            // difference between integrating five ring buffers end to end and
+            // integrating nothing.
+            if !layer.active(now) {
+                continue;
+            }
+            // `geometry.instanceCount` (`particles.js:430`), never `capacity`:
+            // a slot past it has never been emitted into, and a zero-filled
+            // record reads back as a live particle at the world origin. See
+            // `ParticleLayer::instance_count`. `PARTICLE_ALPHA_FLOOR` happens
+            // to reject those too (their alpha is zero), so this was a silent
+            // cost here rather than a visible defect — but it is the same bug
+            // that made the readback in `fx_audio` report phantoms, and the
+            // cost was real: the FX ring buffers total ~23,000 slots, every one
+            // of which was paying a full `integrate` — an `exp`, six `sin`/`cos`
+            // and two `powf` — on every frame of the whole run.
+            for slot in 0..layer.instance_count() {
                 let Some(sample) = particles::integrate(layer, slot, now) else {
                     continue;
                 };

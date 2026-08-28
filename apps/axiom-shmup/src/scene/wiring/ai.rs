@@ -452,6 +452,34 @@ impl AiWiring {
         &mut self.core
     }
 
+    /// `ai.debugStage(name)` — **the capture harness's own vehicle**, and the
+    /// only way to put soldiers in front of the camera on demand.
+    ///
+    /// The garrison [`AiWiring::new`] spawns is deliberately *away* from the
+    /// player: `populate` (`index.js:483-538`) ranks the level's spawn points by
+    /// distance from the player's feet and keeps only those more than 18 m off,
+    /// so the soldiers are somewhere to be *found* rather than somewhere to be
+    /// photographed. A screenshot taken on a fresh load will therefore usually
+    /// contain no soldier at all, and that is the source's behaviour, not a port
+    /// defect. `debugStage('firefight')` is what the source's own capture path
+    /// uses instead (`dev/shots.js:81`, `core/prewarm.js:493`): five men staged
+    /// in camera space plus one already down.
+    ///
+    /// Call it **after** at least one [`AiWiring::frame`], because the tableau is
+    /// laid out in camera space and `frame` is what writes the camera.
+    ///
+    /// The returned hour is a write into another subsystem that this tier hands
+    /// back rather than makes — `index.js:1116` pushes it into
+    /// `sky.setTimeOfDay(...)`, which the source does because the shot needs the
+    /// sun raking down the street to light the characters instead of
+    /// silhouetting them. A caller wiring this to the dev console applies it to
+    /// [`crate::scene::wiring::look::SkyDriver`]; ignoring it stages the
+    /// tableau at whatever hour the level is already at, which is a dimmer but
+    /// still valid frame.
+    pub fn debug_stage(&mut self, name: &str) -> Option<f64> {
+        self.core.debug_stage(name)
+    }
+
     /// `this.stats` — `{ agents, alive, coverPts, walkable, pathsDeferred,
     /// lodIrrelevant }`.
     #[must_use]
@@ -697,5 +725,99 @@ mod tests {
         let (b_poses, b_stats) = run();
         assert_eq!(a_poses, b_poses);
         assert_eq!(a_stats, b_stats);
+    }
+
+    /// **The parity vehicle.** `debugStage('firefight')` is how the source's own
+    /// capture path gets characters on screen deterministically instead of
+    /// hoping combat happens during a screenshot, and this pins that it does the
+    /// same here: the named tableau stages six men, an unknown name stages
+    /// nothing, and the staged men survive the LOD sweep — which is the last
+    /// gate between an actor and a skinned draw
+    /// (`soldier_draw.rs`'s `.filter(|a| !a.agent.lod_irrelevant)`).
+    #[test]
+    fn staging_a_firefight_puts_soldiers_in_front_of_the_camera() {
+        let (mut ai, level, sky) = booted();
+        let p = pose(&level);
+        // The tableau is laid out in CAMERA space, so the camera has to be real
+        // before it is staged — `frame` is what writes it.
+        ai.frame(1.0 / 60.0, 1, 1.0 / 60.0, p, 16.0 / 9.0, &sky, p.eye, None, None);
+        let before = ai.actor_poses().len();
+        assert!(before > 0, "the garrison never spawned; nothing to stage onto");
+
+        // `index.js:1108` — a name the source does not know stages nothing and
+        // reports no time of day. `core/prewarm.js:654` passes exactly this.
+        assert_eq!(ai.debug_stage("none"), None, "'none' is the source's no-op");
+        assert_eq!(
+            ai.actor_poses().len(),
+            before,
+            "'none' staged a soldier anyway"
+        );
+
+        // ...and the one name it does know stages the tableau and hands back the
+        // hour `index.js:1116` pushes into the sky.
+        let hour = ai
+            .debug_stage("firefight")
+            .expect("'firefight' is the one name that stages");
+        assert!(
+            (hour - 17.9).abs() < 1e-12,
+            "the staged hour is the source's 17.9, got {hour}"
+        );
+        let after = ai.actor_poses();
+        assert_eq!(
+            after.len(),
+            before + 6,
+            "the tableau is `LAYOUT`'s five men plus the one already down"
+        );
+
+        // Every staged man stands somewhere real, in front of the camera.
+        let staged = &after[before..];
+        for a in staged {
+            assert!(
+                a.position.iter().all(|c| c.is_finite()),
+                "staged actor {} is at {:?}",
+                a.id,
+                a.position
+            );
+            let d = (a.position[0] - p.eye[0]).hypot(a.position[2] - p.eye[2]);
+            assert!(
+                (2.0..60.0).contains(&d),
+                "staged actor {} is {d} m from the shot camera; `LAYOUT` asks for 8-22",
+                a.id
+            );
+        }
+        // One of them was handed to the ragdoll with a round's impulse.
+        assert!(
+            staged.iter().any(|a| !a.alive),
+            "the tableau's downed man is missing"
+        );
+
+        // Step once more so `_updateRelevance` has judged the new actors. This
+        // is the assertion that matters: `lod_irrelevant` is what
+        // `soldier_draw::frame` filters on, so a staged man who fails it reaches
+        // no pixel no matter how correct his body is.
+        ai.frame(1.0 / 60.0, 2, 2.0 / 60.0, p, 16.0 / 9.0, &sky, p.eye, None, None);
+        let judged = ai.actor_poses();
+        let visible = judged[before..].iter().filter(|a| !a.lod_irrelevant).count();
+        assert!(
+            visible > 0,
+            "every staged soldier was culled by the LOD sweep - the tableau reaches no pixel"
+        );
+
+        // ...and each one names a variant the drawer actually registered, or the
+        // draw loop matches nothing and submits no geometry.
+        let built: Vec<&str> = ai
+            .built_variants()
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
+        for a in &judged[before..] {
+            assert!(
+                built.contains(&a.variant.as_str()),
+                "staged actor {} is a `{}`, which no variant was built for; \
+                 `SoldierDraw::install` reads `built_variants` once, at install",
+                a.id,
+                a.variant
+            );
+        }
     }
 }

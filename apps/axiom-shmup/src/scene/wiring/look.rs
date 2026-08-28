@@ -25,7 +25,7 @@
 //! beam floor               no               yes
 //! cloud-occlusion dimmer   no               yes
 //! moon, key handover       no               yes
-//! time of day moves        no (const 9.5)   yes (`time_rate`)
+//! time of day moves        no (const 16.5)  yes (`time_rate`)
 //! fog / volumetrics        no               yes
 //! exposure bias            no               yes
 //! clear colour             yes              NO
@@ -52,7 +52,7 @@
 //! **Verdict: delete `apps/shmup/src/scene/sky_look.rs`.** Everything in it is
 //! either superseded by `SkySystem` (the key light) or lives here now (the
 //! raymarch). Leaving it constructed alongside a live `SkySystem` is the
-//! two-things-fighting-over-the-sky case: `sky_look::HOUR` is a hard-coded 9.5
+//! two-things-fighting-over-the-sky case: `sky_look::HOUR` is a hard-coded hour
 //! and `SkySystem`'s hour is settable and can move, so the sun in the frame and
 //! the sun in the sky would drift apart the moment `time_rate` is non-zero.
 //!
@@ -133,14 +133,19 @@ use crate::world::palette::{Palette, PaletteEntry};
 /* the sky                                                               */
 /* ==================================================================== */
 
-/// Hour of day the level is lit at.
+/// Hour of day the level is lit at — **the source's own**.
 ///
-/// `SkySystem::new` starts at the source's own `16.5` (`index.js:135`); this is
-/// the hour `crate::scene::sky_look` picked for the level and is kept so
-/// swapping `SkyLook` for [`SkyDriver`] does not silently re-light the street.
-/// Mid-morning: high enough that the street is genuinely lit, low enough that
-/// the geometry has direction to it.
-pub const HOUR: f64 = 9.5;
+/// `sky/index.js:153-154` sets `this.hour = 16.5; this.timeRate = 0;` in
+/// `SkySystem.init`, and nothing moves it: the level is lit by a frozen
+/// late-afternoon sun. `SkySystem::new` starts at the same 16.5, so this
+/// constant is now the identity rather than an override.
+///
+/// It was `9.5` — a value inherited from `crate::scene::sky_look`, which picked
+/// a mid-morning hour of its own. Seven hours of sun position is a different
+/// azimuth, a different elevation, a different sky gradient and a different
+/// shadow direction, so no parity comparison against the source could survive
+/// it however correct everything downstream was.
+pub const HOUR: f64 = 16.5;
 
 /// The raymarch step count for a single direction. The sky-view LUT bake uses
 /// `SKYVIEW_STEPS` (40) per texel; this marches the same integral, so it uses
@@ -161,18 +166,59 @@ const DIRECTION_STEPS: u32 = 40;
 /// see [`SkyDriver::exposure_bias`].
 pub const KEY_INTENSITY_FULL_SCALE: f64 = SUN_ILLUMINANCE_TOP * SUN_KEY_GAIN;
 
+/// **The scene scale** — what one unit of the port's framebuffer radiance is
+/// worth as an engine scene-referred value.
+///
+/// Two factors, and both are forced rather than chosen.
+///
+/// **`1 / KEY_INTENSITY_FULL_SCALE`.** [`SkyDriver::key_light`] divides the sun
+/// by that constant because `DirectionalLight::intensity` is a `Ratio`, and
+/// `scene::boot` hands the tone map an exposure of
+/// `KEY_INTENSITY_FULL_SCALE * METERING_FIT`, which restores it. A radiance that
+/// does *not* carry the same divisor is multiplied by a constant meant for one
+/// that does, and lands about eight times over-bright relative to the key —
+/// which is the sun-to-shadow ratio the source's blue shadows are made of.
+///
+/// **`PI`.** The unit-system conversion between three.js's surfaces and this
+/// engine's. `crate::sky::atmosphere`'s photometric contract records that
+/// three's Lambert BRDF carries the `1/PI` — a lit surface writes `b = I/PI` —
+/// while [`crate::sky::atmosphere::raymarch_sky`] evaluates a radiance and is
+/// written to the buffer as-is. Axiom's surfaces here are
+/// `axiom_surface::LightingModel::LambertSpecular`, whose own doc is explicit
+/// that it is **not** radiometrically scaled (`lit = base * light * N.L`, no
+/// `1/PI`; only `LightingModel::Physical` carries one). So an engine-lit surface
+/// is `PI` times brighter than the source's for the same light intensity, and
+/// every radiance handed to the engine beside it has to be `PI` times brighter
+/// too or the sky, the ambient and the fog all sink a stop and a half below the
+/// street.
+///
+/// `PI / (5.12 * 1.55) = 0.3958662`.
+pub const SCENE_RADIANCE_SCALE: f64 = std::f64::consts::PI / KEY_INTENSITY_FULL_SCALE;
+
 /// `ln 2`, the base conversion between the source's `e`-based extinction
 /// coefficient and `FrameDepthFog`'s `2`-based one. See [`SkyDriver::depth_fog`].
 const LN_2: f64 = std::f64::consts::LN_2;
 
-/// The sky's own radiance, displayed — the CPU stand-in for the dome pass and
-/// the environment bake, both of which are GPU-only in the source.
+/// The sky's own radiance — the CPU stand-in for the dome pass and the
+/// environment bake, both of which are GPU-only in the source.
 ///
 /// Each field is one `raymarch_sky` against the two LUTs that *are* bakeable on
 /// the CPU (transmittance and multiscatter), not a plausible constant.
+///
+/// **Scene-referred, linear and unbounded.** These are radiances on the engine's
+/// own scale ([`SCENE_RADIANCE_SCALE`]), not display colours: a sun disc is a
+/// four-figure value here and is *meant* to be. `Color` carries them because
+/// `Ratio` does not clamp — nothing in the kernel bounds a colour channel at one
+/// — and the frame's only tone map is the engine's AgX, downstream of every
+/// field below.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SkyRadiance {
     /// The clear colour: the sky a level-eye camera looks into.
+    ///
+    /// Scene-referred like the rest of this struct — the clear value is written
+    /// into the `Rgba16Float` scene target and takes the composite's exposure
+    /// and AgX with everything else, so a display-referred value here would be
+    /// tone-mapped a second time.
     pub clear_color: Color,
     /// Hemisphere ambient, sky term — straight up.
     pub ambient_sky: Color,
@@ -330,7 +376,7 @@ impl SkyDriver {
     }
 
     /// The clear colour: the sky's own radiance in the band that fills most of a
-    /// first-person frame.
+    /// first-person frame. Scene-referred — see [`SkyRadiance::clear_color`].
     pub fn clear_color(&self) -> Color {
         self.radiance.clear_color
     }
@@ -546,31 +592,64 @@ fn raymarch(system: &SkySystem, transmittance: &Lut2D, multiscatter: &Lut2D) -> 
     // sky reflected off the ground albedo the shared block publishes.
     let up = radiance(Vec3::new(0.0, 1.0, 0.0));
     SkyRadiance {
-        clear_color: display(radiance(clear_dir)),
-        ambient_sky: display(up),
-        ambient_ground: display(up.mul(shared.ground_albedo)),
+        clear_color: scene_radiance(radiance(clear_dir)),
+        ambient_sky: scene_radiance(up),
+        ambient_ground: scene_radiance(up.mul(shared.ground_albedo)),
     }
 }
 
-/// **Invented, and labelled as such** — carried over verbatim from
-/// `scene::sky_look`, whose job this file takes over.
+/// The port's framebuffer radiance, on the engine's scene scale — **linear and
+/// unbounded**, which is exactly what every contract downstream of it asks for.
 ///
-/// The source's HDR radiance reaches the frame through an exposure and a tone
-/// map in the render graph, which is not ported. This is a plain Reinhard at a
-/// fixed exposure: monotone, hue-preserving per channel, and enough to turn a
-/// scene-unit radiance into a colour that can be a clear colour. A future render
-/// arm replaces it.
-pub fn display(radiance: Vec3) -> Color {
-    const EXPOSURE: f64 = 1.0;
-    let map = |v: f64| {
-        let x = (v * EXPOSURE).max(0.0);
-        x / (1.0 + x)
-    };
-    normalized_color(map(radiance.x), map(radiance.y), map(radiance.z))
+/// This replaced an invented Reinhard (`x / (1 + x)` at a fixed exposure of 1.0)
+/// that was carried over from `scene::sky_look` and labelled at the time as a
+/// stand-in for "an exposure and a tone map in the render graph, which is not
+/// ported. A future render arm replaces it." **That arm landed** —
+/// `scene::boot` authors a real `FrameTonemap`, the scene target is
+/// `Rgba16Float` and the engine runs the ported AgX curve over it — so the
+/// Reinhard had become a second tone map in front of the real one. It squashed
+/// every sky, ambient and fog term into `0.3..0.6`, and the `Ratio` clamp behind
+/// it flattened the sun disc's linear ~4000 to a 1.0. AgX then received a frame
+/// whose whole dynamic range had already been spent.
+///
+/// The four consumers are `FrameSky`'s gradient stops and body colour
+/// (`crate::scene::wiring::sky_draw`), [`SkyDriver::ambient`],
+/// [`SkyDriver::depth_fog`]'s colour and [`SkyDriver::clear_color`]. All four
+/// are documented linear and unbounded — `axiom_host::frame_sky`'s module doc
+/// says so outright, and its own tests author a sun at `[3.0, 2.8, 2.4]`.
+///
+/// See [`SCENE_RADIANCE_SCALE`] for why the scale is what it is.
+pub fn scene_radiance(radiance: Vec3) -> Color {
+    hdr_color(
+        radiance.x * SCENE_RADIANCE_SCALE,
+        radiance.y * SCENE_RADIANCE_SCALE,
+        radiance.z * SCENE_RADIANCE_SCALE,
+    )
+}
+
+/// A [`Color`] from three **scene-referred** channels: finite-guarded and
+/// floored at zero, but deliberately *not* clamped at one.
+///
+/// `Ratio` itself does not clamp — its own doc says "finite values (including
+/// HDR magnitudes above `1.0`) pass through unchanged" — so the 0..1 ceiling in
+/// this module was only ever [`ratio`]'s, and a scene value has no business
+/// passing through it. `f64::max` returns the non-NaN operand, so the floor is
+/// also the NaN guard [`normalized_color`] provides for the display-referred
+/// side.
+fn hdr_color(r: f64, g: f64, b: f64) -> Color {
+    Color::linear_rgb(hdr(r), hdr(g), hdr(b))
+}
+
+/// One scene-referred channel as a `Ratio`: non-negative, finite, unbounded above.
+fn hdr(value: f64) -> Ratio {
+    Ratio::finite_or_zero(value.max(0.0) as f32)
 }
 
 /// A [`Color`] from three already-normalised channels, guarded so a NaN out of
 /// the raymarch can never reach the renderer as an unwrap panic deep in a frame.
+///
+/// For values that genuinely live in `0..1` — a max-normalised light tint. A
+/// scene radiance takes [`hdr_color`] instead.
 fn normalized_color(r: f64, g: f64, b: f64) -> Color {
     Color::linear_rgb(ratio(r), ratio(g), ratio(b))
 }
@@ -881,16 +960,69 @@ mod tests {
 
     /// The LUT bakes are the expensive part, so the sky is exercised through as
     /// few drivers as the assertions allow.
-    fn morning() -> SkyDriver {
+    fn authored_hour() -> SkyDriver {
         SkyDriver::new(Quality::High, HOUR)
     }
 
+    /// **The defect this file was rewritten to fix, written down as a number.**
+    ///
+    /// The frame was tone mapped twice: `display` (as `scene_radiance` was then
+    /// called) ran a Reinhard `x/(1+x)` and then clamped to `0..1`, in front of
+    /// the engine's real AgX over an `Rgba16Float` target. Everything it touched
+    /// — the sky's two stops, the hemisphere ambient, the fog colour — came out
+    /// compressed and clipped, while [`SkyDriver::key_light`] went to the engine
+    /// on the honest photometric scale. The *ratio* between them, which is what
+    /// the source's blue shadows and its sunlit-facade contrast are made of, was
+    /// destroyed before the renderer saw a pixel.
+    ///
+    /// So this pins the ratio, not the values: how far under a fully-lit white
+    /// surface the sky's two gradient stops sit, in stops. The bands are wide —
+    /// they are there to catch a second display transform reappearing, or the
+    /// scale being dropped again, not to freeze the atmosphere's arithmetic.
+    #[test]
+    fn the_sky_sits_the_right_number_of_stops_under_the_key_light() {
+        let sky = authored_hour();
+        let key = sky.key_light();
+        let luma = |c: [f32; 3]| {
+            0.2126 * f64::from(c[0]) + 0.7152 * f64::from(c[1]) + 0.0722 * f64::from(c[2])
+        };
+        let rgb = |c: [f32; 4]| [c[0], c[1], c[2]];
+        // What a white surface facing the key writes: the engine's non-physical
+        // arm is `base * light_colour * light_intensity * N.L`, so at `N.L = 1`
+        // and unit albedo this is the whole of it.
+        let lit = f64::from(key.intensity.get()) * luma(rgb(key.color.to_array()));
+        let under = |c: [f32; 4]| (lit / luma(rgb(c))).log2();
+
+        let horizon = under(sky.radiance().clear_color.to_array());
+        let zenith = under(sky.radiance().ambient_sky.to_array());
+        assert!(
+            (2.0..3.5).contains(&horizon),
+            "the horizon band sits {horizon} stops under the key"
+        );
+        assert!(
+            (4.0..5.5).contains(&zenith),
+            "the zenith sits {zenith} stops under the key"
+        );
+        assert!(
+            zenith > horizon,
+            "the zenith is darker than the horizon at this hour"
+        );
+
+        // And the sun disc is scene-referred: a linear four-figure radiance that
+        // the old `0..1` clamp flattened to display white before AgX could
+        // decide where display white was.
+        let body = crate::scene::wiring::sky_draw::visible_sky(&sky).body_color();
+        assert!(
+            luma(body) > 10.0,
+            "the sun disc is clamped, not radiance: {body:?}"
+        );
+    }
 
     // ---- sky -------------------------------------------------------------
 
     #[test]
     fn the_driver_lights_the_scene_from_sky_system_not_from_a_second_model() {
-        let sky = morning();
+        let sky = authored_hour();
         assert_eq!(sky.system.time_of_day(), HOUR);
         assert!(sky.system.sun_altitude() > 0.3, "the sun is well up");
         let light = sky.key_light();
@@ -920,7 +1052,7 @@ mod tests {
 
     #[test]
     fn the_clear_colour_is_a_daylight_blue_and_the_ambient_is_a_hemisphere() {
-        let sky = morning();
+        let sky = authored_hour();
         let clear = sky.clear_color().to_array();
         assert!(clear[2] > clear[0], "the sky is blue: {clear:?}");
         assert!(clear[2] > 0.1, "and bright enough to see");
@@ -942,28 +1074,46 @@ mod tests {
         assert!(sky.key_light().intensity.get() > 0.0);
     }
 
+    /// A still sky raymarches **once, at construction**, and never again.
+    ///
+    /// This test used to assert the opposite of its own name: that the env-bake
+    /// gate *fired* on one of the first thirty frames. It did fire, but only as
+    /// an artefact — `HOUR` was `9.5` while `SkySystem::new` starts at the
+    /// source's `16.5`, so `SkyDriver::new`'s `set_time_of_day` bumped
+    /// `env_generation` and left the driver stale-by-construction for the first
+    /// frame to clear. `SkyDriver::new` **already** raymarches eagerly, so that
+    /// clearing re-derived a radiance that was correct the moment it was built.
+    ///
+    /// With `HOUR` back on the source's own hour the hour never moves, the
+    /// generation never moves, and the gate correctly never fires. That is the
+    /// real invariant and it is the one worth pinning: a frozen sky must not pay
+    /// a raymarch per frame. `moving_the_clock_re_derives_the_radiance_on_the_env_gate`
+    /// covers the other half — that the gate *does* fire when the clock moves.
     #[test]
-    fn the_first_frame_derives_the_radiance_and_a_still_sky_never_re_derives_it() {
-        let mut sky = morning();
+    fn a_still_sky_raymarches_once_at_construction_and_never_again() {
+        let mut sky = authored_hour();
         let before = sky.radiance();
-        // `time_rate` is 0 by default, so the env gate fires once (`env_age`
-        // has to clear 0.2 s first) and then never again.
-        let first = (0..30).fold(false, |seen, _| {
-            seen | sky.frame(1.0 / 60.0, 0.0, (0.0, 0.0))
-        });
-        assert!(first, "the env bake gate fired");
-        let after = (0..120).fold(false, |seen, i| {
+        // Built, not blank: `new` resolved the radiance before any frame ran.
+        assert!(
+            before.clear_color.to_array()[2] > 0.0,
+            "the radiance was left for the first frame to derive: {:?}",
+            before.clear_color.to_array()
+        );
+        // Well past the 0.2 s `env_age` the gate waits on, twice over.
+        let baked = (0..150).fold(false, |seen, i| {
             seen | sky.frame(1.0 / 60.0, f64::from(i) / 60.0, (0.0, 0.0))
         });
-        assert!(!after, "a still sky re-baked, which would raymarch per frame");
-        // The radiance is stable across the gate: the hour did not move.
+        assert!(
+            !baked,
+            "a still sky re-baked, which would raymarch every frame"
+        );
         assert_eq!(before.clear_color, sky.radiance().clear_color);
     }
 
     #[test]
     fn moving_the_clock_re_derives_the_radiance_on_the_env_gate() {
-        let mut sky = morning();
-        let morning_clear = sky.clear_color().to_array();
+        let mut sky = authored_hour();
+        let day_clear = sky.clear_color().to_array();
         sky.set_hour(19.6);
         // One frame past the 0.2 s env age, so the gate can fire.
         let baked = (0..30).fold(false, |seen, _| {
@@ -971,17 +1121,17 @@ mod tests {
         });
         assert!(baked);
         let dusk_clear = sky.clear_color().to_array();
-        assert_ne!(morning_clear, dusk_clear, "the sky did not follow the sun");
+        assert_ne!(day_clear, dusk_clear, "the sky did not follow the sun");
         // 45 N at the solstice: 19.6 h puts the sun within a degree of the
         // horizon, so the sky is dimmer than it was at a 53-degree elevation.
         assert!(sky.system.sun_altitude() < 0.05);
         let sum = |c: [f32; 4]| c[0] + c[1] + c[2];
-        assert!(sum(dusk_clear) < sum(morning_clear), "the sky did not dim");
+        assert!(sum(dusk_clear) < sum(day_clear), "the sky did not dim");
     }
 
     #[test]
     fn a_turbidity_change_re_bakes_the_luts_rather_than_leaving_them_stale() {
-        let mut sky = morning();
+        let mut sky = authored_hour();
         let clear = sky.clear_color();
         let changed = sky.set_weather(&WeatherPatch {
             turbidity: Some(4.0),
@@ -994,7 +1144,7 @@ mod tests {
 
     #[test]
     fn a_weather_patch_that_leaves_turbidity_alone_keeps_the_luts() {
-        let mut sky = morning();
+        let mut sky = authored_hour();
         let clear = sky.clear_color();
         sky.set_weather(&WeatherPatch {
             cloud_coverage: Some(0.6),
@@ -1005,7 +1155,7 @@ mod tests {
 
     #[test]
     fn the_fog_is_the_physical_term_only_and_recedes_toward_the_sky() {
-        let sky = morning();
+        let sky = authored_hour();
         let fog = sky.depth_fog();
         assert_eq!(fog.strength().get(), 0.0, "the NDC ramp is a deliberate no-op");
         let rate = fog.extinction().get();
@@ -1020,7 +1170,7 @@ mod tests {
 
     #[test]
     fn late_frame_writes_the_camera_into_the_shared_block() {
-        let mut sky = morning();
+        let mut sky = authored_hour();
         let mut world = [0.0f64; 16];
         world[12] = 3.0;
         world[13] = 1.7;
@@ -1033,20 +1183,41 @@ mod tests {
 
     #[test]
     fn the_exposure_bias_is_published_and_unapplied() {
-        let day = morning();
+        let day = authored_hour();
         let dusk = SkyDriver::new(Quality::High, 19.8);
         assert_eq!(day.exposure_bias(), day.system.exposure_bias);
         assert!(dusk.exposure_bias() > day.exposure_bias(), "dusk meters darker");
     }
 
+    /// The conversion is a **linear scale**, not a tone map.
+    ///
+    /// This test used to assert `bright[0] < 1.0` — "Reinhard never reaches
+    /// one" — and that assertion was the defect written down: the frame is tone
+    /// mapped by the engine's AgX over an `Rgba16Float` target, so a second
+    /// compressive curve in front of it spent the whole dynamic range before
+    /// the real one saw the frame. What has to hold now is that the transform
+    /// is exactly `SCENE_RADIANCE_SCALE`, that it is therefore ratio-preserving
+    /// (which is what makes the sky comparable to the key light at all), and
+    /// that it is still floored and NaN-safe.
     #[test]
-    fn the_display_transform_is_monotone_bounded_and_nan_safe() {
-        let dark = display(Vec3::splat(0.01)).to_array();
-        let bright = display(Vec3::splat(100.0)).to_array();
+    fn the_scene_transform_is_a_linear_unbounded_scale_and_nan_safe() {
+        let dark = scene_radiance(Vec3::splat(0.01)).to_array();
+        let bright = scene_radiance(Vec3::splat(100.0)).to_array();
         assert!(dark[0] < bright[0]);
-        assert!(bright[0] < 1.0, "Reinhard never reaches one");
-        assert_eq!(display(Vec3::splat(0.0)).to_array()[0], 0.0);
-        assert_eq!(display(Vec3::splat(-5.0)).to_array()[0], 0.0);
+        assert!(
+            bright[0] > 1.0,
+            "a scene value above display white has to survive: {}",
+            bright[0]
+        );
+        // Exactly the scale, on both probes — no shoulder anywhere in between.
+        // The tolerances are `f32` round-trip slack, not modelling slack: the
+        // channels are stored as `f32`, so the ratio of two of them carries
+        // about `1e-3` of absolute error at `10_000`.
+        assert!((f64::from(dark[0]) - 0.01 * SCENE_RADIANCE_SCALE).abs() < 1.0e-8);
+        assert!((f64::from(bright[0]) / f64::from(dark[0]) - 10_000.0).abs() < 0.1);
+        assert_eq!(scene_radiance(Vec3::splat(0.0)).to_array()[0], 0.0);
+        assert_eq!(scene_radiance(Vec3::splat(-5.0)).to_array()[0], 0.0);
+        assert_eq!(scene_radiance(Vec3::splat(f64::NAN)).to_array()[0], 0.0);
         assert_eq!(normalized_color(f64::NAN, 0.5, 0.5).to_array()[0], 0.0);
     }
 

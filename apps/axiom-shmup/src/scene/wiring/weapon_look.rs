@@ -83,6 +83,20 @@
 //!    `u32`; the table's tint is a linear `THREE.Color` and for the five
 //!    `metalness: 1` entries it is an **F0**, not an albedo — `brass` is
 //!    `(2.3, 1.58, 0.74)`. [`linear_to_hex`] clamps to 1 and quantises to 8 bits.
+//! 1b. **The albedo bake is resolution-starved, and the cure already exists in
+//!    this app.** [`weapon_bake_size`] carries the arithmetic: this table's
+//!    detail layer packs 9-30 detail cells into one base tile, so the street's
+//!    64² bake gives it 2.1-7.1 texels per cell and the finest entries fall at
+//!    or under the Nyquist limit — the grain cannot be represented, and the
+//!    per-pixel weathering layers that excuse a coarse bake on the street are
+//!    switched off here by `BASE.weather`. This slice raises the cap to 128²
+//!    above `Quality::Low`, which is the largest step a *CPU* bake can afford
+//!    at boot. The table actually wants 256². **Hand-off:**
+//!    [`crate::materials::gpu_bake`] already exists, already emits the WGSL for
+//!    `owSurface`, and already has a CPU/GPU parity test; routing
+//!    [`WeaponLook::new`]'s bake through it removes the quadratic boot cost and
+//!    with it this ceiling. That file is owned elsewhere, so the change is
+//!    named here rather than made.
 //! 3. **`MeshBasicMaterial` and additive blending have no counterpart.** The five
 //!    custom keys the source owns outright (`cavity`, `optic_tube`, `glass`,
 //!    `lens_ring`, `lens_vig`) include two unlit additive overlays. An unlit
@@ -171,13 +185,16 @@ pub struct WeaponLook {
 impl WeaponLook {
     /// Resolve every weapon material and bake its albedo.
     ///
-    /// The bake is albedo-only at [`RUNTIME_BAKE_SIZE`], for the reason that
-    /// constant's doc gives at length: a CPU bake at the library's authored 1024²
-    /// is minutes of work and the fix is the source's own GPU bake. The weapon
+    /// The bake is albedo-only — a CPU bake at the library's authored 1024² is
+    /// minutes of work and the fix is the source's own GPU bake. The weapon
     /// table names three libraries (`rubber`, `metal_brushed`, `fabric`) but its
     /// entries override `bake.seed` and `bake.relief` per key, so it costs up to
     /// fifteen bakes rather than three — the same per-surface cost the street's
     /// nineteen already pay.
+    ///
+    /// Its *resolution*, though, is [`weapon_bake_size`] and deliberately not
+    /// the street's [`RUNTIME_BAKE_SIZE`]; see that function for why 64² cannot
+    /// represent this table's detail layer at all.
     ///
     /// `ground_y` is not a parameter: every weapon material zeroes the three
     /// world-space weathering terms (`BASE.weather = [0, 0, 0, 0.62]`) precisely
@@ -192,11 +209,12 @@ impl WeaponLook {
         let _ = system.configure(quality, 8);
         system.set_ground_level(0.0);
 
+        let size = weapon_bake_size(quality);
         let mut bakes: Vec<(String, Rgba8Map)> = Vec::new();
         let keys = CUSTOM_KEYS
             .into_iter()
             .chain(material_keys())
-            .map(|key| resolve_key(&mut system, key, &mut bakes))
+            .map(|key| resolve_key(&mut system, key, size, &mut bakes))
             .collect();
         WeaponLook { keys, bakes }
     }
@@ -327,6 +345,58 @@ fn material_for(
 /* resolving one key                                                     */
 /* ==================================================================== */
 
+/// The albedo bake resolution for a **weapon** surface, in texels per base tile.
+///
+/// This is deliberately *not* [`RUNTIME_BAKE_SIZE`]. That constant's doc
+/// justifies 64² with two arguments, and **neither one survives the move from a
+/// wall to a viewmodel**:
+///
+/// 1. *"64² over a 2 m tile is 3 cm per texel: coarse, but it is the real
+///    generator's colour field."* That is an argument about world-space density
+///    on something five metres away. The number that decides whether a weapon
+///    looks like metal is not metres per texel, it is **texels per detail
+///    cell** — and that is where 64 fails outright. `detail[0]` is the count of
+///    detail tiles packed inside one base tile, and every entry in
+///    `weapons/materials.rs` sets it between 9 and 30
+///    (`materials.rs:287` = 22, `:339` = 30, `:574` = 26, `:611`/`:869` = 24).
+///    At 64² the finest of those gets `64 / 30 = 2.1` texels per cell — *at*
+///    the Nyquist limit, i.e. the detail layer cannot be represented at all and
+///    bakes to aliased mush. `alu`'s own comment states exactly what is being
+///    thrown away: "with diffuse in charge these are the texture ... 22 tiles
+///    over a 95 mm base tile is a 4.3 mm cell".
+/// 2. *"the material shader's macro, weathering and cavity layers — which are
+///    per-pixel and cost nothing here — carry the high frequencies on top of
+///    it."* For a weapon they do not. `BASE.weather` is `[0, 0, 0, 0.62]`:
+///    `materials.js` **switches the three world-space weathering terms off**,
+///    because they key off world Y and that is meaningless for something
+///    parented to the camera. The per-pixel layers the street leans on to
+///    excuse a coarse bake are, by design, absent from this exact table.
+///
+/// So the weapon needs its own number. 128² puts the worst entry at
+/// `128 / 30 = 4.3` texels per cell and `alu` at 5.8 — across the Nyquist floor,
+/// so the grain is *representable* rather than aliased away.
+///
+/// **Why not 256², which is what the table actually wants.** Eight texels per
+/// cell is where a cell reads as grain rather than as noise, and that asks for
+/// `30 * 8 = 240` → 256². The cost is the problem: this is boot-time CPU work,
+/// quadratic in this number (see [`RUNTIME_BAKE_SIZE`] — `ow_hash22` is a
+/// `f64::sin` per sample on a CPU), and 256² is 16x today's texels across up to
+/// fifteen bakes. 128² is 4x, which is the bounded step that buys the
+/// representability threshold. The real fix is not a bigger CPU bake at all: it
+/// is [`crate::materials::gpu_bake`], which already exists in this app and
+/// already has a CPU/GPU parity test — routing the weapon bake through it
+/// removes this ceiling entirely. See the hand-off note in the module doc.
+///
+/// `Low` keeps today's 64² exactly, so a machine that cannot afford this does
+/// not pay it. The result is still `min`-ed against the surface's own authored
+/// size, so this can never ask for more than the generator actually authored.
+fn weapon_bake_size(quality: Quality) -> u32 {
+    match quality {
+        Quality::Low => RUNTIME_BAKE_SIZE,
+        Quality::Medium | Quality::High | Quality::Ultra => 128,
+    }
+}
+
 /// `WeaponMaterials.get(key)`, translated into the engine's contracts.
 ///
 /// `has_library` is `true` because this function *is* holding the library — the
@@ -334,11 +404,12 @@ fn material_for(
 fn resolve_key(
     system: &mut MaterialSystem,
     key: &'static str,
+    size: u32,
     bakes: &mut Vec<(String, Rgba8Map)>,
 ) -> WeaponKeyLook {
     match material_request(key, true) {
         MaterialRequest::Custom(custom) => custom_look(key, &custom),
-        MaterialRequest::Library { entry, .. } => library_look(system, entry, bakes),
+        MaterialRequest::Library { entry, .. } => library_look(system, entry, size, bakes),
         MaterialRequest::Fallback(f) => fallback_look(key, &f),
     }
 }
@@ -348,6 +419,7 @@ fn resolve_key(
 fn library_look(
     system: &mut MaterialSystem,
     entry: &'static WeaponMaterial,
+    bake_size: u32,
     bakes: &mut Vec<(String, Rgba8Map)>,
 ) -> WeaponKeyLook {
     let opts = weapon_opts(entry);
@@ -358,7 +430,7 @@ fn library_look(
     if let Some(want) = bake_key.as_ref() {
         if !bakes.iter().any(|(have, _)| have == want) {
             let map = system.texture_set(want).map(|set| {
-                let size = set.size.min(RUNTIME_BAKE_SIZE);
+                let size = set.size.min(bake_size);
                 // Albedo only — see `RUNTIME_BAKE_SIZE`. The ORM and normal
                 // passes cost a second and third full surface evaluation per
                 // texel and have nowhere to be bound anyway
@@ -538,10 +610,37 @@ fn ratio(v: f64) -> Ratio {
 ///
 /// Round-trips a linear triple through the 8-bit sRGB encoding the parameter
 /// block stores. Lossy in two ways, both stated in the module doc's gap 2: a
-/// channel above 1 clamps, and every channel quantises to a byte.
+/// triple above 1 cannot keep its magnitude, and every channel quantises to a
+/// byte.
+///
+/// # Why the over-one case normalises instead of clamping per channel
+///
+/// Two entries in the table are metal **F0**s rather than albedos, and both
+/// exceed one: `brass` is `(2.3, 1.58, 0.74)` (`materials.rs:684`) and `copper`
+/// is `(2.25, 1.4, 1.09)` (`:706`). Clamping each channel independently is not
+/// merely lossy, it is lossy *in the one dimension that carries the material's
+/// identity*: brass's ratio is `1 : 0.687 : 0.322`, a warm gold, and channel-wise
+/// clamping rewrites it to `1 : 1 : 0.74` — a near-white with the gold gone.
+/// Copper's `1 : 0.622 : 0.484` becomes `1 : 1 : 1`, i.e. **exactly neutral**:
+/// the encode was deleting the entire hue of the cartridge brass and the bullet
+/// jacket, the two warmest things on the weapon.
+///
+/// Scaling the triple by its largest channel instead keeps the chromaticity
+/// exact and spends the whole loss on magnitude — which is the right trade here,
+/// because this value is multiplied into a baked albedo by a renderer that has
+/// no headroom above one anyway, so the magnitude was never going to survive.
+/// The brightest channel still encodes to `0xff`, so nothing that was clipping
+/// before moves.
+///
+/// A triple already at or below one is untouched: the thirteen dielectric
+/// entries encode exactly as they did.
 fn linear_to_hex(c: [f64; 3]) -> u32 {
+    // `f64::max` returns the non-NaN operand, so a NaN channel cannot make the
+    // divisor NaN and drag the other two channels down with it.
+    let peak = c.iter().fold(0.0_f64, |a, &b| a.max(b));
+    let scale = if peak > 1.0 { 1.0 / peak } else { 1.0 };
     let channel = |v: f64| {
-        let srgb = linear_to_srgb(v);
+        let srgb = linear_to_srgb(v * scale);
         ((srgb * 255.0).round().clamp(0.0, 255.0)) as u32
     };
     (channel(c[0]) << 16) | (channel(c[1]) << 8) | channel(c[2])
@@ -971,9 +1070,32 @@ mod tests {
         // Black and white are exact.
         assert_eq!(linear_to_hex([0.0, 0.0, 0.0]), 0x00_0000);
         assert_eq!(linear_to_hex([1.0, 1.0, 1.0]), 0xff_ffff);
-        // And a channel above one clamps rather than wrapping — `brass` is
-        // (2.3, 1.58, 0.74), an F0 rather than an albedo.
+        // And a triple above one keeps its HUE, spending the loss on magnitude.
+        // `brass` is (2.3, 1.58, 0.74) — an F0 rather than an albedo — and its
+        // ratio 1 : 0.687 : 0.322 is the whole of what makes it read as gold.
+        // The brightest channel still saturates, so nothing that clipped moves.
+        let brass = hex_to_linear(linear_to_hex([2.3, 1.58, 0.74]));
         assert_eq!(linear_to_hex([2.3, 1.58, 0.74]) >> 16, 0xff);
+        assert!(
+            (brass[1] / brass[0] - 1.58 / 2.3).abs() < 0.005,
+            "brass lost its green ratio: {brass:?}"
+        );
+        assert!(
+            (brass[2] / brass[0] - 0.74 / 2.3).abs() < 0.005,
+            "brass lost its blue ratio: {brass:?}"
+        );
+        // `copper` (2.25, 1.4, 1.09) is the case channel-wise clamping destroyed
+        // outright: all three channels were above one, so it encoded to pure
+        // white and the bullet jacket lost its colour entirely.
+        let copper = hex_to_linear(linear_to_hex([2.25, 1.4, 1.09]));
+        assert!(
+            copper[2] < copper[1] && copper[1] < copper[0],
+            "copper is not warm: {copper:?}"
+        );
+        assert!(
+            (copper[1] / copper[0] - 1.4 / 2.25).abs() < 0.005,
+            "copper lost its green ratio: {copper:?}"
+        );
     }
 
     #[test]

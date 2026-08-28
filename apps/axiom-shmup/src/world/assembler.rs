@@ -53,6 +53,7 @@ use axiom_math::{Mat4, Vec3};
 use crate::rng::Rng;
 use crate::weapons::geometry::primitives::box_geo;
 use crate::world::accum::{Accum, AccumAddOpts};
+use crate::world::clutter::{audit_clutter, ClutterPolicy};
 use crate::world::geo::WorldGeo;
 use crate::world::kit::trs;
 use crate::world::palette::{Palette, Surface};
@@ -107,7 +108,7 @@ pub struct LightRegistration {
     pub position: Vec3,
 }
 
-/// `this.stats` (`builder.js:79`).
+/// `this.stats` (`builder.js:82`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Stats {
     pub static_tris: usize,
@@ -115,6 +116,15 @@ pub struct Stats {
     pub instances: usize,
     pub draw_calls: usize,
     pub collide_tris: usize,
+    /// `stats.suppressed` (`builder.js:255`): prototype placements the arena
+    /// floor policy discarded — either because the id is in
+    /// [`GROUND_CLUTTER`][crate::world::clutter::GROUND_CLUTTER] or because the
+    /// whole set-piece was built inside [`Assembler::muted`].
+    ///
+    /// The source creates the field lazily (`this.stats.suppressed ?? 0`), so
+    /// it is absent on a build that suppressed nothing; a `usize` at 0 says the
+    /// same thing without the absent case.
+    pub suppressed: usize,
 }
 
 /// One merged static-batch mesh (`builder.js:320-335`).
@@ -175,6 +185,14 @@ pub struct Assembler {
     pub lamp_anchors: Vec<Vec3>,
     pub jitter: Option<Jitter>,
     pub skirts: bool,
+    /// `this.mute` (`builder.js:80-81`). While true every emitter is a no-op —
+    /// see [`Assembler::muted`].
+    pub mute: bool,
+    /// The arena-floor policy this build runs under
+    /// (`clutter.js`'s `ARENA_FLOOR` + `RESTORE_CLUTTER`, which the source
+    /// reads as module state; see [`crate::world::clutter`] for why this port
+    /// carries it as a value instead).
+    pub clutter: ClutterPolicy,
     xform: Mat4,
     identity: bool,
     ry: f32,
@@ -196,6 +214,8 @@ impl Assembler {
             lamp_anchors: Vec::new(),
             jitter: None,
             skirts: true,
+            mute: false,
+            clutter: ClutterPolicy::ARENA_FLOOR,
             xform: Mat4::IDENTITY,
             identity: true,
             ry: 0.0,
@@ -237,17 +257,27 @@ impl Assembler {
     }
 
     // --------------------------------------------------------- static batch --
-    /// `add(key, geo, matrix = null, opts = null)` (`builder.js:132-140`).
+    /// `add(key, geo, matrix = null, opts = null)` (`builder.js:135-144`).
     pub fn add(&mut self, key: &str, geo: &WorldGeo, matrix: Option<&Mat4>, opts: Option<AccumAddOpts>) -> &mut Self {
+        // `if (this.mute) return this;` (`builder.js:136`).
+        if self.mute {
+            return self;
+        }
         let world_matrix = self.compose(matrix);
         self.static_entry(key).add(geo, world_matrix.as_ref(), opts);
         self
     }
 
-    /// `addOnce(key, geo, matrix = null, opts = null)` (`builder.js:161-166`).
+    /// `addOnce(key, geo, matrix = null, opts = null)` (`builder.js:165-171`).
     /// The source's `geo.dispose()` has no Rust counterpart (see module
     /// doc); this is otherwise identical to [`Assembler::add`].
     pub fn add_once(&mut self, key: &str, geo: &WorldGeo, matrix: Option<&Mat4>, opts: Option<AccumAddOpts>) -> &mut Self {
+        // `if (this.mute) return this;` (`builder.js:167`). Redundant with
+        // `add`'s own check, and present for the same reason it is in the
+        // source: this is the emitter callers name, so the gate is stated here.
+        if self.mute {
+            return self;
+        }
         self.add(key, geo, matrix, opts)
     }
 
@@ -314,8 +344,43 @@ impl Assembler {
         self.protos.iter().any(|p| p.id == id)
     }
 
-    /// `place(id, matrix, masks = null)` (`builder.js:217-227`).
+    /// **Swallow everything emitted while `f` runs, then restore**
+    /// (`muted(fn)`, `builder.js:224-246`).
+    ///
+    /// For removing a whole SET-PIECE rather than a prop. A market stall is a
+    /// suppressible `stall` prototype plus a striped canopy, a valance, a side
+    /// drape and a collision box, all raw geometry with no id — so suppressing
+    /// the prototype alone left four cloth panels hanging in mid-air over
+    /// nothing.
+    ///
+    /// **Muting rather than not calling the builder is the whole point:** the
+    /// builder still runs, so it still draws exactly the random numbers it
+    /// always drew, and every set-piece after it lands where it always did.
+    /// Skipping the call instead would shift the shared stream and rebuild the
+    /// street into a different street.
+    ///
+    /// The source's `try`/`finally` is a plain restore here: nothing in the
+    /// world pass unwinds, and a panic mid-build ends the build.
+    pub fn muted<R>(&mut self, f: impl FnOnce(&mut Assembler) -> R) -> R {
+        let prev = self.mute;
+        self.mute = true;
+        let out = f(self);
+        self.mute = prev;
+        out
+    }
+
+    /// `place(id, matrix, masks = null)` (`builder.js:248-266`).
     pub fn place(&mut self, id: &str, matrix: &Mat4, masks: Option<[f32; 3]>) -> &mut Self {
+        // THE ONE PLACE the arena-shooter floor policy is applied
+        // (`builder.js:249-257`). Every prototype placement goes through here,
+        // so suppression cannot be half-applied, and the placement decision
+        // above it still ran — which means it still drew the same random
+        // numbers and the level's architecture is unchanged. See
+        // `crate::world::clutter`.
+        if self.mute || self.clutter.is_suppressed(id) {
+            self.stats.suppressed += 1;
+            return self;
+        }
         let world_matrix = self.compose(Some(matrix)).expect("compose(Some(_)) always returns Some");
         match self.protos.iter_mut().find(|p| p.id == id) {
             Some(p) => {
@@ -374,9 +439,18 @@ impl Assembler {
     }
 
     // ------------------------------------------------------------ collision --
-    /// `box(surface, cx, cy, cz, sx, sy, sz, ry = 0)` (`builder.js:275-283`).
+    /// `box(surface, cx, cy, cz, sx, sy, sz, ry = 0)` (`builder.js:313-323`).
     #[allow(clippy::too_many_arguments)]
     pub fn collide_box(&mut self, surface: Surface, cx: f32, cy: f32, cz: f32, sx: f32, sy: f32, sz: f32, ry: f32) -> &mut Self {
+        // `if (this.mute) return this;` (`builder.js:315`) — a muted set-piece
+        // must not leave its collision proxy standing in an empty street.
+        //
+        // `collideGeo` and `slabBox` below deliberately have NO such gate, in
+        // the source either: they carry the terrain, the alley floors and the
+        // building wall slabs, none of which is ever built inside `muted()`.
+        if self.mute {
+            return self;
+        }
         let local = trs(cx, cy, cz, ry, sx, sy, sz, 0.0, 0.0);
         let world = self.compose(Some(&local));
         self.collide_entry(surface).add(&unit_box(), world.as_ref(), None);
@@ -414,6 +488,10 @@ impl Assembler {
     /// only the position survives. `position` is in LEVEL space, exactly as
     /// the source's `light.position` is expected to be before this call.
     pub fn light(&mut self, position: Vec3, _opts: ()) -> &mut Self {
+        // `if (this.mute) return light;` (`builder.js:351`).
+        if self.mute {
+            return self;
+        }
         let world_position = if self.identity { position } else { self.xform.transform_point(position) };
         self.lights.push(LightRegistration { position: world_position });
         self
@@ -423,6 +501,12 @@ impl Assembler {
     /// `finalize(root, physics)` (`builder.js:318-426`), minus the
     /// `root`/`physics` side effects — see the module doc.
     pub fn finalize(&mut self) -> FinalizeResult {
+        // `auditClutter(new Set(this._protos.keys()))` (`builder.js:360`): a
+        // misspelt id in GROUND_CLUTTER suppresses nothing and says so
+        // silently, so the level checks its own policy list once per build.
+        let known: Vec<&str> = self.protos.iter().map(|p| p.id.as_str()).collect();
+        audit_clutter(&known);
+
         let mut statics = Vec::new();
         for (key, acc) in std::mem::take(&mut self.static_batches) {
             if acc.empty() {
@@ -679,13 +763,125 @@ mod tests {
         assert_eq!(total, 31);
     }
 
+    fn with_skirtable_prototypes(a: &mut Assembler) {
+        a.proto("dust_skirt", ProtoSpec { geo: chamfer_box(1.0, 0.02, 1.0, 0.005), key: "dust_skirt".into(), tilt: 0.0, sink: 0.0, skirt: 0.0, cast_shadow: false, receive_shadow: true, chunk: false, max_dist: 0.0, no_prepass: false });
+        a.proto("box_prop", ProtoSpec { geo: chamfer_box(1.0, 1.0, 1.0, 0.01), key: "wood".into(), tilt: 0.0, sink: 0.0, skirt: 0.3, cast_shadow: true, receive_shadow: true, chunk: false, max_dist: 0.0, no_prepass: false });
+    }
+
     #[test]
     fn skirts_are_dropped_under_a_skirted_prototype_when_dust_skirt_exists() {
         let mut a = assembler();
-        a.proto("dust_skirt", ProtoSpec { geo: chamfer_box(1.0, 0.02, 1.0, 0.005), key: "dust_skirt".into(), tilt: 0.0, sink: 0.0, skirt: 0.0, cast_shadow: false, receive_shadow: true, chunk: false, max_dist: 0.0, no_prepass: false });
-        a.proto("box_prop", ProtoSpec { geo: chamfer_box(1.0, 1.0, 1.0, 0.01), key: "wood".into(), tilt: 0.0, sink: 0.0, skirt: 0.3, cast_shadow: true, receive_shadow: true, chunk: false, max_dist: 0.0, no_prepass: false });
+        // `dust_skirt` is in GROUND_CLUTTER, so the shipping policy would
+        // discard the fillet at `place`. This test is about `put`'s fillet
+        // logic, so it runs with the policy lifted.
+        a.clutter = ClutterPolicy::RESTORED;
+        with_skirtable_prototypes(&mut a);
         a.put("box_prop", 0.0, 0.0, 0.0, 0.0, 1.0, None, 0.0, 0.0);
         assert_eq!(a.count("dust_skirt"), 1);
+    }
+
+    /// `put` still runs its fillet logic under the arena floor — the fillet is
+    /// discarded at [`Assembler::place`], the one choke point, and counted.
+    /// "A dust ring with no object is a stain with no object"
+    /// (`clutter.js:91-95`).
+    #[test]
+    fn the_arena_floor_discards_the_dust_fillet_at_the_choke_point() {
+        let mut a = assembler();
+        with_skirtable_prototypes(&mut a);
+        a.put("box_prop", 0.0, 0.0, 0.0, 0.0, 1.0, None, 0.0, 0.0);
+        assert_eq!(a.count("dust_skirt"), 0);
+        // One discard, for the fillet: `box_prop` is not ground clutter.
+        assert_eq!(a.stats.suppressed, 1);
+        assert_eq!(a.count("box_prop"), 1);
+    }
+
+    /// Every emitter is a no-op inside [`Assembler::muted`], and the flag is
+    /// restored afterwards — including nested use (`builder.js:224-246`).
+    #[test]
+    fn muted_swallows_every_emitter_and_restores_the_previous_flag() {
+        let mut a = assembler();
+        a.clutter = ClutterPolicy::RESTORED;
+        with_skirtable_prototypes(&mut a);
+        a.muted(|m| {
+            m.add("concrete", &chamfer_box(1.0, 1.0, 1.0, 0.012), None, None);
+            m.add_once("sand", &chamfer_box(1.0, 1.0, 1.0, 0.012), None, None);
+            m.collide_box(Surface::Dirt, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0);
+            m.light(Vec3::new(0.0, 1.0, 0.0), ());
+            m.put("box_prop", 0.0, 0.0, 0.0, 0.0, 1.0, None, 0.0, 0.0);
+            // Nested: still muted, and the inner restore does not unmute.
+            m.muted(|inner| {
+                inner.add("brick", &chamfer_box(1.0, 1.0, 1.0, 0.012), None, None);
+            });
+            m.add("brick", &chamfer_box(1.0, 1.0, 1.0, 0.012), None, None);
+        });
+        assert!(!a.mute, "the flag is back where it was");
+        // `box_prop` + its fillet: two placements swallowed and counted.
+        assert_eq!(a.stats.suppressed, 2);
+        let result = a.finalize();
+        assert!(result.statics.is_empty());
+        assert!(result.collision.is_empty());
+        assert!(result.lights.is_empty());
+        assert!(result.instanced.is_empty());
+    }
+
+    /// **The RNG-neutrality property, stated as a test.** Muting and
+    /// suppressing change what is emitted and nothing else; the identical
+    /// sequence of draws happens either way.
+    #[test]
+    fn suppression_and_muting_leave_the_random_stream_exactly_where_it_was() {
+        fn build(a: &mut Assembler, rng: &mut Rng) {
+            a.proto("cinder", ProtoSpec { geo: chamfer_box(0.2, 0.1, 0.1, 0.005), key: "concrete_prop".into(), tilt: 0.1, sink: 0.01, skirt: 0.0, cast_shadow: true, receive_shadow: true, chunk: false, max_dist: 0.0, no_prepass: false });
+            a.proto("lamp_post", ProtoSpec { geo: chamfer_box(0.1, 5.0, 0.1, 0.005), key: "metal_dark".into(), tilt: 0.0, sink: 0.0, skirt: 0.0, cast_shadow: true, receive_shadow: true, chunk: false, max_dist: 0.0, no_prepass: false });
+            for _ in 0..40 {
+                let x = rng.range(-5.0, 5.0) as f32;
+                let z = rng.range(-5.0, 5.0) as f32;
+                let ry = rng.float() as f32 * 6.28;
+                a.put("cinder", x, 0.0, z, ry, 1.0, None, 0.0, 0.0);
+            }
+            a.muted(|m| {
+                m.put("lamp_post", 0.0, 0.0, 0.0, 0.0, 1.0, None, 0.0, 0.0);
+            });
+            a.put("lamp_post", 1.0, 0.0, 0.0, 0.0, 1.0, None, 0.0, 0.0);
+        }
+
+        let mut arena = Assembler::new(Rng::new(1));
+        let mut rng_arena = Rng::new(99);
+        build(&mut arena, &mut rng_arena);
+
+        let mut restored = Assembler::new(Rng::new(1));
+        restored.clutter = ClutterPolicy::RESTORED;
+        let mut rng_restored = Rng::new(99);
+        build(&mut restored, &mut rng_restored);
+
+        assert_eq!(rng_arena.state(), rng_restored.state(), "the policy moved the stream");
+        // ...while the emitted content differs exactly as intended.
+        assert_eq!(arena.count("cinder"), 0);
+        assert_eq!(restored.count("cinder"), 40);
+        // The muted lamp is dropped under BOTH policies — `muted` is not
+        // gated on the policy — and the unmuted one survives both.
+        assert_eq!(arena.count("lamp_post"), 1);
+        assert_eq!(restored.count("lamp_post"), 1);
+        assert_eq!(arena.stats.suppressed, 41);
+        assert_eq!(restored.stats.suppressed, 1);
+    }
+
+    /// The audit reports the ids no prototype answers to, and reports nothing
+    /// when every one is registered (`builder.js:360`).
+    #[test]
+    fn finalize_audits_the_clutter_list_against_the_registered_prototypes() {
+        let mut a = assembler();
+        crate::world::props::register_props(&mut a, &mut Rng::new(2));
+        crate::world::dressing::register_dressing_props(&mut a, &mut Rng::new(3));
+        let known: Vec<&str> = crate::world::clutter::GROUND_CLUTTER
+            .into_iter()
+            .filter(|id| a.has(id))
+            .collect();
+        assert_eq!(
+            known.len(),
+            crate::world::clutter::GROUND_CLUTTER.len(),
+            "every id in GROUND_CLUTTER is a real prototype"
+        );
+        a.finalize();
     }
 
     #[test]

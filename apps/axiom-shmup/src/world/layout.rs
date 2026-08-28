@@ -16,6 +16,8 @@ pub struct Street {
     pub walk_h: f64,
     pub z_min: f64,
     pub z_max: f64,
+    /// Height of the road crown above the gutter, at `x = 0` (`layout.js:20`).
+    pub camber: f64,
 }
 
 pub const STREET: Street = Street {
@@ -24,7 +26,32 @@ pub const STREET: Street = Street {
     walk_h: 0.145,
     z_min: -58.0,
     z_max: 46.0,
+    camber: 0.055,
 };
+
+/// **The height of the road surface at `x`, plus an optional lift**
+/// (`roadY`, `layout.js:24-42`).
+///
+/// The road is cambered, so "on the road" is a function of x, not a constant.
+/// That formula was written out by hand in seven places across `ground.js` and
+/// `dressing.js` — with five different lifts (4 mm to 50 mm) and, in the
+/// manhole covers, a different camber coefficient entirely (0.05 against the
+/// road's 0.055). The covers therefore sat up to 3.5 cm proud of the tarmac
+/// AND drifted off the crown across the road's width, which is why they read
+/// as pale pucks hovering over the asphalt once the rubble that used to hide
+/// them was gone.
+///
+/// One definition, one place to change it. `lift` is how far above the surface
+/// the thing sits: a decal wants a millimetre or two to beat z-fighting
+/// ([`crate::world::ground::DECAL_LIFT`]), a manhole cover wants to be seated
+/// so its TOP is barely proud and its body is buried.
+///
+/// Spelled `t * t`, not `t.powi(2)`, because that is what the source writes
+/// and a squared multiply is the one form guaranteed to round identically.
+pub fn road_y(x: f64, lift: f64) -> f64 {
+    let t = x / STREET.half_width;
+    (1.0 - t * t) * STREET.camber + lift
+}
 
 /// Alleys and open ground, as rects [x0, z0, x1, z1].
 pub struct Alley {

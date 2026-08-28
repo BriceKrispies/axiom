@@ -187,6 +187,17 @@ fn map_of(texture: &Texture) -> Rgba8Map {
 
 /// Binding 4: the ORM triple with the **albedo's** alpha (the height field)
 /// carried into the alpha channel. See the module doc.
+///
+/// **This lane is not what feeds parallax, and citing it as such is wrong.**
+/// `material_shader::compose` samples binding 4 as `.rgb` only
+/// (`compose.rs:283`), and `axiom_pom` is handed `albedo_tex`
+/// (`compose.rs:266`) and marches `.a` of *that* (`pom.rs:137`). Since
+/// [`super::bake::bake`] writes the height field into the **albedo's** alpha
+/// (`bake.rs:327`), the height POM needs has been bound ever since the albedo
+/// was uploaded — the ORM binding did not unlock it and its absence was never
+/// what held it back. The copy stays because the engine documents binding 4's
+/// alpha as the height lane and a future consumer is entitled to find it there;
+/// it is simply unread today.
 fn orm_height_map(orm: &Texture, albedo: &Texture) -> Rgba8Map {
     let size = orm.size;
     let mut pixels = Vec::with_capacity((size as usize) * (size as usize) * 4);
@@ -308,6 +319,27 @@ pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLib
     let shared = system
         .shared()
         .expect("configure with a renderer builds the shared maps (index.js:68-93)");
+    // TWO BUDGETS, ONE KNOB — and they are not the same budget.
+    //
+    // `size_cap` exists because nineteen per-surface bakes are quadratically
+    // expensive (see `RUNTIME_BAKE_SIZE`). These two are **one bake each**, and
+    // clamping them by the same number costs the detail tile the one property
+    // its own source comment says it must have:
+    //
+    //   "1K, not 512: the micro tooth is 1.6-4 mm over a 0.25 m tile, which
+    //    needs ~6 texels per grain to survive mip 1 instead of averaging to
+    //    flat grey."  -- index.js:198-199
+    //
+    // At `size_cap = 64` the 0.25 m tile is 3.9 mm per texel: roughly ONE texel
+    // per 1.6 mm grain, sixteen times below the floor the source states, so the
+    // micro tooth mips to flat grey exactly as that comment predicts. The macro
+    // field is authored at 256 (not 1024) and is world-anchored at 32 m, so 64
+    // hurts it far less — 0.5 m per texel against the source's 0.125 m.
+    //
+    // The correct shape is a separate cap for the shared pair, since raising it
+    // costs two bakes rather than nineteen. Not done here because it changes
+    // `bake_library`'s signature and therefore its callers; recorded so the next
+    // change starts from the measurement rather than the guess.
     let detail = super::bake::build_detail(shared.detail_size.min(size_cap), 1.0);
     let macro_set = super::bake::build_macro(shared.macro_size.min(size_cap), 2.0);
     BakedLibrary {
@@ -354,6 +386,45 @@ pub fn bake_library(quality: Quality, size_cap: u32, names: &[&str]) -> BakedLib
 /// half-float scratch height target, the Sobel as a fragment shader), and
 /// `sobel` is written to be line-for-line portable to it. Until then this
 /// constant is the honest ceiling, and raising it costs boot time quadratically.
+///
+/// ## What governs the number, and what to measure before moving it
+///
+/// One `bake_library` call at cap `N` costs, per distinct bake key:
+/// `bake_at(N, want_orm: true, want_normal: true)` = **three** `owSurface`
+/// evaluations per texel (the height pass, the albedo pass, the ORM pass) plus
+/// one Sobel pass. Nineteen distinct keys, quadratic in `N`. Scaling the table
+/// above (all nineteen at 512² = 232 s native, `--release`):
+///
+/// ```text
+/// N     nineteen surfaces, native, extrapolated from the 512 measurement
+/// 64      3.6 s      <- today
+/// 96      8.2 s
+/// 128    14.5 s
+/// 192    32.6 s
+/// 256    58   s
+/// ```
+///
+/// Those are **extrapolations, not measurements**, and they are native. The
+/// number that decides this is the **wasm** page boot, which is the only place
+/// the cost is actually paid, and it is not a fixed multiple of native. So:
+///
+/// 1. `RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc cargo test -p axiom-shmup
+///    --lib --release` with a timing probe around `bake_library(Quality::Ultra,
+///    N, &names)` for `N` in 64/96/128/192 gives the native curve and confirms
+///    or corrects the extrapolation above.
+/// 2. The page's own boot is what matters: serve the app and time from
+///    navigation to the first painted frame at each `N`. The build log's compile
+///    time is not this number and must not be substituted for it.
+///
+/// **Do not raise this on the strength of the table alone.** The extrapolation
+/// assumes the 512² measurement was pure surface evaluation; if any per-bake
+/// fixed cost dominates at small `N`, the low end of the curve is wrong in the
+/// optimistic direction.
+///
+/// Note also that this one number caps **two unrelated budgets** — see the
+/// comment at the shared-map bake in [`bake_library`], where the detail tile is
+/// clamped sixteen times below the resolution the source's own comment calls the
+/// minimum, for a cost of one bake rather than nineteen.
 pub const RUNTIME_BAKE_SIZE: u32 = 64;
 
 /// Bake the **albedo** map for each of `names`, capped at `size_cap` — the only

@@ -1,36 +1,47 @@
-//! AI — navigation, perception and squad behaviour.
+//! Ported from Claude-of-Duty `src/ai/` — **the whole directory**.
 //!
-//! Ported from Claude-of-Duty `src/ai/`, this slice only:
-//!
-//! | this module     | source        |
-//! |------------------|----------------|
+//! | this module      | source |
+//! |------------------|--------|
+//! | [`system`]       | `index.js` — `AiSystem`: boot, garrison, LOD, tableaus |
 //! | [`nav`]          | `nav.js` — walkability grid + A* + string pull + cover |
-//! | [`agent`]        | `agent.js` — perception, reaction delay, sound, FSM (not the body) |
+//! | [`agent`]        | `agent.js` — perception, reaction delay, sound, FSM |
 //! | [`squad`]        | `squad.js` — peek tokens, contact sharing, flank/grenade rationing |
 //! | [`grounding`]    | `grounding.js` — contact-shadow placement math (not the draw) |
+//! | [`soldier`]      | `soldier.js` — the variants and their material requests |
+//! | [`parts`]        | `parts.js` — head, torso, webbing, plate, limbs, kit |
+//! | [`geo`]          | `geo.js` — `CharacterBuilder`, the skinned buffer set |
+//! | [`rig`]          | `rig.js` — the bone table |
+//! | [`clips`]        | `clips.js` — the animation clips |
+//! | [`animator`]     | `animator.js` — layered pose blending, IK, weapon anchors |
+//! | [`textures`]     | `textures.js` + `bake.js` — the procedural material bakes |
+//! | [`weapon`]       | `weapon.js` — `buildWeapon(nz, style, rng)`, one geometry builder |
 //!
-//! ## What is deliberately not in this slice
+//! ## What is genuinely not here
 //!
-//! `src/ai/soldier.js`, `parts.js`, `rig.js`, `animator.js`, `clips.js`,
-//! `geo.js`, `textures.js`, `weapon.js` — the character *rendering and
-//! animation* half: skeleton, skinned mesh, layered pose blending, IK,
-//! per-bone hitbox sync, muzzle/tracer/shell events, and the carried weapon
-//! model. A later slice ports those.
+//! * `preview.js` — a dev-only model previewer with its own page, not part of
+//!   the game's frame.
+//! * `bake.js`'s worker-thread scheduling (`SOLDIER_SHARDS`, `only`, `bakeMs`).
+//!   [`textures`] bakes the same ten tiles from the same seeds, synchronously.
+//! * The scene graph. `THREE.Group`, `SkinnedMesh` and the `ai.root` subtree are
+//!   render bookkeeping; [`crate::scene::wiring::soldier_draw`] is this port's
+//!   equivalent and it lives in the composing tier, not here.
 //!
-//! `src/ai/index.js` (`AiSystem`) is also not ported here: it is the
-//! orchestration tier — booting navigation, prewarming character shaders,
-//! spawning and garrisoning the level, the frame-wide events wiring
-//! (`weapon:fire`/`bullet:impact`/`explosion`/`player:footstep`), the
-//! per-frame A* budget rationing (`requestPath`, `pathsPerFrame`), the LOD
-//! relevance sweep, and the staged capture tableaus. It is the natural home
-//! for gluing [`nav`], [`agent`] and [`squad`] together once the deferred
-//! body/animation slice lands and there is a real character to drive; wiring
-//! it prematurely against a bodyless `Agent` would mean inventing behaviour
-//! this port has no source to check against.
+//! ## Where this slice stops, and who carries it the rest of the way
 //!
-//! Every subsystem here that needs the unported body work names the
-//! narrowest trait it actually calls, rather than waiting on the whole
-//! slice — [`grounding::FootSource`] is one bone-position call
+//! Everything above is *behaviour and data*. Two seams remain outside it:
+//!
+//! * [`crate::scene::wiring::ai`] constructs [`system::AiCore`] against the real
+//!   level, physics and camera, and steps it once per frame.
+//! * [`crate::scene::wiring::soldier_draw`] turns [`soldier::SoldierBuild`]'s
+//!   geometry into engine meshes and [`animator::Animator`]'s bones into a joint
+//!   palette. **That file, not this one, is where baked detail is currently
+//!   lost** — per-vertex colour (the baked AO and edge wear), the two detail
+//!   tiles, `normalScale`/`aoMapIntensity` and the rim term are all baked here
+//!   and dropped there. See its module doc for which engine boundary each hits.
+//!
+//! Each subsystem here that needs something it does not own names the narrowest
+//! trait it actually calls, rather than reaching for a whole facade —
+//! [`grounding::FootSource`] is one bone-position call
 //! (`agent.animator.bonePos`); [`agent::Agent`]'s movement decision
 //! ([`agent::Agent::move_step`]) stops short of driving a physics character
 //! controller for the same reason. This mirrors the precedent already set by

@@ -1,13 +1,12 @@
-//! Ported from Claude-of-Duty `src/ai/grounding.js:1-196` — the pure math
-//! only. `grounding.js` is a rendering system top to bottom: two
-//! `THREE.InstancedMesh`es (`body`, `feet`), a `MeshBasicMaterial` pair, and a
-//! `THREE.DataTexture` uploaded to the GPU. None of the engine's rendering
-//! arm exists yet for this port to draw through (see
-//! `docs/work-manifests/shmup-port/05-port-status.md`'s "Render
-//! frame graph" item), so nothing here creates a mesh, a material or a
-//! texture object.
+//! Ported from Claude-of-Duty `src/ai/grounding.js:1-196`.
 //!
-//! What *is* pure data/maths, and is ported faithfully:
+//! `grounding.js` is a rendering system top to bottom: two
+//! `THREE.InstancedMesh`es (`body`, `feet`), a `MeshBasicMaterial` pair, and a
+//! `THREE.DataTexture` uploaded to the GPU. Everything in it that is *data or
+//! arithmetic* is here; the GPU objects are not, because the engine has no
+//! decal or billboard primitive to make them out of.
+//!
+//! What is ported:
 //!
 //! - [`build_texture`] — `buildTexture(size, power)` (`grounding.js:32-56`):
 //!   the radial occlusion sprite's pixel data, a function of `(x, y)` alone.
@@ -21,21 +20,26 @@
 //!   `elements` order. Re-audited: an earlier pass called this part of the
 //!   "upload" and dropped it, but composing the instance matrix is arithmetic,
 //!   not a GPU call, and dropping it left the port's only non-trivial maths
-//!   unported. Only `InstancedMesh.setMatrixAt` /
-//!   `instanceMatrix.needsUpdate` / `mesh.count` / `mesh.visible`
-//!   (`grounding.js:133,137-144`) remain out — those are the GPU upload
-//!   proper, and are the future rendering slice's job, consuming
-//!   [`GroundShadows::end`]'s placements.
+//!   unported.
+//! - [`surface`] — the material and draw flags the quads are drawn *with*
+//!   (`grounding.js:72-87, 107-119`), recorded rather than left in the
+//!   JavaScript for whoever wires the draw to re-derive.
 //!
-//! ## The animator seam
+//! What remains out: `InstancedMesh.setMatrixAt` / `instanceMatrix.needsUpdate`
+//! / `mesh.count` / `mesh.visible` (`grounding.js:133,137-144`) — the GPU
+//! upload proper.
+//!
+//! ## Wired, but not yet drawn
 //!
 //! `addActor` reads a foot bone's world position via `agent.animator.bonePos`
-//! (`grounding.js:159-162`), and `animator.js` is not ported in this slice.
-//! Per the port recipe ("where AI needs something unported... define a
-//! narrow trait and say so"), [`FootSource`] names exactly that one call —
-//! `agent.animator.bonePos('FootR'/'FootL', out)` — so this module is
-//! testable today and a real implementation can bind to the animator once it
-//! lands.
+//! (`grounding.js:159-162`); [`FootSource`] names exactly that one call, and
+//! [`crate::ai::system::AiCore::late_update`] implements it against the real
+//! [`crate::ai::animator::Animator`] and runs `begin()`/`add_actor()` every
+//! frame. So the placements are real and current — and
+//! [`crate::ai::system::AiCore::shadow_placements`] publishes them — but
+//! **nothing consumes them to draw**, which is why the soldiers currently have
+//! no contact shadow under them. That is the last step of this file's port and
+//! it belongs with the other ground-projected effects, in the composing tier.
 
 use crate::jsmath;
 
@@ -82,6 +86,85 @@ pub fn build_texture(size: usize, power: f64) -> Vec<u8> {
 pub const TEXTURE_SIZE: usize = 64;
 pub const BODY_POWER: f64 = 3.4;
 pub const FOOT_POWER: f64 = 4.6;
+/* ================================================================== */
+/* The surface a contact shadow is drawn WITH                         */
+/* ================================================================== */
+
+/// `grounding.js:72-87` — the `MeshBasicMaterial` both instanced meshes share,
+/// and `grounding.js:107-119`'s draw flags.
+///
+/// **These are here because the draw is not.** The engine has no decal or
+/// billboard primitive, so nothing in this repo consumes
+/// [`GroundShadows::end`]'s placements yet
+/// (`crate::scene::wiring::soldier_draw` states the same, and names it as the
+/// pooled camera-facing quad every other ground-projected effect in this port
+/// also needs). Until that primitive lands, a port that carries only the
+/// *placements* is carrying half of `grounding.js`: whoever wires the draw
+/// would have to go back to the JavaScript for the surface, and the failure
+/// modes of guessing it are specific and ugly — an additive blend paints grey
+/// discs on the floor instead of darkening it, a tone-mapped colour drifts with
+/// the exposure the shadow is supposed to be independent of, and a
+/// depth-writing quad z-fights the road it lies on.
+///
+/// So they are recorded, in one place, next to the maths they belong to.
+pub mod surface {
+    /// `new THREE.Color(0.045, 0.05, 0.062)` — linear RGB, and deliberately
+    /// **not** black: a contact shadow is lit by the sky it is occluding less
+    /// of, so it keeps a trace of that sky's blue. Deep, but not a hole.
+    pub const TINT: [f64; 3] = [0.045, 0.05, 0.062];
+
+    /// The body ellipse's `opacity` (`grounding.js:86`).
+    pub const BODY_OPACITY: f64 = 0.62;
+
+    /// A foot lobe's `opacity` (`grounding.js:87`) — tighter and darker than
+    /// the body's, because a sole in contact occludes far more of the sky than
+    /// a pelvis 0.9 m above it.
+    pub const FOOT_OPACITY: f64 = 0.85;
+
+    /// `transparent: true, depthWrite: false, depthTest: true` — it lies *on*
+    /// the road and must not write depth, or the road z-fights it.
+    pub const DEPTH_WRITE: bool = false;
+    pub const DEPTH_TEST: bool = true;
+
+    /// `side: THREE.DoubleSide` — the quad is authored flat and yawed, so a
+    /// camera below the floor plane must still see it rather than have it
+    /// vanish.
+    pub const DOUBLE_SIDED: bool = true;
+
+    /// `toneMapped: false, fog: false` — the darkening is a fixed fraction of
+    /// whatever is under it. Running it through the tone map would make the
+    /// shadow's depth a function of the frame's exposure, and fogging it would
+    /// lighten contact shadows in the distance, which is backwards.
+    pub const TONE_MAPPED: bool = false;
+    pub const FOGGED: bool = false;
+
+    /// `renderOrder = 6` (`grounding.js:112`) — after the opaque world, before
+    /// the FX smoke.
+    pub const RENDER_ORDER: i32 = 6;
+
+    /// `frustumCulled = false` (`grounding.js:109`): one instanced mesh holds
+    /// every actor's quad, so its own bounds are meaningless.
+    pub const FRUSTUM_CULLED: bool = false;
+
+    /// `userData.owNoShadow` / `owNoPrepass` (`grounding.js:115-116`). The
+    /// occlusion quads are the one thing in the frame that must never cast into
+    /// the cascades — a shadow of a shadow — nor occlude the depth prepass.
+    /// `owNoShadow` is the source's ONLY shadow-caster switch (the cascades draw
+    /// with `scene.overrideMaterial` and never consult `mesh.castShadow`); see
+    /// `apps/shmup/ARCHITECTURE.md:194-197`.
+    pub const NO_SHADOW: bool = true;
+    pub const NO_PREPASS: bool = true;
+
+    /// `userData.owProbe` (`grounding.js:114`).
+    pub const PROBE: bool = true;
+
+    /// `capacity = Math.max(4, actors)` with `actors = 12` at the call site;
+    /// the feet mesh is sized `capacity * 2` (`grounding.js:64, 89-90`).
+    pub const DEFAULT_CAPACITY: usize = 12;
+    pub const MIN_CAPACITY: usize = 4;
+    pub const FEET_PER_ACTOR: usize = 2;
+}
+
 
 /// One occlusion quad's placement: world position (already lifted `+0.015 m`
 /// off the floor, matching `_place`'s `y + 0.015`), the facing `yaw`, and the

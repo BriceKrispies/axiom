@@ -739,10 +739,43 @@ pub fn stack_crates(asm: &mut Assembler, rng: &mut Rng, x: f32, y: f32, z: f32, 
 mod tests {
     use super::*;
 
+    /// These tests are about **what `furnish_room` places**, so they run with
+    /// the arena floor policy lifted (`?clutter=1`'s dressing). Furniture is
+    /// ground clutter — every id this file places is in `GROUND_CLUTTER` — so
+    /// under the shipping policy `Assembler::place` discards all of it and
+    /// there would be nothing left to assert about the room's contents. That
+    /// suppression is a separate fact, asserted on its own in
+    /// [`the_arena_floor_policy_discards_every_piece_of_furniture`].
     fn assembler() -> Assembler {
         let mut a = Assembler::new(Rng::new(1));
+        a.clutter = crate::world::clutter::ClutterPolicy::RESTORED;
         crate::world::props::register_props(&mut a, &mut Rng::new(2));
         a
+    }
+
+    /// Under the shipping policy the furniture is gone — but the room's static
+    /// geometry (its floor mat, its shelves' backing, its wall dressing) and,
+    /// crucially, the RNG stream are untouched.
+    #[test]
+    fn the_arena_floor_policy_discards_every_piece_of_furniture() {
+        let mut arena = Assembler::new(Rng::new(1));
+        crate::world::props::register_props(&mut arena, &mut Rng::new(2));
+        let mut rng_arena = Rng::new(7);
+        furnish_room(&mut arena, &mut rng_arena, room("shop"));
+        let out = arena.finalize();
+        assert!(out.instanced.is_empty(), "no furniture survives the arena floor");
+        assert!(out.stats.suppressed > 0, "and the discards are counted");
+
+        // The same pass with the policy lifted: the furniture is back, and the
+        // stream ended in exactly the same place. That equality is the whole
+        // argument — suppression happens at the emit, never at the decision.
+        let mut restored = assembler();
+        let mut rng_restored = Rng::new(7);
+        furnish_room(&mut restored, &mut rng_restored, room("shop"));
+        let back = restored.finalize();
+        assert!(!back.instanced.is_empty());
+        assert_eq!(rng_arena.state(), rng_restored.state(), "the policy moved the stream");
+        assert_eq!(out.stats.static_tris, back.stats.static_tris);
     }
 
     fn small_room(kind: &'static str) -> RoomRect {

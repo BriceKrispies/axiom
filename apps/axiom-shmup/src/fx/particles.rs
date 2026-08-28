@@ -39,6 +39,25 @@
 /// Interleaved record stride, in `f32`s. `particles.js:29` (`STRIDE`).
 pub const STRIDE: usize = 32;
 
+/// The alpha below which the source's fragment shader throws the fragment
+/// away: `float a = tex.a * vCol.a; if ( a < 0.0035 ) discard;`
+/// (`particles.js:190-191`), guarded one line earlier by the stronger
+/// `if ( vCol.a <= 0.0 ) discard;` (`particles.js:188`).
+///
+/// `tex.a` is a coverage channel in `[0, 1]`, so `vCol.a < 0.0035` discards
+/// the fragment whatever texel it lands on — which makes this a bound a CPU
+/// readback can apply without a texture fetch, and the *only* honest one: a
+/// sample under it is not a faint particle, it is a particle the source does
+/// not draw at all.
+///
+/// This is reached on every particle's own birth frame. `PARTICLE_VERT`
+/// fades alpha in over the first 4.5% of life
+/// (`a = aMisc.z * pow(...) * smoothstep( 0.0, 0.045, n )`, `particles.js:159`),
+/// and `smoothstep( 0.0, 0.045, 0.0 )` is exactly zero — so a particle
+/// sampled at the instant it was emitted is invisible by construction, in the
+/// source as much as here.
+pub const DISCARD_ALPHA: f64 = 0.0035;
+
 // Interleaved slot offsets — `particles.js:32-39`.
 const O_PS: usize = 0; // pos.xyz, size0
 const O_VS: usize = 4; // vel.xyz, size1
@@ -205,10 +224,27 @@ impl ParticleLayer {
     /// [`FlushResult::visible`]'s last value rather than `mesh.visible`,
     /// since there is no mesh; see [`ParticleLayer::flush`].
     pub fn active(&self, now: f64) -> bool {
-        now < self.expire_at && (self.wrapped_or_high_water() > 0)
+        now < self.expire_at && (self.instance_count() > 0)
     }
 
-    fn wrapped_or_high_water(&self) -> usize {
+    /// How many ring slots a draw is allowed to touch —
+    /// `geometry.instanceCount = this._wrapped ? this.capacity : this.highWater`
+    /// (`particles.js:430`), set to `0` at construction (`particles.js:286`).
+    ///
+    /// **Every reader of this layer must bound its slot loop by this, never by
+    /// [`ParticleLayer::capacity`].** A slot past it has never been written,
+    /// and a zero-filled record is *not* inert: with `birth = 0` and
+    /// `1/life = 0` it yields `t = now` and `n = t * 0 = 0`, which sails
+    /// straight through the vertex shader's `t < 0.0 || n >= 1.0` early-out
+    /// (`particles.js:99`, ported in [`integrate`]) and reads back as a **live**
+    /// particle sitting at the world origin with `size = 0` and `alpha = 0`.
+    ///
+    /// The source is never exposed to that, and not because the shader guards
+    /// against it — it does not. The GPU simply never runs the vertex shader on
+    /// an instance at or above `instanceCount`. That bound is load-bearing, and
+    /// a CPU readback has to reproduce it explicitly or it invents particles
+    /// that were never emitted.
+    pub fn instance_count(&self) -> usize {
         if self.wrapped {
             self.capacity
         } else {
@@ -334,7 +370,7 @@ impl ParticleLayer {
         self.dirty_lo = usize::MAX;
         self.dirty_hi = None;
 
-        let instance_count = self.wrapped_or_high_water();
+        let instance_count = self.instance_count();
         let visible = now < self.expire_at && instance_count > 0;
         FlushResult {
             dirty_range,
@@ -462,6 +498,73 @@ fn integrate_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The regression the `instance_count` bound exists for.
+    ///
+    /// `integrate` **cannot** tell an unwritten slot from a live one, and that
+    /// is faithful: neither can `PARTICLE_VERT`. A zero-filled record has
+    /// `birth = 0` and `1/life = 0`, so `t = now` and `n = t * 0 = 0`, and the
+    /// shader's `t < 0.0 || n >= 1.0` early-out (`particles.js:99`) passes it
+    /// straight through. The source is protected by `geometry.instanceCount`
+    /// (`particles.js:430`), never by the shader. This pins that the port keeps
+    /// that bound available and honest.
+    #[test]
+    fn an_unemitted_slot_still_integrates_as_a_live_particle() {
+        let mut l = ParticleLayer::new(64, ParticleMode::Lit);
+        assert_eq!(l.instance_count(), 0, "an untouched layer draws nothing");
+
+        let s = ParticleSpawn { life: 1.0, ..ParticleSpawn::default() };
+        l.emit(&s, 0.0);
+        assert_eq!(l.instance_count(), 1, "one emit, one drawable instance");
+
+        // Slot 0 is a real particle, halfway through its life.
+        let real = integrate(&l, 0, 0.5).expect("slot 0 was emitted and is alive");
+        assert!(real.size > 0.0 && real.alpha > 0.0);
+
+        // Slot 1 was never written — and integrates as "alive" anyway. This is
+        // the phantom: at the world origin, with no extent and no alpha.
+        let phantom = integrate(&l, 1, 0.5).expect(
+            "an unwritten slot passes the shader's own early-out; if this ever \
+             returns None the bound below is no longer what protects callers",
+        );
+        assert_eq!(phantom.pos, (0.0, 0.0, 0.0));
+        assert_eq!(phantom.size, 0.0);
+        assert_eq!(phantom.alpha, 0.0);
+
+        // So a caller that respects the bound never sees it, and one that
+        // walks `capacity` sees 63 of them.
+        assert_eq!(
+            (0..l.instance_count())
+                .filter(|&i| integrate(&l, i, 0.5).is_some())
+                .count(),
+            1
+        );
+        assert_eq!(
+            (0..l.capacity)
+                .filter(|&i| integrate(&l, i, 0.5).is_some())
+                .count(),
+            64
+        );
+    }
+
+    /// A particle is invisible on its own birth frame, by construction:
+    /// `smoothstep( 0.0, 0.045, 0.0 )` is zero (`particles.js:159`) and the
+    /// fragment shader discards on it (`particles.js:188`). Any readback that
+    /// reports drawable particles must apply [`DISCARD_ALPHA`].
+    #[test]
+    fn a_particle_has_no_alpha_at_the_instant_it_is_emitted() {
+        let mut l = ParticleLayer::new(16, ParticleMode::Lit);
+        let s = ParticleSpawn { life: 1.0, alpha: 1.0, ..ParticleSpawn::default() };
+        l.emit(&s, 4.0);
+
+        let born = integrate(&l, 0, 4.0).expect("it exists at its own birth time");
+        assert_eq!(born.alpha, 0.0, "the fade-in starts at exactly zero");
+        assert!(born.alpha < DISCARD_ALPHA, "and so the source discards it");
+
+        // One 60 Hz frame later it is genuinely on screen.
+        let next = integrate(&l, 0, 4.0 + 1.0 / 60.0).expect("still alive");
+        assert!(next.alpha > DISCARD_ALPHA, "the fade-in has started");
+    }
 
     #[test]
     fn capacity_is_clamped_to_a_minimum_of_sixteen() {

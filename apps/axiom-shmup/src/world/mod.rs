@@ -1,6 +1,7 @@
 pub mod accum;
 pub mod assembler;
 pub mod buildings;
+pub mod clutter;
 pub mod geo;
 pub mod ground;
 pub mod interiors;

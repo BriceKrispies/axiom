@@ -797,13 +797,32 @@ impl UiCore {
         }
     }
 
-    /// The tail of `init` (`index.js:243-244`): size the HUD to the canvas and
-    /// seed `_prevPos` from the current player position, so the first frame's
-    /// movement bloom does not see a teleport from the origin.
-    pub fn init(&mut self, viewport_w: f64, viewport_h: f64, player_pos: [f64; 3]) {
+    /// The tail of `init` (`index.js:147`, `:243-244`, `:258`): size the HUD to
+    /// the canvas, seed `_prevPos` from the current player position, and seed
+    /// `_lastRaw` from the current raw clock.
+    ///
+    /// Both seeds matter on frame one and both were unseeded until this was
+    /// given a caller ([`crate::scene::wiring::hud::HudRig::frame`]):
+    ///
+    /// * `_prevPos` at the origin makes the first frame measure
+    ///   `speed = |spawn| / dt` — hundreds of m/s for any spawn away from
+    ///   `(0,0,0)` — so `clamp01(speed / 6.2)` saturates and the crosshair
+    ///   opens to full movement bloom on the first painted frame.
+    /// * `_lastRaw` at `0.0` makes the first `rawDt` the **0.1 s clamp**
+    ///   instead of a frame, because `ctx.time.raw` is already well past
+    ///   0.1 s by the time the HUD's first frame runs. Everything damped on
+    ///   `rawDt` — the three-layer HUD fade, the menu fade, the movement
+    ///   bloom — then takes one ~6x oversized step.
+    ///
+    /// `raw_time` is the clock the frame *before* the first `late_update`, so
+    /// that first `rawDt` is one frame rather than zero — which is where the
+    /// source's `init` sits, and which keeps the movement bloom's
+    /// `distance / rawDt` off a zero denominator.
+    pub fn init(&mut self, viewport_w: f64, viewport_h: f64, player_pos: [f64; 3], raw_time: f64) {
         self.resize(viewport_w, viewport_h);
         self.prev_pos = player_pos;
         self.player_pos = player_pos;
+        self.last_raw = raw_time;
     }
 
     /// `_prevPos` — what the movement bloom measures against.

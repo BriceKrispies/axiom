@@ -94,29 +94,56 @@ pub fn shmup_start() {
     // the app-side switch for the whole HDR path.
     // **The scene's photometric scale, and the metering the port does not have.**
     //
-    // Two separate facts, multiplied together.
+    // Two separate factors, multiplied together.
     //
     // FIRST, the scale. `SkyDriver::key_light` divides the sun by
     // `KEY_INTENSITY_FULL_SCALE` because the engine types a light's intensity as
     // a `Ratio`, and that constant's own doc says what it is: *"a stand-in for
-    // the source's exposure path, not a replacement for it."* Nothing put it
-    // back, so every surface reached AgX about eight times under-exposed. The
-    // frame came out dark and over-saturated — the classic "untonemapped"
-    // signature, produced not by a missing tone map but by feeding a correct one
-    // the wrong radiance.
+    // the source's exposure path, not a replacement for it."* Multiplying it
+    // back here is what restores the scene to the scale it was shaded at. Every
+    // other radiance the app authors — the sky's two gradient stops, the sun
+    // disc, the hemisphere ambient, the fog colour — now carries the same
+    // divisor (`look::SCENE_RADIANCE_SCALE`), so this one multiply restores all
+    // of them together and the sun-to-shadow ratio survives it.
     //
     // SECOND, the metering. The source does not carry a fixed exposure at all:
-    // `render/index.js:207` runs an `AutoExposure` — a GPU log-luminance
-    // reduction to EV100, `exposure = 1/H` — re-metered every frame. This port
-    // has no metering pass, so the second factor stands in for one, and it is
-    // **fitted, not derived**: with the scale alone the frame metered a mean
-    // luminance of 119 against the original's 95.7 at this hour, measured on
-    // matched captures with the original running beside it.
+    // `render/index.js:249` runs an `AutoExposure` — a GPU log-luminance
+    // reduction to EV100 (`render/exposure.js:107-118`:
+    // `ev = log2(L * 100/12.5)`, `exposure = keyScale / (1.2 * 2^ev)`, i.e.
+    // `exposure = 1 / (9.6 * L)` for a log-average scene luminance `L`) —
+    // re-metered every frame. This port has no metering pass, so this factor
+    // stands in for one.
     //
-    // Because it is a fit and not a meter, it is correct for THIS hour. Move
-    // `HOUR` and it will drift, and the honest fix at that point is to port
-    // `render/exposure.js` rather than to re-fit this number.
-    const METERING_FIT: f64 = 2.11;
+    // ---- MEASURED, on matched framing ------------------------------------
+    //
+    // `uv run scripts/parity_shot.py hero`, 1280x720, camera PINNED and clock
+    // PINNED against the original's own `hero` shot (`apps/shmup/src/dev/shots.js`,
+    // which also carries `time: 16.5` — the hour `look::HOUR` now matches).
+    //
+    // The fit is not a mean-of-the-frame: the two towns are not byte-identical
+    // (the port draws 1.64x the instances), so a whole-frame mean mixes the
+    // exposure gap with a dressing gap. It is taken on the two regions least
+    // sensitive to dressing — `skyHi`, which is the sky pass and nothing else,
+    // and `sunlit`, a large facade dominated by the key — inverted through AgX's
+    // own curve rather than compared as bytes:
+    //
+    //     contrast(t) = byte / 255      (the composite's `pow(.,2.2)` and the
+    //                                    sRGB encode cancel exactly)
+    //     scene       = 2^(t * 16.5 - 12.47393)
+    //
+    //     region    original -> port      needs
+    //     skyHi      188.89     93.57     +3.101 stops   (x8.578)
+    //     sunlit     175.03     71.98     +3.385 stops   (x10.446)
+    //
+    // Those two agree to 0.28 stop, and that agreement is the load-bearing
+    // result: it says the sky and the key light are on ONE scale to within a
+    // third of a stop, which is what `look::SCENE_RADIANCE_SCALE` exists to
+    // guarantee and what the old double-tone-map destroyed. A missing `PI` there
+    // would show up here as a 1.65-stop disagreement between these two rows.
+    //
+    // So the remaining error is a single global exposure, and the fit is their
+    // geometric mean: `x9.466` on an authored `1.1301`.
+    const METERING_FIT: f64 = 1.348;
     let exposure = (crate::scene::wiring::look::KEY_INTENSITY_FULL_SCALE * METERING_FIT) as f32;
     windowing.set_tonemap(FrameTonemap::blended(
         Ratio::new(1.0).expect("an authored tone-map strength is finite"),
@@ -126,6 +153,9 @@ pub fn shmup_start() {
     windowing.set_material_programs(scene.app.material_surface_programs());
 
     let meshes = scene.app.mesh_set();
+    // The per-mesh triangle table the frame census needs to turn a draw list into
+    // a triangle count. Once, at bind, before the set is handed to the backend.
+    scene.console.borrow_mut().observe_meshes(&meshes);
     let materials = scene.app.material_textures();
     // The bake-once soldier bodies, uploaded at bind alongside the rigid set.
     let skinned_meshes = scene.app.skinned_mesh_set();
@@ -207,15 +237,29 @@ pub fn shmup_start() {
         skinned_source,
         move |tick| {
         let now = performance.now();
-        let dt = (now - last) / 1000.0;
+        // Through the console, not around it: `frame_dt` applies the `dt` pin when
+        // one is installed and, either way, RECORDS what this frame advanced by,
+        // which is what lets `stats` answer `dt_used=` instead of leaving a
+        // harness to assume its pin took. See `DevConsole::frame_dt`.
+        let dt = scene.console.borrow_mut().frame_dt((now - last) / 1000.0);
         last = now;
 
         let pad = crate::input::dom::poll_pad();
         let pose = {
             let mut input = input.borrow_mut();
             input.poll_gamepad(pad);
+            // The console's input pin (`freeze on`). `Input::frozen` was ported
+            // faithfully and then had no writer outside its own tests, so capture
+            // mode existed in the type and could not be entered.
+            input.frozen = scene.console.borrow().frozen();
             scene.game.frame(dt, &mut input)
         };
+        // The scripted camera, for the same reason and in the same shape. Without
+        // this line `cam` is accepted, reported as installed, and moves no pixel —
+        // and a parity harness comparing two different framings is measuring
+        // nothing. `DevConsole::resolve_camera` is the identity when no override
+        // is set, so an ordinary run is unchanged apart from the recorded pose.
+        let pose = scene.console.borrow_mut().resolve_camera(pose);
         write_camera(&mut scene.app, pose);
         // The same three steps `frame` runs. This loop INLINES them rather than
         // calling it, so anything added to `frame` alone silently never runs in
@@ -251,6 +295,25 @@ pub fn shmup_start() {
         scene.soldier_draw.frame(&mut scene.app, &scene.game.ai);
 
         let outcome = scene.app.tick(tick);
+        // The frame census, and with it the only readiness signal this side has:
+        // `__ax_console` is installed before the GPU binds, so a harness waiting
+        // on the global is waiting for nothing, while a non-zero `observed=` is
+        // the first fact that means a frame was actually rendered.
+        scene.console.borrow_mut().observe_frame(&outcome);
+        // `window.__READY__` once three engine frames have run -- the same
+        // BOOT_FRAMES the original uses (`apps/shmup/src/main.js`), so "ready"
+        // means the same thing on both sides of a parity capture. `__ax_console`
+        // is installed BEFORE the GPU binds, so its existence is not a ready
+        // signal and a harness that waits on it is waiting for nothing.
+        (scene.console.borrow().frames_observed() >= 3).then(|| {
+            web_sys::window().map(|w| {
+                js_sys::Reflect::set(
+                    &w,
+                    &wasm_bindgen::JsValue::from_str("__READY__"),
+                    &wasm_bindgen::JsValue::TRUE,
+                )
+            })
+        });
         // The id overlay. Off unless `window.__ax_console("ids on")` has run, in
         // which case `labels` is empty and this is one `Vec` allocation a frame.
         let labels = console_frame.borrow().labels(

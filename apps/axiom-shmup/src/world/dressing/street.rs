@@ -27,17 +27,46 @@ pub fn dress_street(asm: &mut Assembler, rng: &mut Rng) {
     // would shift every subsequent position in the level and walk props into
     // the shot cameras' keepout zones.
     asm.jitter = Some(jitter_rig());
-    market_stalls(asm, rng);
-    barriers(asm, rng);
-    sandbag_emplacements(asm, rng);
-    wrecks(asm, rng);
-    palms(asm, rng);
+
+    // WHOLE SET-PIECES THE ARENA DRESSING REMOVES (`dressing.js:348-372`).
+    //
+    // Each of these builds a composite: a suppressible prototype plus raw
+    // geometry that has no id — a stall's canopy and valance, a wreck's body
+    // slab, a rubble pile's mound. Suppressing only the prototype left the raw
+    // half behind, floating where its support used to be.
+    // [`Assembler::muted`] runs the builder and swallows everything it emits,
+    // so the set-piece disappears whole AND the shared RNG stream advances
+    // exactly as it always did — which is what keeps every other set-piece in
+    // the same place. See `crate::world::clutter`.
+    //
+    // `const drop = (fn) => A.muted(() => fn(A, rng));` (`dressing.js:359`),
+    // spelled as a macro because a Rust closure taking `&mut Assembler` cannot
+    // also hold the `&mut Rng` the pass needs.
+    //
+    // **Unconditional, as in the source.** `drop()` does not consult
+    // `isSuppressed`/`suppresses`, so `?clutter=1` restores the individually
+    // suppressed props (the debris scatter, the interiors, the seam stones,
+    // the skirts, the road marks) but NOT these eight set-pieces. That is the
+    // original's behaviour, transcribed rather than improved: the switch is a
+    // side-by-side comparison aid, and the composites are the half of the
+    // policy the source chose to make permanent.
+    macro_rules! drop_set_piece {
+        ($pass:ident) => {
+            asm.muted(|a| $pass(a, rng))
+        };
+    }
+
+    drop_set_piece!(market_stalls);
+    drop_set_piece!(barriers);
+    drop_set_piece!(sandbag_emplacements);
+    drop_set_piece!(wrecks);
+    drop_set_piece!(palms);
     street_lamps(asm, rng);
     overhead_lines(asm, rng);
     facade_hangings(asm, rng);
-    rubble_piles(asm, rng);
-    tyre_stacks(asm, rng);
-    cover_clusters(asm, rng);
+    drop_set_piece!(rubble_piles);
+    drop_set_piece!(tyre_stacks);
+    drop_set_piece!(cover_clusters);
     street_floor(asm, rng);
     asm.jitter = None;
 }

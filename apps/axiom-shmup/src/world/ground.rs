@@ -39,9 +39,19 @@ use crate::world::accum::AccumAddOpts;
 use crate::world::assembler::Assembler;
 use crate::world::geo::WorldGeo;
 use crate::world::kit::{chamfer_box, cylinder_geometry, patch_geometry, plane_geometry, trs};
-use crate::world::layout::{ALLEYS, STREET};
+use crate::world::layout::{road_y, ALLEYS, STREET};
 use crate::world::noise::fbm3;
 use crate::world::palette::Surface;
+
+/// **How far a flat decal sits above the surface it is painted on**
+/// (`ground.js:15-24`).
+///
+/// Two millimetres: enough to beat depth precision at this scale, little
+/// enough that the decal reads as painted on rather than laid over. The old
+/// values here were 42-50 mm, which is a hand's width of air under a dust
+/// patch — invisible when the road was covered in rubble, and a floating disc
+/// once it was not.
+pub const DECAL_LIFT: f64 = 0.002;
 
 /// `BOX`/`BOX_SOFT` (`kit.js:54,56`) — cached chamfered-box providers.
 /// `kit.js`'s modular building kit is out of this port's scope (see
@@ -96,7 +106,9 @@ pub fn build_ground(asm: &mut Assembler, rng: &mut Rng) {
     for i in 0..road.vert_count() {
         let x = f64::from(road.pos[i * 3]);
         let z = f64::from(road.pos[i * 3 + 2]);
-        let camber = (1.0 - (x / hw).powi(2)) * 0.055;
+        // `roadY(x)` (`ground.js:60`) — the same value the hand-written
+        // formula produced, now from the one definition.
+        let camber = road_y(x, 0.0);
         let wear = (fbm3(x * 0.55 + 3.0, 2.2, z * 0.35, 3) - 0.5) * 0.07;
         let rut = -((-((x.abs() - 1.6).powi(2)) / 0.5).exp()) * 0.022;
         road.pos[i * 3 + 1] = (camber + wear + rut) as f32;
@@ -121,7 +133,8 @@ pub fn build_ground(asm: &mut Assembler, rng: &mut Rng) {
             rng.range(-hw + 0.5, hw - 0.5)
         };
         let z = rng.range(z_min + 2.0, z_max - 2.0);
-        let camber = (1.0 - (x / hw).powi(2)) * 0.055 + 0.042;
+        // `roadY(x, DECAL_LIFT)` (`ground.js:84`), was `+ 0.042`.
+        let camber = road_y(x, DECAL_LIFT);
         let radius = rng.range(0.45, 1.1);
         let g = patch_geometry(rng, radius, 11, 0.5, 0.0);
         let ry = rng.float() as f32 * 0.4;
@@ -212,7 +225,8 @@ pub fn build_ground(asm: &mut Assembler, rng: &mut Rng) {
         let y = if against_wall {
             wh + 0.012
         } else if x.abs() < hw {
-            (1.0 - (x / hw).powi(2)) * 0.055 + 0.05
+            // `roadY(x, DECAL_LIFT)` (`ground.js:254`), was `+ 0.05`.
+            road_y(x, DECAL_LIFT)
         } else {
             wh + 0.01
         };
@@ -230,7 +244,8 @@ pub fn build_ground(asm: &mut Assembler, rng: &mut Rng) {
         let z = rng.range(z_min + 3.0, z_max - 3.0);
         let ry = rng.float() as f32 * 6.28;
         let sz = rng.range(0.4, 0.9);
-        let y = (1.0 - (px / hw).powi(2)) * 0.055 + 0.048;
+        // `roadY(px, DECAL_LIFT)` (`ground.js:267`), was `+ 0.048`.
+        let y = road_y(px, DECAL_LIFT);
         let m = trs(px as f32, y as f32, z as f32, ry, 1.0, 1.0, sz as f32, 0.0, 0.0);
         asm.add_once("dirt", &g, Some(&m), Some(AccumAddOpts { masks: Some([0.1, 0.85, 0.5]), paint: None }));
     }
@@ -248,7 +263,13 @@ pub fn build_ground(asm: &mut Assembler, rng: &mut Rng) {
             g
         });
         let ry = rng.float() as f32 * 6.28;
-        let m = trs(x as f32, (0.035 + (1.0 - (x / hw).powi(2)) * 0.05) as f32, z as f32, ry, 1.0, 1.0, 1.0, 0.0, 0.0);
+        // Seated, not sitting on top (`ground.js:283-286`): the cylinder is
+        // 4 cm thick and centred, so placing its CENTRE 1.2 cm below the
+        // surface leaves 8 mm of rim proud and buries the rest. It used to be
+        // centred 3.5 cm ABOVE the road — and on a DIFFERENT camber
+        // coefficient (0.05 against the road's 0.055), so it also drifted off
+        // the crown across the road's width.
+        let m = trs(x as f32, road_y(x, -0.012) as f32, z as f32, ry, 1.0, 1.0, 1.0, 0.0, 0.0);
         asm.add("metal_dark", &ring, Some(&m), None);
     }
     for &side in &[-1.0f64, 1.0] {
@@ -329,10 +350,32 @@ mod tests {
     #[test]
     fn road_camber_peaks_at_the_crown_and_vanishes_at_the_kerb() {
         let hw = STREET.half_width;
-        let camber = |x: f64| (1.0 - (x / hw).powi(2)) * 0.055;
-        assert!((camber(0.0) - 0.055).abs() < 1e-12);
-        assert!(camber(hw).abs() < 1e-9);
-        assert!(camber(0.0) > camber(hw / 2.0));
+        assert!((road_y(0.0, 0.0) - 0.055).abs() < 1e-12);
+        assert!(road_y(hw, 0.0).abs() < 1e-9);
+        assert!(road_y(0.0, 0.0) > road_y(hw / 2.0, 0.0));
+    }
+
+    /// The decal lift is 2 mm, not the 42-50 mm the pre-policy code used, and
+    /// it is the SAME lift at every road-decal site (`ground.js:15-24`).
+    #[test]
+    fn a_road_decal_sits_two_millimetres_above_the_road_surface() {
+        for x in [-4.0f64, -1.3, 0.0, 2.2, 4.4] {
+            assert!((road_y(x, DECAL_LIFT) - road_y(x, 0.0) - 0.002).abs() < 1e-15);
+        }
+    }
+
+    /// A manhole cover is SEATED: its centre is 1.2 cm below the road, so
+    /// 8 mm of a 4 cm-thick ring stands proud (`ground.js:283-286`). The old
+    /// placement centred it 3.5 cm above the road — a floating puck.
+    #[test]
+    fn a_manhole_cover_is_seated_below_the_road_not_floating_above_it() {
+        let half_thickness = 0.04 / 2.0;
+        for x in [-2.5f64, 0.0, 2.5] {
+            let centre = road_y(x, -0.012);
+            assert!(centre < road_y(x, 0.0), "the cover's centre is under the road");
+            let proud = centre + half_thickness - road_y(x, 0.0);
+            assert!((proud - 0.008).abs() < 1e-15, "8 mm of rim proud, got {proud}");
+        }
     }
 
     #[test]

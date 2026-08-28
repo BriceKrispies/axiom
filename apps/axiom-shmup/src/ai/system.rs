@@ -2309,6 +2309,27 @@ impl AiCore {
         out
     }
 
+    /// `debugStage(name)`. `index.js:1107-1109` — the dispatcher.
+    ///
+    /// This is the AI's whole capture-facing API, and it is the reason the
+    /// tableau below is reachable at all: every caller in the source passes a
+    /// *name* (`dev/shots.js:81`, `core/prewarm.js:493` and `:654`,
+    /// `tools/profile.mjs:68`, `ai/aicost.mjs:38`), and one of them
+    /// (`prewarm.js:654`) passes `'none'` **specifically to hit the no-op
+    /// path** — it is how the prewarm harness asks for a frame with no staged
+    /// combat in it. Porting only the `'firefight'` body, as this file did,
+    /// left that vocabulary inexpressible and left the module doc's promise of
+    /// `ai.debugStage('firefight')` implemented by nothing.
+    ///
+    /// `None` is the source's `return this.stats`: nothing was staged, so there
+    /// is no time-of-day to push. `Some(hour)` is the write into `sky` that
+    /// [`AiCore::debug_stage_firefight`] hands back rather than makes — the
+    /// caller applies it (`index.js:1116`'s
+    /// `ctx.peek('sky')?.setTimeOfDay?.(17.9)`).
+    pub fn debug_stage(&mut self, name: &str) -> Option<f64> {
+        (name == "firefight").then(|| self.debug_stage_firefight())
+    }
+
     /// `debugStage('firefight')`. `index.js:980-1054`.
     ///
     /// A staged firefight in front of the shot camera: one man up and firing

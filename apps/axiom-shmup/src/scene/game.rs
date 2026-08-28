@@ -106,6 +106,31 @@ pub struct Game {
     /// rather than dropped, which is why all 46 keys used to share one
     /// hand-authored surface.
     pub materials: crate::scene::wiring::look::MaterialLook,
+    /// **The three subsystem streams this port forks but does not yet spend.**
+    ///
+    /// `core/engine.js:143-145` runs one prepare pass over `registry.resolve()`
+    /// order and every subsystem forks the root stream there. Three of those
+    /// subsystems have no live consumer inside `Game`, and their forks are held
+    /// here rather than dropped: the *position* of a draw in the root sequence
+    /// is what seeds everything after it, so a fork nobody spends is still part
+    /// of the level. `crate::player::system::PlayerCore::rng` documents the same
+    /// contract one level down.
+    ///
+    /// `render/index.js:142-145`, the FIRST draw of the sequence. The source
+    /// spends it on `new RenderProbeScene(this.rng.fork())`
+    /// (`render/index.js:515`); this port has no probe scene.
+    pub render_rng: Rng,
+    /// `physics/index.js:252-255`, handed straight to `this.ballistics.rng`
+    /// (`index.js:260`) and read by every spread and ricochet draw
+    /// (`index.js:724`, `:816`, `:1029`).
+    /// [`crate::physics::system::PhysicsCore::set_rng`] is where this belongs;
+    /// `Game` drives [`PhysicsWorld`] -- the BVH query facade -- instead, so the
+    /// stream waits here until the ballistics arm is wired.
+    pub physics_rng: Rng,
+    /// `player/index.js:153-156`. Never read anywhere in `player/index.js`;
+    /// dead computation in the source is still part of the source.
+    pub player_rng: Rng,
+
     pub time: Time,
 
     /// The fixed-step accumulator (`engine.js:271`).
@@ -184,20 +209,72 @@ impl Game {
         let mut root = Rng::new(seed);
         checkpoint("start", root.state());
 
-        // **The source's init order, from `core/registry.js`'s topological sort:**
-        // `render, materials, sky, physics, world, player, weapons, fx, ai, ui,
-        // audio`. `materials` and `sky` draw nothing; every other slot forks
-        // once. The constructors below sit in that order, because a subsystem
-        // built in the wrong place silently reshuffles every later value in the
-        // level.
+        // **THE PREPARE PASS - `core/engine.js:143-145`, draw for draw.**
         //
-        // One honesty note: the port's stream cannot match the source's in
-        // ABSOLUTE terms, because `build_level` takes two forks where
-        // `world/index.js:91` takes one — a borrow-checker workaround recorded
-        // at `level.rs:158`. What this ordering buys is that the subsystems stay
-        // consistent with each other and with themselves across runs.
+        // ```js
+        // boot.time('engine.prepare', () => {
+        //   for (const sys of order) sys.prepare?.(this.ctx);
+        // });
+        // ```
+        //
+        // Every subsystem's `prepare(ctx)` is the same two lines - fork the root
+        // stream once, keep the fork - and `core/registry.js`'s topological sort
+        // fixes the order they run in:
+        //
+        // | slot | name      | source                     | draws |
+        // |------|-----------|----------------------------|-------|
+        // |  1   | render    | `render/index.js:144`      | 1 |
+        // |  2   | materials | *(no `prepare`)*           | 0 |
+        // |  3   | sky       | *(no `prepare`)*           | 0 |
+        // |  4   | physics   | `physics/index.js:254`     | 1 |
+        // |  5   | world     | `world/index.js:126`       | 1 |
+        // |  6   | player    | `player/index.js:155`      | 1 |
+        // |  7   | weapons   | `weapons/index.js:147,158` | 2 |
+        // |  8   | fx        | `fx/index.js:53`           | 1 |
+        // |  9   | ai        | `ai/index.js:68`           | 1 |
+        // | 10   | ui        | `ui/index.js:78`           | 1 |
+        // | 11   | audio     | `audio/index.js:139`       | 1 |
+        //
+        // Ten draws, in that sequence. `apps/shmup/tools/rngprobe.mjs --trace`
+        // prints exactly this list off the running original, and
+        // `apps/shmup/tools/rng-golden.json` pins where the root stream lands
+        // afterwards.
+        //
+        // **The POSITION of a draw is the whole seed contract** - see
+        // `apps/shmup/ARCHITECTURE.md`, "prepare(ctx) - claim your seed", and
+        // the long comment at `core/engine.js:120-142` explaining why hoisting
+        // the forks out of `init()` was only legal because the *sequence* came
+        // with them. A subsystem this port has not wired still has to take its
+        // draw, or every seed after it shifts and the port grows a different
+        // town. Until this pass existed the port's world was fork #1 where the
+        // source's is #3, so no screenshot of the two could be compared.
+        //
+        // The source splits the fork from the construction (a prepare pass, then
+        // an init pass) and this follows it: where a fork and the object it
+        // belongs to cannot be built at the same moment - `physics` needs the
+        // BVH the `world` slot has not produced yet - the fork is taken here at
+        // its slot and the object is built below.
+
+        // 1 - render. `render/index.js:142-145`.
+        let render_rng = root.fork();
+        checkpoint("render", root.state());
+
+        // 4 - physics. `physics/index.js:252-255`. Slots 2 (`materials`) and 3
+        // (`sky`) have no `prepare` and draw nothing, so nothing sits between.
+        let physics_rng = root.fork();
+        checkpoint("physics", root.state());
+
+        // 5 - world. `world/index.js:124-127`; the fork itself is taken inside
+        // `WorldSystem::init`, which `build_level` delegates to.
         let level = build_level(&mut root);
         checkpoint("world", root.state());
+
+        // 6 - player. `player/index.js:153-156`. Before `weapons`, and that is
+        // load-bearing: it is what puts the two weapon forks at #5 and #6 of the
+        // root sequence.
+        let player_rng = root.fork();
+        checkpoint("player", root.state());
+
         let physics = PhysicsWorld::new(level.world.clone());
 
         // `physics.createCharacter({...})` — `movement.js:141-149`'s dimensions.
@@ -228,7 +305,7 @@ impl Game {
         let mut rig = CameraRig::new(config.fov);
         rig.reset(STAND.eye);
 
-        // sky (slot 3) and materials (slot 2) draw no RNG, so their position
+        // Slots 3 (`sky`) and 2 (`materials`) draw no RNG, so their position
         // here is free; they sit before the forking slots to match the source.
         let sky = crate::scene::wiring::look::SkyDriver::new(
             config.quality,
@@ -260,6 +337,9 @@ impl Game {
             config,
             level,
             physics,
+            render_rng,
+            physics_rng,
+            player_rng,
             movement,
             rig,
             hud,
@@ -874,21 +954,27 @@ mod tests {
         );
     }
 
-    /// **The construction order IS the level, so it is pinned here.**
+    /// **The root stream is pinned against the ORIGINAL, not against itself.**
     ///
-    /// Every subsystem forks the root stream once at init, and
-    /// `crate::registry::Registry` records that its topological sort breaks ties
-    /// on insertion order — so two independent systems swapping places changes
-    /// the world. Nothing else would catch it: the build succeeds, the frame
-    /// renders, and the buildings are somewhere else.
+    /// This test used to assert the port's own numbers, which made it a
+    /// regression guard and nothing more: the port forked `world` first where
+    /// the source forks it third, and a test written from the port's output
+    /// agreed with the defect. The oracle is
+    /// `apps/shmup/tools/rng-golden.json` and the live trace that produced it
+    /// (`node tools/rngprobe.mjs --trace`, run from `apps/shmup`).
     ///
-    /// This exists so the composition root can be MOVED. Whatever drives these
-    /// systems — the hand-rolled `Game` today, `registry::Registry` after — has
-    /// to reproduce this sequence exactly, and this fails loudly when it does
-    /// not. The order itself is `core/registry.js`'s topological sort, minus
-    /// the slots that draw nothing (`materials`, `sky`).
+    /// The values below are the root stream's four state words after each of
+    /// the source's ten prepare-pass draws, computed from `Rng::new(0x5eed1234)`
+    /// - the seed `engine.js:35` uses when `config.deterministic`, which is
+    /// `?capture=1` only (`main.js:38`, `:71`). They are anchored at both ends:
+    /// `start` is the seeded state before any draw, and the final `audio` row is
+    /// **literally `rng-golden.json`'s `root` key**,
+    /// `302843209,3700148001,543641753,221195564` - the state the original's
+    /// root is left in once its boot has taken all ten forks. A port that
+    /// reaches that value has drawn the same number of times, in the same
+    /// places, as the original.
     #[test]
-    fn the_root_stream_is_consumed_in_the_registrys_order() {
+    fn the_root_stream_is_consumed_in_the_sources_order() {
         let mut seen: Vec<(String, [u32; 4])> = Vec::new();
         Game::new_observed(CAPTURE_SEED, &mut |slot, state| {
             seen.push((slot.to_owned(), state));
@@ -896,25 +982,147 @@ mod tests {
         let order: Vec<&str> = seen.iter().map(|(s, _)| s.as_str()).collect();
         assert_eq!(
             order,
-            vec!["start", "world", "weapons", "fx", "ai", "ui", "audio"],
-            "the root stream was consumed in a different order — the level moved"
+            vec![
+                "start", "render", "physics", "world", "player", "weapons", "fx", "ai", "ui",
+                "audio"
+            ],
+            "the root stream was consumed in a different order - the level moved"
         );
-        // The states themselves, not only the order: a subsystem that starts
-        // drawing a different NUMBER of values leaves the sequence intact and
-        // the world different, and the names alone would not see it.
+        // The states themselves, not only the order: a subsystem that draws a
+        // different NUMBER of values leaves the sequence of names intact and the
+        // world different, and the names alone would not see it. `weapons` is
+        // the one slot that advances by two (`weapons/index.js:147` and `:158`).
         let states: Vec<[u32; 4]> = seen.iter().map(|(_, s)| *s).collect();
         assert_eq!(
             states,
             vec![
+                // draw 0 - `new Rng(0x5eed1234)`, before the prepare pass.
                 [1408721277, 2042729634, 265063393, 2021161881],
+                // 1 - render   (`render/index.js:144`)
                 [1380879942, 637173310, 3742543516, 3480868877],
+                // 2 - physics  (`physics/index.js:254`)
+                [3100452981, 2829475556, 2040552666, 489791316],
+                // 3 - world    (`world/index.js:126`)
                 [224061893, 1774922315, 2379267247, 3188557228],
+                // 4 - player   (`player/index.js:155`)
                 [3667674658, 3913383713, 383697770, 897531582],
-                [111282109, 621017705, 1320994632, 4060937953],
+                // 5,6 - weapons + viewmodel (`weapons/index.js:147`, `:158`)
                 [3517776693, 1830632092, 1340740341, 2015643320],
+                // 7 - fx       (`fx/index.js:53`)
                 [3298066193, 4082772828, 2754750912, 3420528809],
+                // 8 - ai       (`ai/index.js:68`)
+                [4230968548, 2482797965, 3572559569, 3630148037],
+                // 9 - ui       (`ui/index.js:78`)
+                [3079446700, 3139692472, 3492053045, 513950301],
+                // 10 - audio   (`audio/index.js:139`) == rng-golden.json `root`
+                [302843209, 3700148001, 543641753, 221195564],
             ],
             "a subsystem drew a different number of values from the root stream"
+        );
+    }
+
+    /// The last row above, stated on its own against the golden file's `root`
+    /// key, because it is the single assertion that is an ORACLE rather than a
+    /// derivation: `apps/shmup/tools/rng-golden.json` is a committed capture of
+    /// the original's boot, and this is the number in it.
+    #[test]
+    fn the_root_stream_ends_where_the_sources_golden_says_it_does() {
+        let mut last = [0u32; 4];
+        Game::new_observed(CAPTURE_SEED, &mut |_, state| last = state);
+        assert_eq!(
+            last,
+            [302_843_209, 3_700_148_001, 543_641_753, 221_195_564],
+            "apps/shmup/tools/rng-golden.json, key `root`"
+        );
+    }
+
+    /// The world's own stream, which is the point of the whole ordering: the
+    /// level is generated from the root's THIRD fork. The four words are
+    /// `new Rng(root.u32())` taken after two prior draws - the state
+    /// `WorldSystem` starts from in the original.
+    #[test]
+    fn the_world_generator_starts_from_the_sources_third_fork() {
+        let mut root = Rng::new(CAPTURE_SEED);
+        root.u32(); // render
+        root.u32(); // physics
+        let world = root.fork();
+        assert_eq!(
+            world.state(),
+            [2_835_107_428, 3_288_565_564, 3_792_338_184, 2_967_788_734],
+            "the world fork moved"
+        );
+        // And `Game` really reaches that stream position before building the
+        // level: its `world` checkpoint is the root state after three draws.
+        let mut at_world = None;
+        Game::new_observed(CAPTURE_SEED, &mut |slot, state| {
+            if slot == "world" {
+                at_world = Some(state);
+            }
+        });
+        assert_eq!(
+            at_world,
+            Some([224_061_893, 1_774_922_315, 2_379_267_247, 3_188_557_228])
+        );
+    }
+
+    /// **The witness: does this port generate the ORIGINAL town?**
+    ///
+    /// `apps/shmup/tools/rng-golden.json`, key `witness`, is a committed
+    /// snapshot of what the source produced in capture mode:
+    /// `staticTris 585630`, `instances 308`, `drawCalls 62`. It is the only
+    /// end-to-end oracle for the seeding: the fork order can be right and the
+    /// geometry still wrong, and only these counts tell the two apart.
+    ///
+    /// Two of the three are asserted here because two of the three are exact.
+    /// Measured in one binary, building the same level from two stream
+    /// positions:
+    ///
+    /// | root fork | staticTris | instances | drawCalls |
+    /// |-----------|-----------|-----------|-----------|
+    /// | #1 (the old, wrong slot) | 584465 | 295 | 56 |
+    /// | #3 (the source's slot)   | 585336 | **308** | **62** |
+    /// | `rng-golden.json`        | 585630 | **308** | **62** |
+    ///
+    /// The placement counts land on the golden the moment the world generator
+    /// draws from the right fork, which is the strongest available evidence
+    /// that the seeding is now the source's. `staticTris` does not, and that
+    /// residue is a *geometry* defect rather than a seeding one - see
+    /// `the_static_triangle_count_still_falls_short` below.
+    #[test]
+    fn the_generated_level_matches_the_sources_witness() {
+        let game = Game::new(CAPTURE_SEED);
+        assert_eq!(
+            (game.level.instances, game.level.draw_calls),
+            (308, 62),
+            "witness drift: instances/drawCalls against rng-golden.json"
+        );
+    }
+
+    /// **THE OPEN SECOND DEFECT — 294 static triangles missing.**
+    ///
+    /// With the fork order corrected the port's merged static geometry comes to
+    /// `585336` triangles against the golden's `585630`: a shortfall of 294,
+    /// 0.05%. Every instanced placement matches exactly, so this is not a
+    /// reseed - the same passes run in the same order off the same stream and
+    /// one of them emits slightly less merged geometry than the source's.
+    ///
+    /// Ignored rather than left red because the world generator
+    /// (`crate::world`) is under active change and this number moves with it;
+    /// un-ignore it to work the defect:
+    ///
+    /// ```text
+    /// cargo test -p axiom-shmup --lib the_static_triangle_count -- --ignored
+    /// ```
+    ///
+    /// It is recorded here rather than in prose so it cannot be forgotten: the
+    /// port does not generate the source's town until this passes.
+    #[test]
+    #[ignore = "open defect: 294 static triangles short of rng-golden.json's witness"]
+    fn the_static_triangle_count_still_falls_short() {
+        let game = Game::new(CAPTURE_SEED);
+        assert_eq!(
+            game.level.static_tris, 585_630,
+            "apps/shmup/tools/rng-golden.json, witness.staticTris"
         );
     }
 

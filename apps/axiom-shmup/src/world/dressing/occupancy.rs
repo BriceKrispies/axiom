@@ -10,7 +10,8 @@ use crate::rng::Rng;
 use crate::world::accum::AccumAddOpts;
 use crate::world::assembler::{Assembler, Jitter};
 use crate::world::kit::{ll, patch_geometry};
-use crate::world::layout::{ALLEYS, BUILDINGS, STREET};
+use crate::world::clutter::Category;
+use crate::world::layout::{road_y, ALLEYS, BUILDINGS, STREET};
 
 // --------------------------------------------------------------- occupancy --
 /// `inBuilding(x, z, m = 0.3)` (`dressing.js:49-61`): true inside (or within
@@ -38,7 +39,11 @@ pub fn is_open(x: f64, z: f64, m: f64) -> bool {
 /// cambered.
 pub fn ground_y(x: f64, z: f64) -> f64 {
     if x.abs() < STREET.half_width {
-        return (1.0 - (x / STREET.half_width).powi(2)) * 0.055 + 0.004;
+        // `roadY(x, 0.004)` (`dressing.js:81`). The road is cambered; props
+        // placed at y=0 sink into the crown by 5 cm. Value-identical to the
+        // formula this replaced — it is the same numbers, from the one
+        // definition (`crate::world::layout::road_y`).
+        return road_y(x, 0.004);
     }
     if x.abs() < STREET.kerb && z > STREET.z_min && z < STREET.z_max {
         return STREET.walk_h;
@@ -172,7 +177,24 @@ const PEBBLES: [&str; 6] = ["rock_b", "rock_b", "brick_b", "cinder", "rock_a", "
 /// left-to-right, so the `LL(...)` calls below consume `rng.range(0, 0.005)`
 /// → `rng.float()` → `rng.range(0.7, 1.0)` in that order, interleaved with
 /// the `patchGeometry` draws exactly as sequenced here.
+///
+/// ## Muted by the arena floor policy
+///
+/// With the props gone these are stains with no object
+/// ([`Category::Skirts`]). **Muted rather than skipped** so every random draw
+/// below still happens and nothing downstream of it moves — see
+/// [`crate::world::clutter`]. `dressing.js:96-104` splits this into a
+/// `groundSkirt` gate and a `_groundSkirt` body for the same reason; here the
+/// gate is the first two lines and the body is the rest.
 pub fn ground_skirt(asm: &mut Assembler, rng: &mut Rng, x: f64, y: f64, z: f64, radius: f64, opts: SkirtOpts) {
+    if asm.clutter.suppresses(Category::Skirts) {
+        return asm.muted(|a| ground_skirt_body(a, rng, x, y, z, radius, opts));
+    }
+    ground_skirt_body(asm, rng, x, y, z, radius, opts);
+}
+
+/// `_groundSkirt(A, rng, x, y, z, radius, opts)` (`dressing.js:106-140`).
+fn ground_skirt_body(asm: &mut Assembler, rng: &mut Rng, x: f64, y: f64, z: f64, radius: f64, opts: SkirtOpts) {
     let r = radius * rng.range(1.15, 1.55);
     let g = patch_geometry(rng, r, 11, 0.5, 0.0);
     let y0 = y + 0.011 + rng.range(0.0, 0.005);

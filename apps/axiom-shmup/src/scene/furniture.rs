@@ -231,8 +231,22 @@ mod tests {
     use crate::rng::Rng;
     use crate::world::props::register_props;
 
+    /// Built with the arena floor policy lifted
+    /// ([`crate::world::clutter::ClutterPolicy::RESTORED`]).
+    ///
+    /// Every prototype this placeholder pass names — `jersey`, the sandbags,
+    /// `tyre`, `palm_trunk`/`palm_frond`, `stall`, `crate_a`, `barrel_rust` —
+    /// is in `GROUND_CLUTTER`, so under the shipping policy
+    /// `Assembler::place` discards all of it and these tests would be
+    /// asserting counts of zero. That is not a defect in this pass: it is the
+    /// policy doing exactly its job, and this file is the labelled placeholder
+    /// its own module doc says to **delete** now that `world::dressing` has
+    /// landed (nothing outside these tests calls
+    /// [`place_street_furniture`]). Lifting the policy keeps the tests
+    /// meaningful for as long as the file survives.
     fn assembler_with_props() -> Assembler {
         let mut asm = Assembler::new(Rng::new(1));
+        asm.clutter = crate::world::clutter::ClutterPolicy::RESTORED;
         let mut rng = Rng::new(20260818);
         register_props(&mut asm, &mut rng);
         asm

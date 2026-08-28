@@ -419,7 +419,16 @@ pub mod view {
             let root = dom::el("div", Some("ow-layer"), Some(parent));
             let obj_nodes: Vec<ObjNode> = (0..6).map(|_| build_objective(&root)).collect();
             let nade_nodes: Vec<NadeNode> = (0..4).map(|_| build_nade(&root)).collect();
-            let dn_nodes: Vec<Element> = (0..16).map(|_| dom::el("div", Some("ow-dn"), Some(&root))).collect();
+            // `Pool`'s constructor hides every node it builds
+            // (`util.js:174`); `build_objective`/`build_nade` do the same, the
+            // damage numbers were the one pool that missed it.
+            let dn_nodes: Vec<Element> = (0..16)
+                .map(|_| {
+                    let n = dom::el("div", Some("ow-dn"), Some(&root));
+                    dom::set_display(&n, "none");
+                    n
+                })
+                .collect();
             WorldMarkersView { core: WorldMarkers::new(obj_nodes, 4, 16, rng), root, nade_nodes, dn_nodes }
         }
 
@@ -449,7 +458,16 @@ pub mod view {
             dom::set_display(&node.chevron, if frame.edge { "" } else { "none" });
             dom::set_style(&node.letter, "opacity", if frame.edge { "0" } else { "1" });
             if frame.edge {
-                dom::set_attr(&node.chevron, "transform", &format!("rotate({:.1}deg)", frame.chevron_rotation_deg));
+                // `markers.js:162` writes a **CSS** transform
+                // (`setStyle(node._chev, 'transform', …)`), not the SVG
+                // presentation attribute. The attribute's grammar is a
+                // `<transform-list>` of bare numbers, so `rotate(137.4deg)`
+                // is a parse error the browser discards — and `chevron()`
+                // builds an outermost `<svg>`, where a `transform` attribute
+                // was not even valid before SVG 2. Written as an attribute the
+                // chevron never rotated: every off-screen objective's edge
+                // marker pointed straight up instead of at its target.
+                dom::set_style(&node.chevron, "transform", &format!("rotate({:.1}deg)", frame.chevron_rotation_deg));
             }
             dom::set_style(&node.root, "opacity", &format!("{:.3}", frame.opacity));
         }
@@ -460,7 +478,12 @@ pub mod view {
         }
 
         pub fn update_grenades(&mut self, dt: f64, camera: &dyn ScreenProjector, w: f64, h: f64, k: f64) {
+            // `Pool.release`'s `it.node.style.display = 'none'` (`util.js:209`),
+            // which the pure Rust pool dropped. The core emits a frame only for
+            // a live slot, so "not in this frame's list" *is* "released".
+            let mut live = vec![false; self.nade_nodes.len()];
             for (i, frame) in self.core.update_grenades(dt, camera, w, h, k) {
+                live[i] = true;
                 let node = &self.nade_nodes[i];
                 dom::set_style(
                     &node.root,
@@ -471,6 +494,11 @@ pub mod view {
                 dom::set_style(&node.ring, "transform", &format!("scale({:.3})", frame.ring_scale));
                 dom::set_style(&node.ring, "opacity", &format!("{:.3}", frame.ring_opacity));
                 dom::set_style(&node.root, "opacity", &format!("{:.3}", frame.opacity));
+            }
+            for (i, node) in self.nade_nodes.iter().enumerate() {
+                if !live[i] {
+                    dom::set_display(&node.root, "none");
+                }
             }
         }
 
@@ -486,7 +514,14 @@ pub mod view {
         }
 
         pub fn update_damage(&mut self, dt: f64, camera: &dyn ScreenProjector, w: f64, h: f64, k: f64) {
+            // See `update_grenades`. This pool is the one where the missing
+            // `display:none` was actually legible: a damage number's last
+            // painted frame sits at `u ~= 0.98`, i.e. `opacity ~= 0.08`, so up
+            // to sixteen faint ghost numbers accumulated at their death
+            // positions until their slots were reused.
+            let mut live = vec![false; self.dn_nodes.len()];
             for (i, frame) in self.core.update_damage(dt, camera, w, h, k) {
+                live[i] = true;
                 let node = &self.dn_nodes[i];
                 dom::set_style(
                     node,
@@ -498,10 +533,24 @@ pub mod view {
                 );
                 dom::set_style(node, "opacity", &format!("{:.3}", frame.opacity));
             }
+            for (i, node) in self.dn_nodes.iter().enumerate() {
+                if !live[i] {
+                    dom::set_display(node, "none");
+                }
+            }
         }
 
+        /// `releaseAll()` on all three pools — which in the source hides every
+        /// node, because `Pool.release` does. Without the DOM half,
+        /// `debugState('clean')` left the last frame's markers on screen.
         pub fn clear(&mut self) {
             self.core.clear();
+            for node in &self.nade_nodes {
+                dom::set_display(&node.root, "none");
+            }
+            for node in &self.dn_nodes {
+                dom::set_display(node, "none");
+            }
         }
 
         pub fn dispose(&self) {

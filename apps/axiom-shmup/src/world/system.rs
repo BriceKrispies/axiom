@@ -112,6 +112,7 @@
 use crate::rng::Rng;
 use crate::weapons::rig_math::{M4, Q, V3};
 use crate::world::assembler::{Assembler, CollisionMesh, InstancedDraw, Stats, StaticMesh};
+use crate::world::clutter::ClutterPolicy;
 use crate::world::buildings::{build_building, collapse_roof, BuildingInfo, CollapseHole};
 use crate::world::dressing::{
     build_gate, build_perimeter, dress_buildings, dress_street, ground_y, is_open,
@@ -289,8 +290,18 @@ impl WorldSystem {
     /// `init(ctx)` (`index.js:89-161`), minus the scene graph, the material
     /// resolution, the physics bridge and the banner. `root` is the engine's
     /// root stream; this forks its own from it exactly once.
+    ///
+    /// Builds under [`ClutterPolicy::from_environment`] — the shipping arena
+    /// floor, or the full pre-policy dressing when the page was loaded with
+    /// `?clutter=1`. See [`crate::world::clutter`].
     pub fn init(root: &mut Rng) -> WorldSystem {
-        WorldSystem::init_observed(root, &mut |_, _| {})
+        WorldSystem::init_with_clutter(root, ClutterPolicy::from_environment())
+    }
+
+    /// [`WorldSystem::init`] with the floor policy chosen explicitly, for a
+    /// caller that wants the comparison dressing without a query string.
+    pub fn init_with_clutter(root: &mut Rng, clutter: ClutterPolicy) -> WorldSystem {
+        WorldSystem::init_observed_with_clutter(root, clutter, &mut |_, _| {})
     }
 
     /// [`WorldSystem::init`] with a per-pass observer: `checkpoint(name,
@@ -307,11 +318,24 @@ impl WorldSystem {
         root: &mut Rng,
         checkpoint: &mut dyn FnMut(&str, [u32; 4]),
     ) -> WorldSystem {
+        WorldSystem::init_observed_with_clutter(root, ClutterPolicy::from_environment(), checkpoint)
+    }
+
+    /// [`WorldSystem::init_observed`] with the floor policy chosen explicitly.
+    pub fn init_observed_with_clutter(
+        root: &mut Rng,
+        clutter: ClutterPolicy,
+        checkpoint: &mut dyn FnMut(&str, [u32; 4]),
+    ) -> WorldSystem {
         let mut rng = root.fork();
 
         // `new Assembler({ materials, rng, render })`. The `rng` argument is
         // stored and never read — see the module doc's "One fork, not two".
         let mut a = Assembler::new(Rng::new(0));
+        // The arena floor policy (`clutter.js`), which the source reads as
+        // module state at import time. Set before any pass runs, because
+        // `Assembler::place` consults it on every placement.
+        a.clutter = clutter;
         // The one narrowing: the Assembler bakes the transform into `f32`
         // vertices (see the constants' doc).
         a.set_transform(LEVEL_YAW as f32, LEVEL_TX as f32, LEVEL_TZ as f32);

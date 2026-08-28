@@ -87,11 +87,26 @@ pub struct AmmoFrame {
 pub struct AmmoPanel {
     punch: f64,
     last_ammo: i64,
+    /// `this._lastCount` (`ammo.js:89`, `:148`). The source runs the per-pip
+    /// class loop **only when `filled` changes**, so the `warn` amber is a
+    /// function of the state at the last *transition*, not of the current
+    /// frame. Recomputing every frame is not a harmless optimisation: a reload
+    /// that ends with the magazine below 34% settles its final `filled` while
+    /// `reloading` is still true (so `warn` is written `false` and cached), and
+    /// the frame after — same `filled`, `reloading` now false — the source
+    /// skips the loop and the pips stay white. Recomputed, they turn amber.
+    last_count: i64,
+    /// The `(filled, warn)` pairs that loop last wrote. Deliberately *not*
+    /// resized with `pip_count`: the source leaves a newly-revealed pip
+    /// carrying the previous weapon's classes when a swap changes `pipCount`
+    /// while `filled` happens to stay equal, and the view's `enumerate` over
+    /// this vector reproduces that exactly.
+    pips: Vec<(bool, bool)>,
 }
 
 impl Default for AmmoPanel {
     fn default() -> Self {
-        AmmoPanel { punch: 0.0, last_ammo: -1 }
+        AmmoPanel { punch: 0.0, last_ammo: -1, last_count: -1, pips: Vec::new() }
     }
 }
 
@@ -102,7 +117,11 @@ impl AmmoPanel {
 
     pub fn update(&mut self, dt: f64, s: &AmmoInput) -> AmmoFrame {
         let ammo = s.ammo.max(0);
-        let mag_size = if s.mag_size > 0 { s.mag_size } else { 30 }.max(1);
+        // `Math.max(1, s.magSize | 0 || 30)` (`ammo.js:102`). JS's `||` falls
+        // through on **zero only**, so a negative mag size stays negative and
+        // is then clamped to 1 (one pip); it does not fall back to 30. The
+        // guard is `!= 0`, not `> 0`.
+        let mag_size = if s.mag_size != 0 { s.mag_size } else { 30 }.max(1);
 
         if self.last_ammo != ammo {
             if self.last_ammo >= 0 && ammo < self.last_ammo {
@@ -142,8 +161,17 @@ impl AmmoPanel {
         } else {
             (((pip_ammo / mag_size as f64) * pip_count as f64).round() as i64).max(1) as usize
         };
-        let warn_threshold = !reloading && pip_count > 0 && (filled as f64 / pip_count as f64) <= 0.34;
-        let pips: Vec<(bool, bool)> = (0..pip_count).map(|i| (i < filled, i < filled && warn_threshold)).collect();
+        // `if (filled !== this._lastCount) { … }` (`ammo.js:148-155`) — see
+        // `AmmoPanel::last_count`.
+        if filled as i64 != self.last_count {
+            self.last_count = filled as i64;
+            let warn_threshold =
+                !reloading && pip_count > 0 && (filled as f64 / pip_count as f64) <= 0.34;
+            self.pips = (0..pip_count)
+                .map(|i| (i < filled, i < filled && warn_threshold))
+                .collect();
+        }
+        let pips = self.pips.clone();
 
         // --- reload state ---------------------------------------------------
         let reload_prompt = if reloading {

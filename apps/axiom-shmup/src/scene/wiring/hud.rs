@@ -72,12 +72,13 @@ use crate::input::Input;
 use crate::rng::Rng;
 use crate::scene::game::CameraPose;
 use crate::scene::wiring::ai::{camera_state, ActorPose};
-use crate::ui::minimap::Minimap;
+use crate::ui::minimap::{FootprintSpec, LayoutSource, Minimap};
 use crate::ui::system::{
     CameraState, FrameLinks, HudActor, PlayerLink, UiClock, UiCore, UiEffect, UiFrame, UiInput,
     UiSystem,
 };
 use crate::ui::{PlayerPull, WeaponPull};
+use crate::world::system::WorldSystem;
 
 /// `document.getElementById('ui') ?? document.body` (`index.js:72`). The page
 /// is expected to carry an empty `<div id="ui">`; the body is the source's own
@@ -131,6 +132,11 @@ pub struct HudRig {
     minimap: Minimap,
     /// `sfx(id, gain)` calls this frame, for whoever owns the audio graph.
     sfx: Vec<(&'static str, f64)>,
+    /// Whether [`UiCore::init`] has run. It needs the player position and the
+    /// raw clock (`index.js:147`, `:258`) and neither exists at
+    /// [`HudRig::new`], so it is deferred to the first [`HudRig::frame`] —
+    /// which is the first moment a [`HudPull`] carries both.
+    initialised: bool,
     vw: f64,
     vh: f64,
     dpr: f64,
@@ -164,6 +170,7 @@ impl HudRig {
             core,
             minimap: Minimap::new(minimap_rng, dpr),
             sfx: Vec::new(),
+            initialised: false,
             vw: DEFAULT_VIEWPORT.0,
             vh: DEFAULT_VIEWPORT.1,
             dpr,
@@ -297,6 +304,23 @@ impl HudRig {
     pub fn frame(&mut self, pull: HudPull<'_>, events: &EventBus) -> UiFrame {
         let camera = ui_camera(pull.pose, pull.aspect);
         let actors: Vec<HudActor> = pull.actors.iter().map(hud_actor).collect();
+        // `init(ctx)`'s two seeds (`index.js:147`, `:258`). Run here rather
+        // than in `new` because both values arrive with the frame; see
+        // [`UiCore::init`] for what an unseeded first frame costs.
+        //
+        // `raw - dt`, not `raw`: in the source `init` runs a whole frame
+        // before the first `lateUpdate`, so that first `rawDt` is one frame,
+        // not zero. Seeding it to `raw` exactly would make frame one's
+        // `rawDt` zero, and the movement bloom divides by it.
+        if !self.initialised {
+            self.initialised = true;
+            self.core.borrow_mut().init(
+                self.vw,
+                self.vh,
+                pull.player_position,
+                pull.clock.raw - pull.dt,
+            );
+        }
         {
             let mut core = self.core.borrow_mut();
             core.set_clock(pull.clock);
@@ -341,15 +365,32 @@ impl HudRig {
     /// `if (!minimap.bakeDone && ...) minimap.tryBake(ctx)` (`index.js:524`).
     ///
     /// Both of `try_bake`'s inputs are `None`, and that is not a stub — it is
-    /// the state of the port. The vector bake needs a
-    /// [`crate::ui::minimap::LayoutSource`] (`world.buildings` /
-    /// `levelToWorld` / `isOpen`); [`crate::world::system::WorldSystem`]
-    /// satisfies it exactly, but `scene::level::build_level` keeps only the
-    /// system's *products* and drops the system, so nothing reachable from a
-    /// running `Game` can hand one over. The depth bake needs an orthographic
-    /// depth readback the engine does not expose. So the minimap draws its
-    /// procedural plate — grid, view cone, blips, objectives — and no
-    /// footprints. See the notes file.
+    /// the state of the port. It is also **not** blocked on the render work
+    /// the manifests recorded: the orthographic depth bake is `tryBake`'s
+    /// *fallback* (`minimap.js:74-76`), and the primary path,
+    /// `_buildVectorMap`, is pure CPU. [`Minimap::build_vector_map`] is
+    /// ported in full and only wants a [`LayoutSource`] — `world.buildings`,
+    /// `levelToWorld`, `isOpen` — which [`WorldLayout`], just above, already
+    /// adapts out of [`WorldSystem`].
+    ///
+    /// What is missing is one field one tier up: `scene::level::build_level`
+    /// keeps the `WorldSystem`'s *products* and drops the system, so nothing
+    /// reachable from a running `Game` can hand one over. Closing it takes
+    /// three edits, none of them in this file:
+    ///
+    /// 1. `scene/level.rs` — keep the system on `Level` (`pub world_system:
+    ///    WorldSystem`) instead of dropping it.
+    /// 2. this file — give `run_bake_gate` the layout, and pass
+    ///    `Some(&WorldLayout(&level.world_system))` into `try_bake`.
+    /// 3. `ui/minimap.rs`'s `view` — make `DrawOp::DrawBaked` non-inert. The
+    ///    source rasterises `_buildVectorMap` into an **offscreen canvas**
+    ///    once (`minimap.js:204-278`) and `drawImage`s it every frame;
+    ///    [`crate::ui::minimap::Baked::Vector`] is that display list, so the
+    ///    view has to replay it into a `BAKE`x`BAKE` canvas on the first frame
+    ///    it appears and blit from it thereafter.
+    ///
+    /// Until then the minimap draws its procedural plate — grid, view cone,
+    /// blips, objectives — and no building footprints.
     fn run_bake_gate(&mut self, frame: &UiFrame) {
         if frame.minimap_bake_requested {
             self.minimap.try_bake(None, None);
@@ -362,6 +403,51 @@ impl HudRig {
 /* ==================================================================== */
 /* Seam adapters                                                        */
 /* ==================================================================== */
+
+/// `ctx.peek('world')` as the minimap's vector bake reads it
+/// (`minimap.js:184-201`, `:234`), over the world subsystem.
+///
+/// A newtype rather than `impl LayoutSource for WorldSystem` on purpose:
+/// [`crate::world::system::WorldSystem`] already has *inherent* methods named
+/// `level_to_world` and `is_open`, and implementing the trait on it directly
+/// would put two same-named methods in scope at every call site inside the
+/// impl. Wrapping means `self.0` is a plain `&WorldSystem`, which does not
+/// implement the trait, so each call unambiguously reaches the inherent
+/// method it is meant to forward to.
+///
+/// **This has no call site yet, and cannot have one from inside this file.**
+/// See [`HudRig::run_bake_gate`] for the one field that is missing a tier up.
+pub struct WorldLayout<'a>(pub &'a WorldSystem);
+
+impl LayoutSource for WorldLayout<'_> {
+    /// `world.buildings[i].spec` — `BuildingInfo::building` is that spec, and
+    /// supplies all five fields, so none of `FootprintSpec`'s `??` fallbacks
+    /// fire from this source.
+    fn buildings(&self) -> Vec<FootprintSpec> {
+        self.0
+            .buildings
+            .iter()
+            .map(|info| FootprintSpec {
+                x: Some(info.building.x),
+                z: Some(info.building.z),
+                w: Some(info.building.w),
+                d: Some(info.building.d),
+                floors: Some(f64::from(info.building.floors)),
+            })
+            .collect()
+    }
+
+    /// `world.levelToWorld(x, y, z, out)` — only `.x` and `.z` are read.
+    fn level_to_world(&self, x: f64, y: f64, z: f64) -> (f64, f64) {
+        let p = self.0.level_to_world(x, y, z);
+        (p.x, p.z)
+    }
+
+    /// `world.isOpen(x, z, margin)`, called with `margin = 0` throughout.
+    fn is_open(&self, x: f64, z: f64, margin: f64) -> bool {
+        self.0.is_open(x, z, margin)
+    }
+}
 
 /// `ctx.camera`, as the HUD reads it.
 ///

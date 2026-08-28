@@ -193,6 +193,9 @@ pub mod view {
             let node = self.core.node(i);
             // newest on top: re-parent to the front of the killfeed root.
             self.root.prepend_with_node_1(&node.row).expect("prepend");
+            // `Pool.acquire`'s `it.node.style.display = ''` (`util.js:191`) —
+            // a reused slot was hidden by the release below and must come back.
+            dom::set_display(&node.row, "");
             dom::set_text(&node.attacker, &e.attacker.to_uppercase());
             dom::set_text(&node.victim, &e.victim.to_uppercase());
             dom::set_display(&node.headshot, if e.headshot { "" } else { "none" });
@@ -205,12 +208,27 @@ pub mod view {
             dom::set_style(&node.victim, "color", v_colour);
         }
 
-        // Released rows stay in the DOM at their last-painted transform/opacity
-        // (opacity 0 by the time release fires) — the source never removes a
-        // row element, it only frees the slot for [`Killfeed::push`] to reuse.
+        /// `Pool.acquire`/`release` own the row's `display` in the source
+        /// (`util.js:174`, `:191`, `:202`, `:209`): a spent row is taken out of
+        /// flow entirely. The Rust [`super::super::util::Pool`] is pure and
+        /// dropped that DOM write, so the view has to make it.
+        ///
+        /// It is not cosmetic. `.ow-killfeed` is a `display:flex` column with a
+        /// `gap` (`style.css.tpl:306-310`), so a released row left in the tree
+        /// stays a full-height flex item *plus* its gap and pushes every live
+        /// row down the screen. It is also not invisible: release fires on the
+        /// first step where `t >= life`, so the last frame actually painted is
+        /// `t = life - dt` — at 60 Hz that is `opacity 0.073`, and the row's
+        /// `::before` scrim (`rgba(5,9,12,.58)`) reads as a faint dark bar
+        /// forever. `clear()` is worse still: it releases mid-dwell, freezing
+        /// rows at up to `opacity 1`.
         pub fn update(&mut self, dt: f64) {
             for (i, frame) in self.core.update(dt) {
                 Self::apply(self.core.node(i), &frame);
+            }
+            for i in 0..self.core.count() {
+                let alive = self.core.slot(i).alive;
+                dom::set_display(&self.core.node(i).row, if alive { "" } else { "none" });
             }
         }
 
@@ -219,8 +237,13 @@ pub mod view {
             dom::set_style(&node.row, "opacity", &format!("{:.3}", frame.opacity));
         }
 
+        /// `releaseAll()` (`killfeed.js:88-90`) — which in the source hides all
+        /// six nodes, because `Pool.release` does.
         pub fn clear(&mut self) {
             self.core.clear();
+            for i in 0..self.core.count() {
+                dom::set_display(&self.core.node(i).row, "none");
+            }
         }
 
         pub fn dispose(&self) {

@@ -62,7 +62,7 @@
 //! `axiom_surface::LightingModel::Unlit` surface plus a baked equirect albedo —
 //! i.e. the dome-mesh path this module already rejected, taken for the one layer
 //! that is invisible at this level's authored hour anyway
-//! ([`crate::scene::wiring::look::HOUR`] is 9.5, mid-morning). The honest fix is
+//! ([`crate::scene::wiring::look::HOUR`] is 16.5, the source's own). The honest fix is
 //! an engine one — a star/night term on `FrameSky`, evaluated by the sky pass
 //! alongside the cloud layer it already carries — and that is a new engine
 //! capability, which this wave does not add. `crate::sky::stars` therefore stays
@@ -99,7 +99,7 @@ use std::f64::consts::PI;
 use axiom::prelude::{FrameSky, Ratio};
 use axiom_kernel::Radians;
 
-use crate::scene::wiring::look::{display, SkyDriver};
+use crate::scene::wiring::look::{scene_radiance, SkyDriver};
 use crate::sky::atmosphere::{luminance, lut_uv, raymarch_sky, Vec3};
 use crate::sky::clouds::CUMULUS_KM;
 use crate::sky::dome::aureole;
@@ -239,7 +239,12 @@ pub fn visible_sky(driver: &SkyDriver) -> FrameSky {
     let body_linear = disc_radiance
         .mul(to_body)
         .div(Vec3::splat(draw_scale * draw_scale));
-    let body_color = rgb(display(body_linear).to_array());
+    // Scene-referred and deliberately unbounded: the sun's disc radiance is a
+    // four-figure linear value, and `FrameSky`'s body colour is a raw `[f32; 3]`
+    // for exactly that reason (its own tests author a sun at `[3.0, 2.8, 2.4]`).
+    // While this went through a Reinhard the disc was flattened to 1.0 — display
+    // white — which is also what made `halo_fit` below meaningless.
+    let body_color = rgb(scene_radiance(body_linear).to_array());
 
     // ---- the halo ------------------------------------------------------------
     let (halo_falloff, halo_strength) = halo_fit(
@@ -313,7 +318,7 @@ fn haze_height(
     let sample = |up: f64| {
         let flat = (1.0 - up * up).max(0.0).sqrt();
         let dir = Vec3::new(column.x * flat, up, column.z * flat);
-        luma(rgb(display(radiance(dir)).to_array()))
+        luma(rgb(scene_radiance(radiance(dir)).to_array()))
     };
 
     let mut prev_up = up_at(0);
@@ -339,12 +344,19 @@ fn haze_height(
 ///
 /// Two probes, two unknowns, one closed-form solve — no search and no eyeballed
 /// constant. The quantity fitted is the halo as the engine *composites* it: the
-/// engine adds `body_color * halo` to the displayed gradient, so each probe
-/// measures how much displayed luminance the port's aureole adds on top of the
-/// displayed sky at that angle, divided by the body's own displayed luminance.
-/// Working in the composite's own space is what makes the two comparable at all —
-/// the display transform is not additive, so a ratio taken in scene radiance
-/// would not survive it.
+/// engine adds `body_color * halo` to the gradient, so each probe measures how
+/// much luminance the port's aureole adds on top of the sky at that angle,
+/// divided by the body's own luminance.
+///
+/// That ratio is now **exact**. While `scene_radiance` was a Reinhard this doc
+/// argued the opposite — that the probes had to be taken in the composite's own
+/// space because "the display transform is not additive" — and the argument was
+/// sound about a curve and wrong about the frame: the curve also crushed the
+/// body's own luminance to ~1.0, so `strength` came out as the aureole's
+/// absolute luminance rather than as a fraction of the disc, three orders of
+/// magnitude too large. The transform is a linear scale, so
+/// `SCENE_RADIANCE_SCALE` cancels top and bottom and what is left is the
+/// dimensionless ratio the engine's shader actually wants.
 ///
 /// The port sums **two** aureoles, one per body. Only the key body's is fitted;
 /// the other has nowhere to go, exactly as the other body's disc does not.
@@ -368,8 +380,8 @@ fn halo_fit(
         let (u, v) = lut_uv(view_pos, dir);
         let along = transmittance.sample(u, v);
         let glow = aureole(dir.y, irradiance, along, theta.cos(), mie_scale);
-        let lit = luma(rgb(display(base.add(glow)).to_array()));
-        let plain = luma(rgb(display(base).to_array()));
+        let lit = luma(rgb(scene_radiance(base.add(glow)).to_array()));
+        let plain = luma(rgb(scene_radiance(base).to_array()));
         (lit - plain).max(0.0) / body_luma.max(1.0e-6)
     };
 
@@ -434,17 +446,17 @@ mod tests {
     /// The LUT bakes are the expensive part, so the sky is exercised through as
     /// few drivers as the assertions allow — the same posture `look`'s own tests
     /// take.
-    fn morning() -> SkyDriver {
+    fn authored_hour() -> SkyDriver {
         SkyDriver::new(Quality::High, HOUR)
     }
 
     #[test]
     fn the_dome_is_the_drivers_own_two_stops_and_not_a_second_sky() {
-        let driver = morning();
+        let driver = authored_hour();
         let sky = visible_sky(&driver);
         assert_eq!(sky.zenith(), rgb(driver.radiance().ambient_sky.to_array()));
         assert_eq!(sky.horizon(), rgb(driver.radiance().clear_color.to_array()));
-        // A morning sky is darker overhead than at the horizon, where the path
+        // A daytime sky is darker overhead than at the horizon, where the path
         // through the air is longest.
         assert!(
             luma(sky.zenith()) < luma(sky.horizon()),
@@ -456,7 +468,7 @@ mod tests {
 
     #[test]
     fn the_haze_band_is_measured_and_is_tighter_than_the_engine_default() {
-        let sky = visible_sky(&morning());
+        let sky = visible_sky(&authored_hour());
         let haze = sky.haze_height().get();
         assert!(haze >= HORIZON_UP as f32, "the scan starts at the horizon stop");
         assert!(haze <= 1.0, "and cannot exceed the zenith: {haze}");
@@ -469,13 +481,13 @@ mod tests {
 
     #[test]
     fn the_key_body_is_the_sun_with_its_drawn_radius_and_a_fitted_halo() {
-        let driver = morning();
+        let driver = authored_hour();
         let sky = visible_sky(&driver);
         let sun = driver.system.sun_direction();
         let body = sky.body_direction();
         // Pointing AT the sun, which is where the port's ephemeris points.
         assert!((f64::from(body[1]) - sun.y).abs() < 1.0e-5, "{body:?}");
-        assert!(body[1] > 0.0, "the sun is up at 9.5 hours");
+        assert!(body[1] > 0.0, "the sun is up at 16.5 hours");
 
         // The drawn limb, not the true one: `uDisc.x * uDisc.z`.
         let true_radius = driver.system.shared.disc[0];
@@ -494,7 +506,7 @@ mod tests {
 
     #[test]
     fn the_cloud_layer_carries_the_weathers_coverage_and_the_decks_own_scale() {
-        let driver = morning();
+        let driver = authored_hour();
         let sky = visible_sky(&driver);
         assert_eq!(
             sky.cloud_coverage().get(),

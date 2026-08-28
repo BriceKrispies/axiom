@@ -632,8 +632,29 @@ mod tests {
     }
 
     /// The whole point of the slice: holding the trigger fires rounds, the
-    /// magazine drains, the camera climbs, brass comes out, and the rig's
-    /// trigger bit goes true — the bit `drive_viewmodel` hardcoded to `false`.
+    /// magazine drains, the camera climbs, and brass comes out.
+    ///
+    /// It does **not** assert the trigger bit goes true, and that is not an
+    /// omission — in `auto` it provably cannot. `update` runs `run_trigger`
+    /// *first* and only then evaluates `state.trigger = input.fire() &&
+    /// can_fire()` (`system.rs:1666-1667`, `index.js:683-684`). In `auto`,
+    /// `run_trigger` calls `try_fire` on every held frame (`index.js:701`), and
+    /// `try_fire`'s guard is character-for-character `can_fire`'s
+    /// (`system.rs:1277` vs `:1262-1266`), so by the time the bit is computed
+    /// `can_fire()` is false down every path: the shot that just fired set
+    /// `fire_timer = 60 / rpm` (`system.rs:1361`), a dry chamber set it to 0.25
+    /// (`:1283`), and otherwise `try_fire` was blocked by the very condition
+    /// `can_fire` is about to re-check. `input.fire()` false closes the last
+    /// path. The bit is therefore identically false for a held auto trigger,
+    /// in the port and in the source alike.
+    ///
+    /// That is the source's behaviour, so it is this port's behaviour. The bit
+    /// is genuinely live in `semi` and `burst`, where `run_trigger` fires on the
+    /// press *edge* and leaves the held frames for `can_fire` to answer true —
+    /// which is what
+    /// [`the_trigger_bit_is_live_in_semi_where_auto_can_never_show_it`] pins,
+    /// and which is what keeps this suite honest about `drive_viewmodel` no
+    /// longer hardcoding the bit to `false`.
     #[test]
     fn holding_the_trigger_drains_the_magazine_and_kicks_the_camera() {
         let mut host = Host::new();
@@ -647,7 +668,12 @@ mod tests {
 
         assert!(shots > 5, "only {shots} rounds left the barrel");
         assert!(shells > 0, "no brass was ejected");
-        assert!(triggered, "the trigger bit never went true");
+        assert!(
+            !triggered,
+            "the trigger bit went true in auto — `run_trigger` must run before \
+             `state.trigger` is computed, and `try_fire`'s guard must stay \
+             identical to `can_fire`'s"
+        );
         assert!(
             host.rig.core().ammo().mag < start,
             "the magazine never drained"
@@ -657,6 +683,40 @@ mod tests {
             "the camera never climbed"
         );
         assert!(host.rig.core().stats.fired >= shots);
+    }
+
+    /// The trigger bit reaches the viewmodel — it is not hardcoded `false`, and
+    /// it is not dead just because
+    /// [`holding_the_trigger_drains_the_magazine_and_kicks_the_camera`] cannot
+    /// see it.
+    ///
+    /// `semi` is where it is observable. `run_trigger` fires only on the press
+    /// EDGE there (`index.js:719`), so the held frames after the shot leave
+    /// `try_fire` uncalled; `fire_timer` decays past zero (`system.rs:1599`),
+    /// the round `try_fire` chambered on its way out (`:1296-1298`) keeps
+    /// `chambered` true, and `can_fire()` answers true with the trigger still
+    /// down — exactly the state `viewmodel.rs:918` turns into a pulled trigger
+    /// finger.
+    #[test]
+    fn the_trigger_bit_is_live_in_semi_where_auto_can_never_show_it() {
+        let mut host = Host::new();
+        // The rifle's modes are ['auto', 'burst', 'semi'] (`defs.js:26`) and
+        // `set_weapon` starts it on `modes[0]`, so cycle round to `semi`.
+        let mode = (0..3).fold("auto", |m, _| match m {
+            "semi" => m,
+            _ => host.rig.core_mut().cycle_fire_mode(),
+        });
+        assert_eq!(mode, "semi", "the rifle should offer a semi-automatic mode");
+
+        host.input.mouse_down(0);
+        // 120 frames, the same budget the auto test uses — comfortably past the
+        // draw animation, during which `switching()` holds `can_fire` false.
+        let triggered = (0..120).fold(false, |acc, _| acc | host.step(pose(0.0, 0.0, 0.0)).trigger);
+
+        assert!(
+            triggered,
+            "the trigger bit never went true in semi — it is not reaching the rig"
+        );
     }
 
     /// A shot carries the two fields the shared event vocabulary drops. Were

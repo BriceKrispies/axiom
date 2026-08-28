@@ -13,8 +13,9 @@ use axiom_math::Mat4;
 use crate::rng::Rng;
 use crate::world::accum::AccumAddOpts;
 use crate::world::assembler::Assembler;
+use crate::world::clutter::Category;
 use crate::world::kit::{box_thin_kit, cloth_geometry, ll, patch_geometry, rubble_mound, ClothOpts, RubbleOpts};
-use crate::world::layout::{BUILDINGS, STREET};
+use crate::world::layout::{road_y, BUILDINGS, STREET};
 use crate::world::palette::Surface;
 
 use super::berm::{drift_berm, DRIFT_BERM_DEFAULT_NZ};
@@ -178,16 +179,40 @@ fn kerb_line(asm: &mut Assembler, rng: &mut Rng, hw: f64, z_min: f64, z_max: f64
 }
 
 // ---- 3. tyre tracks polished into the dust along the driving line ----
-/// `dressing.js:332-395`. Two ruts, laid as long overlapping strips so the
+/// `dressing.js:519-575`. Two ruts, laid as long overlapping strips so the
 /// line wanders instead of ruling a straight edge down the middle of the
 /// frame.
+///
+/// **Muted by the arena floor policy** ([`Category::VehicleMarks`],
+/// `dressing.js:520-523`): no vehicles, and the decal lift that made them
+/// invisible under rubble makes them hover over a clean road. The source
+/// wraps its two loops in `roadMarks(fn)` separately; so does this, with the
+/// same effect and the same shape.
 fn tyre_tracks(asm: &mut Assembler, rng: &mut Rng, hw: f64, z_min: f64, z_max: f64) {
+    // `const roadMarks = (fn) => (suppresses('vehicleMarks') ? A.muted(fn) : fn());`
+    // (`dressing.js:523`), applied to each of the two loops in turn. Muted, not
+    // skipped: both loops still draw exactly what they always drew.
+    if asm.clutter.suppresses(Category::VehicleMarks) {
+        asm.muted(|a| driving_line_ruts(a, rng, z_min, z_max));
+        asm.muted(|a| turning_scuffs(a, rng, hw, z_min, z_max));
+        return;
+    }
+    driving_line_ruts(asm, rng, z_min, z_max);
+    turning_scuffs(asm, rng, hw, z_min, z_max);
+}
+
+/// `dressing.js:526-560` — the two ruts down the driving line.
+///
+/// Takes no `hw`: the rut height is `roadY(x, 0.002)` now, and `roadY` owns
+/// the half-width it divides by.
+fn driving_line_ruts(asm: &mut Assembler, rng: &mut Rng, z_min: f64, z_max: f64) {
     for side in [-1.0f64, 1.0] {
         let mut z = z_min + 2.0;
         while z < z_max - 3.0 {
             let len = rng.range(5.0, 13.0);
             let x = side * rng.range(1.25, 1.95);
-            let camber = (1.0 - (x / hw).powi(2)) * 0.055 + 0.038;
+            // `roadY(x, 0.002)` (`dressing.js:530`), was `+ 0.038`.
+            let camber = road_y(x, 0.002);
             let g = patch_geometry(rng, 0.34, 13, 0.28, 0.0);
             let ry = rng.range(-0.03, 0.03);
             let m = ll(&Mat4::IDENTITY, x as f32, camber as f32, (z + len / 2.0) as f32, ry as f32, 1.0, 1.0, (len / 0.68) as f32, 0.0, 0.0);
@@ -220,7 +245,11 @@ fn tyre_tracks(asm: &mut Assembler, rng: &mut Rng, hw: f64, z_min: f64, z_max: f
             z += len + rng.range(0.5, 4.0);
         }
     }
-    // a couple of turning scuffs where vehicles have swung across the road
+}
+
+/// `dressing.js:562-574` — a couple of turning scuffs where vehicles have
+/// swung across the road.
+fn turning_scuffs(asm: &mut Assembler, rng: &mut Rng, hw: f64, z_min: f64, z_max: f64) {
     for _ in 0..8 {
         let z = rng.range(z_min + 5.0, z_max - 5.0);
         let radius = rng.range(0.5, 1.1);
@@ -228,7 +257,8 @@ fn tyre_tracks(asm: &mut Assembler, rng: &mut Rng, hw: f64, z_min: f64, z_max: f
         let x = rng.range(-hw + 0.6, hw - 0.6);
         let ry = rng.float() * 3.14;
         let sz = rng.range(1.4, 2.6);
-        let m = ll(&Mat4::IDENTITY, x as f32, ((1.0 - (x / hw).powi(2)) * 0.055 + 0.04) as f32, z as f32, ry as f32, 1.0, 1.0, sz as f32, 0.0, 0.0);
+        // `roadY(x, 0.002)` (`dressing.js:570`), was `+ 0.04`.
+        let m = ll(&Mat4::IDENTITY, x as f32, road_y(x, 0.002) as f32, z as f32, ry as f32, 1.0, 1.0, sz as f32, 0.0, 0.0);
         asm.add_once("asphalt", &g, Some(&m), Some(AccumAddOpts { masks: Some([0.45, 0.4, 0.15]), paint: None }));
     }
 }
@@ -281,22 +311,36 @@ fn stalled_saloon(asm: &mut Assembler, rng: &mut Rng) {
     }
     let y = ground_y(car[0], car[1]);
     asm.put("wreck", car[0] as f32, (y + 0.02) as f32, car[1] as f32, car[2] as f32, 1.0, Some([1.0, 0.85, 1.0]), 0.0, 0.0);
-    asm.collide_box(Surface::Metal, car[0] as f32, (y + 0.75) as f32, car[1] as f32, 1.85, 1.5, 4.4, car[2] as f32);
-    // it has been sitting long enough to gather its own drift and shed a wheel
-    let dg = drift_berm(rng, 4.2, 0.7, 0.13, 3);
-    let m = ll(
-        &Mat4::IDENTITY,
-        (car[0] - 1.0) as f32,
-        (y + 0.005) as f32,
-        car[1] as f32,
-        (car[2] + std::f64::consts::FRAC_PI_2) as f32,
-        1.0,
-        1.0,
-        1.0,
-        0.0,
-        0.0,
-    );
-    asm.add_once("sand", &dg, Some(&m), Some(AccumAddOpts { masks: Some([0.15, 0.6, 0.5]), paint: None }));
+    // The car's body slab and the sand drifted against it are raw geometry,
+    // not prototypes, so they have no id for `Assembler::place` to suppress
+    // and have to be gated here (`dressing.js:621-632`). Without this the
+    // wreck vanishes and leaves a floating metal box sitting in a dune.
+    //
+    // **This one is a SKIP, not a mute, and the difference is visible in the
+    // stream.** `driftBerm(rng, ...)` sits INSIDE the source's guard
+    // (`dressing.js:628`), so a suppressed wreck does not draw its berm — the
+    // one place in this whole policy where the RNG stream legitimately moves.
+    // Transcribed exactly as written: hoisting the draw out to "preserve
+    // determinism" would make this port diverge from the original it is
+    // pinned against.
+    if !asm.clutter.is_suppressed("wreck") {
+        asm.collide_box(Surface::Metal, car[0] as f32, (y + 0.75) as f32, car[1] as f32, 1.85, 1.5, 4.4, car[2] as f32);
+        // it has been sitting long enough to gather its own drift and shed a wheel
+        let dg = drift_berm(rng, 4.2, 0.7, 0.13, 3);
+        let m = ll(
+            &Mat4::IDENTITY,
+            (car[0] - 1.0) as f32,
+            (y + 0.005) as f32,
+            car[1] as f32,
+            (car[2] + std::f64::consts::FRAC_PI_2) as f32,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+        );
+        asm.add_once("sand", &dg, Some(&m), Some(AccumAddOpts { masks: Some([0.15, 0.6, 0.5]), paint: None }));
+    }
     asm.skirts = false;
     asm.put("tyre", (car[0] + 1.5) as f32, (y + 0.1) as f32, (car[1] - 1.8) as f32, 1.1, 1.0, Some([1.0, 1.4, 1.0]), 1.5, 0.2);
     asm.skirts = true;

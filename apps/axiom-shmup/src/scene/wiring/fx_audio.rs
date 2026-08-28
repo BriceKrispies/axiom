@@ -555,8 +555,26 @@ impl FxAudio {
             (&self.fx.motes, true),
         ];
         for (layer, additive) in layers {
-            for slot in 0..layer.capacity {
+            // `mesh.visible = now < this.expireAt && instanceCount > 0`
+            // (`particles.js:431`). An idle layer draws nothing in the source,
+            // so it reads back as nothing here.
+            if !layer.active(now) {
+                continue;
+            }
+            // Bounded by `geometry.instanceCount` (`particles.js:430`) and NOT
+            // by `capacity` — see `ParticleLayer::instance_count` for why the
+            // difference is a correctness bound and not an optimisation.
+            for slot in 0..layer.instance_count() {
                 if let Some(s) = particles::integrate(layer, slot, now) {
+                    // The fragment shader's own first two discards
+                    // (`particles.js:188, 191`), which live outside
+                    // `PARTICLE_VERT` and so outside what `integrate` ports.
+                    // Without them this readback reports particles the source
+                    // throws away — including every particle on its birth
+                    // frame, whose alpha is exactly zero.
+                    if s.alpha < particles::DISCARD_ALPHA {
+                        continue;
+                    }
                     out.push(ParticlePoint {
                         position: s.pos,
                         color: s.color,
@@ -890,14 +908,42 @@ mod tests {
             step: None,
         };
         pair.frame(&FrameState::of(&game), &pulse, true);
+        // Where the player stood when the spray was emitted.
+        let feet = game.movement.position;
+
+        // Read back on the NEXT frame, not on the emitting one. A particle is
+        // invisible at the instant it is born: `PARTICLE_VERT` ramps alpha in
+        // over the first 4.5% of life with `smoothstep( 0.0, 0.045, n )`
+        // (`particles.js:159`), which is exactly zero at `n == 0`, and
+        // `PARTICLE_FRAG` then discards the fragment outright
+        // (`particles.js:188`). Sampling at the emit instant asked the readback
+        // for something the source does not draw either — the frame that
+        // spawns a puff is never the frame that shows it.
+        game.frame(1.0 / 60.0, &mut input);
 
         let mut points = Vec::new();
         pair.particle_points(game.time.elapsed, &mut points);
         assert!(!points.is_empty(), "the landing spray read back as nothing");
-        // Every point is finite, alive and near the player's feet.
-        let feet = game.movement.position;
+        // Every point is one the source would really have drawn: finite, past
+        // the fragment shader's discard threshold, and with real extent.
+        //
+        // Before `ParticleLayer::instance_count` bounded the loop, this swept
+        // up all ~23,000 never-emitted ring slots as well, every one of which
+        // integrates to a zero-size, zero-alpha phantom sitting at the world
+        // origin — see `particles::instance_count`.
         points.iter().for_each(|p| {
-            assert!(p.position.0.is_finite() && p.alpha > 0.0 && p.size > 0.0);
+            assert!(
+                p.position.0.is_finite()
+                    && p.position.1.is_finite()
+                    && p.position.2.is_finite(),
+                "a particle integrated to a non-finite position: {p:?}"
+            );
+            assert!(
+                p.alpha >= crate::fx::particles::DISCARD_ALPHA,
+                "a particle the source's fragment shader discards was reported \
+                 as drawn: {p:?}"
+            );
+            assert!(p.size > 0.0, "a particle was reported with no extent: {p:?}");
         });
         let near = points
             .iter()
