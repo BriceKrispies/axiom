@@ -62,6 +62,34 @@ pub(crate) fn local_bounds(vertices: &[f32], stride: usize) -> Option<Aabb> {
 /// fact have been clipped. It can never *drop* one that would have contributed,
 /// which is the only error that would be visible — a shadow disappearing.
 pub(crate) fn casts_into(bounds: &Aabb, world: &[f32], light: &Frustum) -> bool {
+    casts_into_with_margin(bounds, world, light, 0.0)
+}
+
+/// [`casts_into`], with the world-space bounds grown by `margin` first.
+///
+/// The margin exists because a caster does not have to be *inside* the light's
+/// volume to darken a texel that is: the fragment stage samples outside a
+/// receiver's own projected point by up to the sum of the whole-texel snap, the
+/// normal offset, the PCSS blocker search and the PCF disc. A caster just outside
+/// the box, whose shadow the filter would reach in for, is dropped by an
+/// undilated test — and a dropped caster is a shadow that disappears, the one
+/// error `casts_into` says is visible.
+///
+/// `crate::cascade::CascadeSet::cull_margin` is where the number comes from: 32
+/// shadow texels, which is the source's own measured figure (it measured 2 texels
+/// as *not* output-preserving). Growing the BOUNDS rather than the frustum is the
+/// same test — a containment query does not care which side the slack is added
+/// to — and it needs no dilation operation on `Frustum`, which has none.
+///
+/// The single-volume pass calls this with a zero margin, which adds an exact
+/// `0.0` to each extent: the identity on every IEEE float, so that path's culling
+/// decision is unchanged to the bit.
+pub(crate) fn casts_into_with_margin(
+    bounds: &Aabb,
+    world: &[f32],
+    light: &Frustum,
+    margin: f32,
+) -> bool {
     let m = |row: usize, col: usize| world[col * 4 + row];
     let centre = bounds.center();
     let extents = bounds.extents();
@@ -72,7 +100,11 @@ pub(crate) fn casts_into(bounds: &Aabb, world: &[f32], light: &Frustum) -> bool 
         m(row, 0).abs() * extents.x + m(row, 1).abs() * extents.y + m(row, 2).abs() * extents.z
     };
     let world_centre = Vec3::new(axis(0), axis(1), axis(2));
-    let world_extents = Vec3::new(spread(0), spread(1), spread(2));
+    let world_extents = Vec3::new(
+        spread(0) + margin,
+        spread(1) + margin,
+        spread(2) + margin,
+    );
     Aabb::from_center_extents(world_centre, world_extents)
         .ok()
         .map_or(true, |b| light.intersects_aabb(&b))

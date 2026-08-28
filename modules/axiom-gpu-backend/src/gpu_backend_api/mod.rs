@@ -732,6 +732,12 @@ impl GpuBackendApi {
         // device report a G-buffer it cannot allocate.
         self.capability =
             crate::gbuffer::grant_gbuffer(self.capability, binding.has_gbuffer());
+        // And the third device-resolved bit: whether this adapter can hold the
+        // layered cascade atlas. Same shape, same reason — a backend that has
+        // bound no device has resolved no answer, and the answer is a property
+        // of the adapter's reported format features, not of this source.
+        self.capability =
+            crate::cascade::grant_cascaded_shadows(self.capability, binding.has_cascaded_shadows());
         self.live = Some(binding);
         Ok(())
     }
@@ -905,18 +911,26 @@ mod tests {
         assert!(!backend
             .capability_profile()
             .contains(axiom_host::RenderCapability::GBuffer));
+        // And the third, for the same reason again: whether a single-channel
+        // float colour target can be a render attachment — and therefore whether
+        // a cascade atlas exists at all — is the adapter's answer, not this
+        // source's.
+        assert!(!backend
+            .capability_profile()
+            .contains(axiom_host::RenderCapability::CascadedShadows));
         assert_eq!(
             backend.capability_profile(),
             axiom_host::BackendCapabilityProfile::all()
                 .without(axiom_host::RenderCapability::HdrTargets)
                 .without(axiom_host::RenderCapability::GBuffer)
+                .without(axiom_host::RenderCapability::CascadedShadows)
         );
         assert_ne!(
             backend.capability_profile(),
             axiom_host::BackendCapabilityProfile::all()
         );
         // Bit 12 is set; the word the main-pass WGSL reads is unchanged, because
-        // that shader reads no bit above 2048. Both device-resolved bits sit
+        // that shader reads no bit above 2048. All three device-resolved bits sit
         // ABOVE it, so the shader contract is the same word it always was.
         assert_eq!(backend.capability_profile().bits(), 0b1_1111_1111_1111);
         // A host can restrict it; the present path then consults the narrowed profile.

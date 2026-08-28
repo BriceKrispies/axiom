@@ -119,6 +119,11 @@ pub struct LiveGpuBinding {
     /// `max_color_attachments` and `max_color_attachment_bytes_per_sample`, plus
     /// HDR itself (a `Rgba16Float` normal target is an HDR target).
     gbuffer: bool,
+    /// Whether this adapter reported the cascade atlas format
+    /// (`crate::scene_renderer::CSM_ATLAS_FORMAT`) usable as a render
+    /// attachment — held for the same reason as the two above, and the reason
+    /// the renderer either built a cascade atlas or did not.
+    cascades: bool,
 }
 
 /// Translate a `wgpu` surface acquisition failure into the engine's
@@ -450,6 +455,21 @@ impl LiveGpuBinding {
             hdr_targets,
         );
 
+        // **Can this device hold a cascade atlas?** Asked of the adapter, not
+        // assumed from the arm — the atlas is a single-channel float COLOUR
+        // target (PCSS reads stored depth VALUES, which a comparison sampler
+        // cannot return), which is core WebGPU but an extension on the downlevel
+        // WebGL2 path. The same posture `device_gbuffer` above takes for the
+        // prepass: a measurement, never a policy.
+        //
+        // A `false` here is the declared `RenderCapability::CascadedShadows`
+        // Substitute — no atlas, no caster pipeline, and every frame renders the
+        // single-volume shadow it always did.
+        let cascades = adapter
+            .get_texture_format_features(crate::scene_renderer::CSM_ATLAS_FORMAT)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT);
+
         let scene_format = crate::surface_encode::scene_target_format(
             format,
             adapter
@@ -472,6 +492,8 @@ impl LiveGpuBinding {
             materials,
             max_instances,
             shadow_size,
+            // Four cascades or none, from the adapter's answer above.
+            crate::cascade::device_cascades(cascades),
             // The app-authored render look — hemisphere ambient, depth fog, sky —
             // threaded from the run loop through bind, so the live render lights
             // unlit faces, recedes its horizon and paints its sky exactly as the
@@ -641,6 +663,7 @@ impl LiveGpuBinding {
             clock,
             backend,
             hdr_targets,
+            cascades,
         })
     }
 
@@ -665,6 +688,15 @@ impl LiveGpuBinding {
     /// the velocity buffer and the linear depth the temporal passes read.
     pub fn has_gbuffer(&self) -> bool {
         self.gbuffer
+    }
+
+    /// Whether the bound device can hold the layered cascade atlas
+    /// (`crate::cascade`) — the single-channel float colour target the caster
+    /// pass renders each cascade into. `false` is the declared
+    /// `axiom_host::RenderCapability::CascadedShadows` Substitute: the frame
+    /// renders the single-volume directional shadow instead.
+    pub fn has_cascaded_shadows(&self) -> bool {
+        self.cascades
     }
 
     /// The most recent **resolved** per-pass GPU timings, or the reason there

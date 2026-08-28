@@ -136,6 +136,58 @@ const GL_TO_WGPU_DEPTH: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 1.0,
 ];
 
+/// How many cascades this device may actually hold.
+///
+/// `atlas_renderable` is the adapter's own answer about the atlas format — the
+/// cascade atlas is a **colour** target, not a depth attachment (PCSS needs the
+/// stored depth *value* for its blocker mean, which `textureSampleCompare`
+/// cannot give you), and a single-channel float colour target is core WebGPU but
+/// an extension on the downlevel WebGL2 arm. `requested` is the tier's count.
+///
+/// Zero means "not here": the caller builds no atlas and the frame renders the
+/// single-volume shadow path unchanged, which is exactly the declared
+/// [`axiom_host::RenderCapability::CascadedShadows`] Substitute. The rule lives
+/// here, as covered arithmetic, for the same reason `hdr_target` and
+/// `shadow_cull` do: a rule that decides what a frame may render is impossible
+/// to debug from inside a render pass.
+///
+/// The answer is [`MAX_CASCADES`] or nothing, never a partial count, and that is
+/// not laziness. The fragment stage is specialised on `OW_CASCADES` at compile
+/// time (`wgsl::CSM_CONSTANTS_WGSL`), every per-cascade lane is a `vec4`, and the
+/// atlas is four layers whatever is rendered into them — so a three-cascade
+/// configuration saves no lane, no layer and no uniform byte. It would only add a
+/// sentinel row to the shader's selection scan and its far fade-out, and a
+/// half-filled atlas is exactly the shape that shadows with last frame's
+/// blockers.
+pub(crate) fn device_cascades(atlas_renderable: bool) -> usize {
+    MAX_CASCADES * usize::from(atlas_renderable)
+}
+
+/// `base` with [`axiom_host::RenderCapability::CascadedShadows`] granted when the
+/// bound device reported the atlas renderable — what a backend's profile becomes
+/// at bind.
+///
+/// The third device-resolved capability, and it behaves exactly like the two
+/// before it ([`crate::hdr_target::grant_hdr_targets`],
+/// [`crate::shadow_cull`]'s peer in `gbuffer`): it only ever **grants**. A host
+/// that narrowed the profile before the bind keeps every restriction it set,
+/// because a device can add a capability it genuinely has and can never take back
+/// one a host declined — recomputing the profile from scratch on bind would
+/// silently undo an fps lever the moment the surface came up.
+pub(crate) fn grant_cascaded_shadows(
+    base: axiom_host::BackendCapabilityProfile,
+    device_has_cascades: bool,
+) -> axiom_host::BackendCapabilityProfile {
+    [
+        base,
+        base.with(axiom_host::RenderCapability::CascadedShadows),
+    ][usize::from(device_has_cascades)]
+}
+
+/// Floats in the `CsmU` uniform: four `mat4x4` (64) plus seven `vec4` (28).
+/// Pinned against the WGSL struct by `the_packed_uniform_is_the_struct_wgsl_declares`.
+pub(crate) const UNIFORM_FLOATS: usize = 64 + 28;
+
 /// Bytes one atlas occupies: `count` layers of `map_size²` R32Float texels. The
 /// source's "quarter of a gigabyte" remark is this function at `4 x 4096`; at the
 /// shipped `4 x 2048` it is 67 MB.
@@ -287,6 +339,54 @@ impl CascadeSet {
     /// texel this cascade is ever *sampled* at.
     pub(crate) fn cull_margin(&self, index: usize) -> f32 {
         CULL_MARGIN_TEXELS * self.fits[index.min(MAX_CASCADES - 1)].texel
+    }
+
+    /// The whole `CsmU` uniform, lane for lane as `wgsl::CSM_UNIFORM_WGSL`
+    /// declares it: four matrices, the four per-cascade `vec4` lanes, the atlas
+    /// edge with its reciprocal, the to-sun direction, and `owCsmParams`.
+    ///
+    /// Packed here rather than in the render pass because it is arithmetic over
+    /// this type's own fields and nothing else — so it is measured by the
+    /// coverage gate instead of living inside a `cfg`-gated pass no native test
+    /// can reach. It is also the one place the byte layout is decided, which is
+    /// what lets the adapter proof and the live pipeline upload the same bytes.
+    ///
+    /// `sun_world` points FROM the scene TOWARD the sun, matching the direction
+    /// [`fit`] takes and the `csm.sun_world` the shader dots against a normal.
+    pub(crate) fn pack_uniform(
+        &self,
+        params: CascadeParams,
+        sun_world: Vec3,
+    ) -> [f32; UNIFORM_FLOATS] {
+        let matrices = self.matrices();
+        let edge = self.map_size as f32;
+        let tail: [f32; 28] = [
+            self.split(),
+            self.split_near(),
+            self.texel(),
+            self.range(),
+            [edge, 1.0 / edge, 0.0, 0.0],
+            [sun_world.x, sun_world.y, sun_world.z, 0.0],
+            [
+                params.strength,
+                params.softness,
+                params.max_filter_texels,
+                params.rotation,
+            ],
+        ]
+        .concat()
+        .try_into()
+        .expect("seven vec4 lanes are twenty-eight floats");
+        core::array::from_fn(|i| {
+            // The first 64 floats are the four matrices, column-major and
+            // back to back; the rest is the tail above. Index arithmetic rather
+            // than two writes into a mutable buffer, so the whole value is one
+            // expression.
+            [
+                tail[i.saturating_sub(64).min(27)],
+                matrices[(i / 16).min(MAX_CASCADES - 1)][i % 16],
+            ][usize::from(i < 64)]
+        })
     }
 }
 
@@ -476,6 +576,14 @@ fn fit_one(
 // two different questions — where the map looks from, and how a receiver reads
 // it — and because one file may not exceed the engine size budget.
 mod shading;
+
+// The fragment stage as SHADER TEXT, spliced by both the adapter proof and the
+// main pass's WGSL. One definition, so the proof compares the Rust reference
+// against the text the pipeline actually runs rather than against a second
+// transcription of it. Compiled everywhere: it is `&str` plus one `format!`,
+// and gating a string on a rendering feature is a mistake this crate has
+// already had to undo once (`material_shader/compose.rs`).
+pub(crate) mod wgsl;
 
 #[cfg(test)]
 mod tests {
@@ -793,21 +901,90 @@ mod tests {
     /// (and the one-cascade byte-identity argument that has to come with it) is
     /// forced to be deliberate.
     #[test]
-    fn nothing_in_the_shadow_path_compiles_this_yet() {
-        [
-            ("scene_wgsl.rs", include_str!("scene_wgsl.rs")),
-            ("scene_renderer.rs", include_str!("scene_renderer.rs")),
-            ("shadow_cull.rs", include_str!("shadow_cull.rs")),
-        ]
-        .iter()
-        .for_each(|(name, source)| {
-            assert!(
-                !source.contains("cascade::") & !source.contains("CascadeSet"),
-                "{name} now references the cascades; the shadow pass is no longer \
-                 one cascade, and this test must be replaced by one proving the \
-                 one-cascade configuration still renders what it renders today"
-            );
+    fn the_single_volume_shadow_path_survives_the_cascade_wiring_intact() {
+        let scene = include_str!("scene_wgsl.rs");
+        // The old shadow filter is still THERE, still called, and still the arm a
+        // frame without the capability bit takes. The cascade path is a second
+        // value selected beside it, never a generalisation of it: the two filters
+        // are not reducible to each other (a hardware-comparison 5x5 at a
+        // texel-derived bias against a manual-compare Vogel disc with a PCSS
+        // blocker search), so making `count == 1` of the new path reproduce the
+        // old path's pixels would mean porting the source's filter wrong.
+        assert!(
+            scene.contains("fn shadow_factor(world_pos: vec3<f32>) -> f32 {"),
+            "the single-volume filter must still be defined"
+        );
+        assert!(
+            scene.contains(
+                "let single_cascade = select(1.0, shadow_factor(in.world_pos), \
+                 (caps & CAP_SHADOWS) != 0u);"
+            ),
+            "the single-volume arm must be the expression it has always been"
+        );
+        assert!(
+            scene.contains("let shade = select(single_cascade, cascaded, (caps & CAP_CSM) != 0u);"),
+            "the cascade path must be SELECTED beside the old one, not replace it"
+        );
+        // And the bit the select reads is the host's, not a number invented here.
+        assert!(scene.contains("const CAP_CSM: u32 = 32768u;"));
+        assert_eq!(
+            axiom_host::RenderCapability::CascadedShadows as u32,
+            32768,
+            "the WGSL mask and the host capability bit are one contract"
+        );
+    }
+
+    /// The device gate is all-or-nothing, and the reason is the shader: the
+    /// fragment stage is specialised on four cascades, so a partial count would
+    /// leave it scanning a layer nothing rendered into.
+    #[test]
+    fn a_device_that_cannot_hold_the_atlas_gets_no_cascades_at_all() {
+        assert_eq!(device_cascades(true), MAX_CASCADES);
+        assert_eq!(device_cascades(false), 0);
+    }
+
+    /// The uniform is the WGSL struct, lane for lane. Every lane is checked
+    /// against the value it is supposed to carry rather than against a golden
+    /// blob, because a golden blob cannot say WHICH lane moved.
+    #[test]
+    fn the_packed_uniform_is_the_struct_wgsl_declares() {
+        let set = street_set();
+        let params = CascadeParams::default();
+        let packed = set.pack_uniform(params, sun());
+        assert_eq!(packed.len(), 92, "four mat4 plus seven vec4");
+
+        // The four matrices, column-major and back to back.
+        let matrices = set.matrices();
+        (0..MAX_CASCADES).for_each(|c| {
+            (0..16).for_each(|j| {
+                assert_eq!(packed[c * 16 + j], matrices[c][j], "matrix {c} element {j}");
+            });
         });
+        // The four per-cascade lanes, in declaration order.
+        assert_eq!(packed[64..68], set.split());
+        assert_eq!(packed[68..72], set.split_near());
+        assert_eq!(packed[72..76], set.texel());
+        assert_eq!(packed[76..80], set.range());
+        // The atlas edge and its reciprocal: the shader divides by the edge on
+        // every tap, so the reciprocal is carried rather than recomputed.
+        assert_eq!(packed[80], MAP_SIZE as f32);
+        assert_eq!(packed[81], 1.0 / MAP_SIZE as f32);
+        // The to-sun direction, the same one the fit took.
+        assert_eq!([packed[84], packed[85], packed[86]], [sun().x, sun().y, sun().z]);
+        // `owCsmParams` — and `strength` is lane zero, which is the lane the
+        // fragment stage tests first to early-out an unshadowed frame.
+        assert_eq!(packed[88], params.strength);
+        assert_eq!(packed[89], params.softness);
+        assert_eq!(packed[90], params.max_filter_texels);
+        assert_eq!(packed[91], params.rotation);
+
+        // A zero strength is what a frame that did not ask for cascades packs,
+        // and it must reach lane 88 unchanged so `ow_sun_shadow` returns 1.0.
+        let off = CascadeParams {
+            strength: 0.0,
+            ..CascadeParams::default()
+        };
+        assert_eq!(set.pack_uniform(off, sun())[88], 0.0);
     }
 
 }

@@ -134,6 +134,16 @@ pub(crate) fn render_to_rgba(
         materials,
         max_instances,
         shadow_size,
+        // The capture path runs on a real native adapter, and it asks the same
+        // question the live arm does rather than assuming a native answer: a
+        // still is only usable as evidence about the live frame if it was
+        // rendered through the same decision.
+        crate::cascade::device_cascades(
+            adapter
+            .get_texture_format_features(crate::scene_renderer::CSM_ATLAS_FORMAT)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+        ),
         look,
         // The capture path renders on a real native adapter, so it gets the same
         // anisotropy the browser arm does — which is what keeps a still usable as

@@ -418,6 +418,42 @@ fn vs(
 }
 "#;
 
+/// WGSL for the **cascade caster pass**: the same instanced transform the
+/// single-volume caster runs, plus a fragment stage that writes the fragment's
+/// normalized light depth into the atlas layer.
+///
+/// The fragment stage is the whole difference, and it is why the atlas is a
+/// COLOUR target rather than a depth attachment: PCSS needs to read the stored
+/// depth *value* to average its blockers, and `textureSampleCompare` cannot give
+/// you a value — only a comparison result. `@builtin(position).z` in a fragment
+/// is exactly the `[0, 1]` normalized device depth the CPU reference's
+/// `shading::project` returns, so the two agree by construction.
+///
+/// The view-projection is bound with a **dynamic offset**: one buffer holds all
+/// four cascades at [`CSM_CASTER_SLOT_BYTES`] apart, and each pass selects its
+/// own with an offset rather than with its own bind group.
+const CASCADE_CASTER_WGSL: &str = r#"
+struct CascadeVp { view_proj: mat4x4<f32> };
+@group(0) @binding(0) var<uniform> cascade: CascadeVp;
+
+@vertex
+fn vs(
+    @location(0) position: vec3<f32>,
+    @location(1) w0: vec4<f32>,
+    @location(2) w1: vec4<f32>,
+    @location(3) w2: vec4<f32>,
+    @location(4) w3: vec4<f32>,
+) -> @builtin(position) vec4<f32> {
+    let world = mat4x4<f32>(w0, w1, w2, w3);
+    return cascade.view_proj * world * vec4<f32>(position, 1.0);
+}
+
+@fragment
+fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(pos.z, 0.0, 0.0, 1.0);
+}
+"#;
+
 /// WGSL for the **SDF raymarch pass**: a fullscreen-triangle vertex shader plus a
 /// fragment shader that reconstructs each pixel's world ray (from the SDF
 /// uniform's `inv_view_proj` + `camera_world_pos`), marches the primitive list
@@ -670,6 +706,25 @@ fn scene_shader_source() -> String {
 
 /// Depth-buffer format used by both the camera depth and the shadow map.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// The cascade atlas's texel format: one float channel, as a **colour** target.
+///
+/// Not a depth attachment, and that is load-bearing rather than a preference —
+/// the PCSS blocker search averages the stored depth VALUES, which
+/// `textureSampleCompare` structurally cannot return. `R32Float` is
+/// `unfilterable-float` in core WebGPU, which is exactly the source's own
+/// `NearestFilter` configuration, so the sampler is non-filtering by agreement
+/// and not by compromise.
+///
+/// It is also the one thing about this path a device can refuse: a single-channel
+/// float colour target is core WebGPU but an extension on the downlevel WebGL2
+/// arm. `crate::cascade::device_cascades` is where that answer becomes zero
+/// cascades and the frame keeps the single-volume path.
+pub(crate) const CSM_ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+/// The stride between two cascades' caster view-projections in the shared
+/// uniform buffer. A `mat4` is 64 bytes; this is 256 because that is WebGPU's
+/// guaranteed `min_uniform_buffer_offset_alignment`, and the buffer is addressed
+/// by dynamic offset.
+const CSM_CASTER_SLOT_BYTES: u64 = 256;
 /// Maximum lights uploaded per frame (must match the WGSL `array<Light, 16>`).
 const MAX_LIGHTS: usize = 16;
 /// Lighting uniform size in bytes: an 80-byte header (count + caps + padding, the
@@ -785,6 +840,34 @@ struct MeshBuffers {
     bounds: Option<axiom_math::Aabb>,
 }
 
+/// Everything the cascade caster pass needs, built once, and built ONLY on a
+/// device that can hold the atlas.
+///
+/// Its absence is the declared
+/// [`axiom_host::RenderCapability::CascadedShadows`] Substitute: no atlas, no
+/// caster pipeline, and every frame renders the single-volume shadow it always
+/// did. The sampled binding still exists in either case — it is a 1x1 neutral
+/// when this is `None` — so there is exactly one main-pass pipeline rather than
+/// one per cascade configuration.
+#[derive(Debug)]
+struct CascadeAtlas {
+    /// One render view per atlas layer. The caster pass renders each cascade
+    /// into its own layer, so a `D2Array` view is what the MAIN pass samples and
+    /// a per-layer `D2` view is what the caster attaches.
+    layer_views: Vec<wgpu::TextureView>,
+    /// One depth buffer, reused (and re-cleared) by every cascade's pass. The
+    /// layers are rendered one after another, so they cannot share a frame's
+    /// depth state and do not need four buffers to avoid it.
+    depth_view: wgpu::TextureView,
+    /// All four caster view-projections, `CSM_CASTER_SLOT_BYTES` apart.
+    caster_vp: wgpu::Buffer,
+    caster_bind_group: wgpu::BindGroup,
+    caster_pipeline: wgpu::RenderPipeline,
+    /// The atlas edge in texels — the fit is done against this, so it has to be
+    /// the number the texture was actually allocated at.
+    map_size: u32,
+}
+
 /// The shared, surface-free renderer: pipelines + caches + per-frame buffers +
 /// shadow map. Its [`Self::record`] draws into any colour/depth view; the
 /// surface-vs-offscreen plumbing lives in the callers.
@@ -805,6 +888,14 @@ pub(crate) struct SceneRenderer {
     /// Group 2 of the main pass: shadow map + comparison sampler + light VP.
     shadow_sample_bind_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
+    /// The cascade uniform (`CsmU`), rewritten each frame. Allocated on every
+    /// device, because the main pass's bind group declares it on every device;
+    /// a frame that asks for no cascades writes a zero strength into it, which
+    /// the fragment stage early-outs on at its first line.
+    csm_uniform: wgpu::Buffer,
+    /// The cascade caster machinery, or `None` on a device that cannot hold the
+    /// atlas. See [`CascadeAtlas`].
+    csm: Option<CascadeAtlas>,
     instance_buffer: wgpu::Buffer,
     max_instances: u32,
     /// The fullscreen-triangle SDF raymarch pipeline (composites after the mesh
@@ -1078,6 +1169,18 @@ impl SceneRenderer {
         materials: &[axiom_host::MaterialTexture],
         max_instances: u32,
         shadow_size: u32,
+        // How many **cascades** this device can hold, from
+        // `crate::cascade::device_cascades` — which is `MAX_CASCADES` or nothing.
+        // Zero builds no cascade atlas and no caster pipeline, and every frame
+        // renders the single-volume shadow it always did: the declared
+        // `RenderCapability::CascadedShadows` Substitute.
+        //
+        // A count rather than a bool because the caller's answer is a
+        // measurement of the ADAPTER (can a single-channel float colour target
+        // be a render attachment here) and this is where that measurement
+        // becomes an allocation. Passing the profile itself would ask this
+        // function to re-derive an answer the binding already has.
+        csm_cascades: usize,
         look: axiom_host::FrameRenderLook,
         device_max_anisotropy: u16,
         // The colour target's full allocated size, and therefore the size of the
@@ -1323,6 +1426,144 @@ impl SceneRenderer {
             }],
         });
 
+        // ------------------------------------------------------------------
+        // The CASCADE atlas: `MAX_CASCADES` layers of a single-channel float
+        // colour target, at the tier's shadow edge.
+        //
+        // Allocated in BOTH configurations, because the main pass's bind group
+        // declares the binding in both — a device with no cascades binds a 1x1
+        // neutral, four texels, and its fragment stage early-outs before ever
+        // sampling it. The alternative was a second pipeline variant, which
+        // would have doubled a matrix already keyed by surface program to buy
+        // byte-identity of shader TEXT that nothing downstream reads.
+        //
+        // The neutral is allocated WITHOUT `RENDER_ATTACHMENT`, and that is the
+        // point of splitting the usage: a device that refuses `R32Float` as a
+        // render target refuses to CREATE such a texture, so asking for the
+        // usage we are not going to use would fail exactly the device this arm
+        // exists to serve.
+        // ------------------------------------------------------------------
+        let csm_cascades = csm_cascades.min(crate::cascade::MAX_CASCADES);
+        let csm_live = csm_cascades > 0;
+        let csm_edge = [1, shadow_size][usize::from(csm_live)];
+        let csm_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("axiom-cascade-atlas"),
+            size: wgpu::Extent3d {
+                width: csm_edge,
+                height: csm_edge,
+                depth_or_array_layers: crate::cascade::MAX_CASCADES as u32,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: CSM_ATLAS_FORMAT,
+            usage: [
+                wgpu::TextureUsages::TEXTURE_BINDING,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            ][usize::from(csm_live)],
+            view_formats: &[],
+        });
+        let csm_array_view = csm_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("axiom-cascade-atlas-array"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        // NEAREST, and not as a quality compromise: `R32Float` is
+        // `unfilterable-float` in core WebGPU, which is exactly the source's own
+        // `NearestFilter` configuration. The PCF disc does the filtering.
+        let csm_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("axiom-cascade-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let csm_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("axiom-cascade-uniform"),
+            size: (crate::cascade::UNIFORM_FLOATS * 4) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let csm = csm_live.then(|| {
+            let layer_views: Vec<wgpu::TextureView> = (0..crate::cascade::MAX_CASCADES)
+                .map(|layer| {
+                    csm_texture.create_view(&wgpu::TextureViewDescriptor {
+                        label: Some("axiom-cascade-layer"),
+                        dimension: Some(wgpu::TextureViewDimension::D2),
+                        base_array_layer: layer as u32,
+                        array_layer_count: Some(1),
+                        ..Default::default()
+                    })
+                })
+                .collect();
+            // ONE depth buffer for all four passes. The cascades are rendered one
+            // after another, so they never need each other's depth state — four
+            // buffers would cost four times the memory to hold the same thing.
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("axiom-cascade-depth"),
+                size: wgpu::Extent3d {
+                    width: csm_edge,
+                    height: csm_edge,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
+            let caster_vp = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("axiom-cascade-caster-vp"),
+                size: CSM_CASTER_SLOT_BYTES * crate::cascade::MAX_CASCADES as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let matrix_bytes = std::num::NonZeroU64::new(64).expect("a mat4 is 64 bytes");
+            let caster_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("axiom-cascade-caster-layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            // The four cascades share one buffer and one bind
+                            // group; each pass selects its own matrix with an
+                            // offset instead of with a group of its own.
+                            has_dynamic_offset: true,
+                            min_binding_size: Some(matrix_bytes),
+                        },
+                        count: None,
+                    }],
+                });
+            let caster_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("axiom-cascade-caster-bind-group"),
+                layout: &caster_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &caster_vp,
+                        offset: 0,
+                        size: Some(matrix_bytes),
+                    }),
+                }],
+            });
+            let caster_pipeline = build_cascade_caster_pipeline(device, &caster_layout);
+            CascadeAtlas {
+                layer_views,
+                depth_view,
+                caster_vp,
+                caster_bind_group,
+                caster_pipeline,
+                map_size: csm_edge,
+            }
+        });
+
         // Main pass shadow-sampling bind group layout (group 2): shadow depth
         // texture + comparison sampler + light VP.
         let shadow_sample_layout =
@@ -1380,6 +1621,35 @@ impl SceneRenderer {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
                         },
+                        count: None,
+                    },
+                    // The cascades, at the tail of the same group and for the
+                    // same reason as the two above: they are a shadow input, and
+                    // WebGPU's default `maxBindGroups` is four, so there is no
+                    // group of their own to move into. The binding NUMBERS come
+                    // from `cascade::wgsl`, which is also what writes them into
+                    // the shader text — one definition, so the layout and the
+                    // WGSL cannot drift.
+                    uniform_entry(
+                        crate::cascade::wgsl::CSM_UNIFORM_BINDING,
+                        wgpu::ShaderStages::FRAGMENT,
+                    ),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: crate::cascade::wgsl::CSM_ATLAS_BINDING,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            // Unfilterable: the atlas is `R32Float`. See
+                            // `CSM_ATLAS_FORMAT`.
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: crate::cascade::wgsl::CSM_SAMPLER_BINDING,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                         count: None,
                     },
                 ],
@@ -1516,6 +1786,18 @@ impl SceneRenderer {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(contact_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: crate::cascade::wgsl::CSM_UNIFORM_BINDING,
+                    resource: csm_uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: crate::cascade::wgsl::CSM_ATLAS_BINDING,
+                    resource: wgpu::BindingResource::TextureView(&csm_array_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: crate::cascade::wgsl::CSM_SAMPLER_BINDING,
+                    resource: wgpu::BindingResource::Sampler(&csm_sampler),
+                },
             ],
         });
 
@@ -1589,6 +1871,8 @@ impl SceneRenderer {
             shadow_pass_bind_group,
             shadow_sample_bind_group,
             shadow_view,
+            csm_uniform,
+            csm,
             instance_buffer,
             max_instances,
             sdf_pipeline,
@@ -1675,6 +1959,55 @@ impl SceneRenderer {
     /// slow frame.
     pub(crate) fn surface_program_count(&self) -> u32 {
         self.surfaces.len()
+    }
+
+    /// Which of `draws` can put anything inside `light_view_proj`'s clip volume,
+    /// grown by `margin` world units.
+    ///
+    /// The shadow camera is a box that follows the view, while the frame it is
+    /// rendering reaches to its far plane — 1,650 m in a racing course.
+    /// Everything past the box was being submitted and clipped: a full draw call
+    /// and a full vertex load per batch, for zero texels, over EVERY batch in the
+    /// frame. On the WebGL2 path a draw costs ~52 GL calls whether or not it
+    /// contributes, so this was roughly half the frame's submission cost — and
+    /// the cascade path multiplies the caster draws by four, which is exactly why
+    /// this had to become one shared answer rather than a loop's inner detail.
+    ///
+    /// A batch survives if ANY of its instances can reach the volume: the
+    /// instances of one batch share a contiguous run of the buffer and are drawn
+    /// as one call, so the batch is the unit that can be dropped. A frame with no
+    /// usable volume (a degenerate shadow camera) keeps every draw, exactly as
+    /// before this existed — dropping a caster is visible, keeping a redundant
+    /// one is not.
+    #[allow(clippy::type_complexity)]
+    fn casters_reaching<'a>(
+        &self,
+        draws: &'a [(u64, u64, u64, u32, u64)],
+        packed: &[f32],
+        light_view_proj: &[f32; 16],
+        margin: f32,
+    ) -> Vec<&'a (u64, u64, u64, u32, u64)> {
+        let volume = crate::shadow_cull::light_volume(light_view_proj);
+        draws
+            .iter()
+            .filter(|(mesh_id, _, byte_offset, count, _)| {
+                volume.as_ref().map_or(true, |frustum| {
+                    let bounds = self.meshes.get(mesh_id).and_then(|m| m.bounds.as_ref());
+                    bounds.map_or(true, |bounds| {
+                        let first = (*byte_offset / INSTANCE_STRIDE) as usize;
+                        (first..first + *count as usize).any(|i| {
+                            packed
+                                .get(i * INSTANCE_FLOATS + 16..i * INSTANCE_FLOATS + 32)
+                                .map_or(true, |world| {
+                                    crate::shadow_cull::casts_into_with_margin(
+                                        bounds, world, frustum, margin,
+                                    )
+                                })
+                        })
+                    })
+                })
+            })
+            .collect()
     }
 
     /// Record + submit one frame: a directional **shadow depth pre-pass** (the
@@ -1850,25 +2183,71 @@ impl SceneRenderer {
         // frame with no usable light volume (degenerate shadow camera) keeps
         // every draw, exactly as before this existed: dropping a caster is
         // visible, keeping a redundant one is not.
-        let volume = crate::shadow_cull::light_volume(&light_view_proj);
-        let shadow_draws: Vec<&(u64, u64, u64, u32, u64)> = draws
-            .iter()
-            .filter(|(mesh_id, _, byte_offset, count, _)| {
-                volume.as_ref().map_or(true, |frustum| {
-                    let bounds = self.meshes.get(mesh_id).and_then(|m| m.bounds.as_ref());
-                    bounds.map_or(true, |bounds| {
-                        let first = (*byte_offset / INSTANCE_STRIDE) as usize;
-                        (first..first + *count as usize).any(|i| {
-                            packed
-                                .get(i * INSTANCE_FLOATS + 16..i * INSTANCE_FLOATS + 32)
-                                .map_or(true, |world| {
-                                    crate::shadow_cull::casts_into(bounds, world, frustum)
-                                })
-                        })
-                    })
-                })
+        // The single-volume pass's casters, at a zero margin — the identity on
+        // every extent, so this path's decision is unchanged to the bit.
+        let shadow_draws = self.casters_reaching(&draws, &packed, &light_view_proj, 0.0);
+
+        // ------------------------------------------------------------------
+        // THE CASCADE FIT.
+        //
+        // Done here, in the backend, because it cannot be done anywhere else:
+        // `cascade` lives in this engine module (`allowed_modules = []`) and the
+        // pipeline that resolves the camera is a feature module with no edge to
+        // it. So the frame carries the fit's INPUT — the camera's intrinsics, as
+        // `axiom_host::FrameCameraLens` — and every matrix, split plane and texel
+        // lane the fit produces stays inside this file.
+        //
+        // Three things have to be true at once, and each `None`/`false` is a
+        // different honest answer:
+        //  - the device built an atlas (`self.csm`) — otherwise the declared
+        //    Substitute is the single-volume path,
+        //  - the frame asked for cascades AND for shadows at all (`caps`),
+        //  - the frame stated its intrinsics (`camera.lens()`) — a producer that
+        //    only had matrices states nothing, and guessing a fov here is exactly
+        //    the shortcut the lane exists to remove.
+        // ------------------------------------------------------------------
+        let csm_asked = ((caps & (axiom_host::RenderCapability::CascadedShadows as u32)) != 0)
+            & ((caps & (axiom_host::RenderCapability::Shadows as u32)) != 0);
+        let cascade_set = self
+            .csm
+            .as_ref()
+            .filter(|_| csm_asked)
+            .zip(camera.lens())
+            .and_then(|(atlas, lens)| {
+                crate::cascade::fit(
+                    crate::cascade::MAX_CASCADES,
+                    crate::cascade::CascadeCamera {
+                        world: axiom_math::Mat4::from_cols_array(lens.world()),
+                        fovy_radians: lens.fovy().get(),
+                        aspect: lens.aspect().get(),
+                        near: lens.near().get(),
+                        far: lens.far().get(),
+                    },
+                    // `sun_dir_world` already points FROM the scene TOWARD the
+                    // sun, which is the direction `fit` takes and the negation of
+                    // the travel direction the single-volume fit uses.
+                    axiom_math::Vec3::new(sun_dir_world[0], sun_dir_world[1], sun_dir_world[2]),
+                    atlas.map_size,
+                )
+            });
+        // The cascade uniform, written on EVERY frame because the bind group
+        // declares it on every frame. A frame with no fit writes all zeros, whose
+        // `params.x` is zero — the first thing `ow_sun_shadow` tests, and the
+        // value that makes it return an exact `1.0` before it samples anything.
+        //
+        // `CascadeParams::default()` is the source's own `vec4(1, 0.022, 9, 0)`,
+        // untouched. Tuning strength or softness here to compensate for something
+        // else in the frame would bake a second error in to cancel a first.
+        let csm_words = cascade_set
+            .as_ref()
+            .map(|set| {
+                set.pack_uniform(
+                    crate::cascade::CascadeParams::default(),
+                    axiom_math::Vec3::new(sun_dir_world[0], sun_dir_world[1], sun_dir_world[2]),
+                )
             })
-            .collect();
+            .unwrap_or([0.0; crate::cascade::UNIFORM_FLOATS]);
+        queue.write_buffer(&self.csm_uniform, 0, bytemuck::cast_slice(&csm_words));
 
         // Pack every skinned draw's palette back-to-back (recording each draw's base
         // matrix index) and its instance (mvp + world + colour + joint_base), bounded
@@ -2041,6 +2420,76 @@ impl SceneRenderer {
                 }
             }
         }
+
+        // CASCADE CASTER PASSES: one per atlas layer, each from its own fitted
+        // ortho box, each with its own cull.
+        //
+        // **Every layer gets a pass, including one no caster reaches.** A skipped
+        // layer keeps last frame's blockers and shadows the scene with them —
+        // which is a shadow that lags the geometry casting it, and it is far
+        // harder to recognise than an obviously empty cascade.
+        self.csm
+            .as_ref()
+            .zip(cascade_set.as_ref())
+            .map(|(atlas, set)| {
+                let matrices = set.matrices();
+                // All four view-projections into one buffer, a dynamic-offset
+                // slot apart, before any pass reads it.
+                (0..atlas.layer_views.len()).for_each(|i| {
+                    queue.write_buffer(
+                        &atlas.caster_vp,
+                        i as u64 * CSM_CASTER_SLOT_BYTES,
+                        bytemuck::cast_slice(&matrices[i]),
+                    );
+                });
+                (0..atlas.layer_views.len()).for_each(|i| {
+                    let casters =
+                        self.casters_reaching(&draws, &packed, &matrices[i], set.cull_margin(i));
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("axiom-cascade-caster-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &atlas.layer_views[i],
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                // 1.0 is the far plane — "no blocker between the
+                                // sun and this texel" — which the fragment
+                                // stage's `step(recv, d)` reads as fully lit.
+                                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: Some(
+                            wgpu::RenderPassDepthStencilAttachment {
+                                view: &atlas.depth_view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(1.0),
+                                    store: wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            },
+                        ),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    pass.set_pipeline(&atlas.caster_pipeline);
+                    pass.set_bind_group(
+                        0,
+                        &atlas.caster_bind_group,
+                        &[(i as u64 * CSM_CASTER_SLOT_BYTES) as u32],
+                    );
+                    for (mesh_id, _material_id, byte_offset, count, _program) in &casters {
+                        if let Some(mesh) = self.meshes.get(mesh_id) {
+                            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, self.instance_buffer.slice(*byte_offset..));
+                            pass.set_index_buffer(
+                                mesh.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
+                        }
+                    }
+                });
+            });
 
         // Main pass: lit + textured + shadowed.
         {
@@ -2571,6 +3020,92 @@ fn build_shadow_pipeline(
             depth_compare: wgpu::CompareFunction::Less,
             stencil: wgpu::StencilState::default(),
             // A slope-scaled depth bias reduces shadow acne on the depth pass.
+            bias: wgpu::DepthBiasState {
+                constant: 2,
+                slope_scale: 2.0,
+                clamp: 0.0,
+            },
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
+
+/// Build the **cascade caster** pipeline: the same instanced position transform
+/// the single-volume caster runs, plus a fragment stage writing normalized light
+/// depth into one `R32Float` atlas layer.
+///
+/// The depth bias is the single-volume caster's, unchanged. It is a
+/// rasterizer-stage bias in depth units and it is doing the same job here; the
+/// cascade path's *sampling* bias is separate, per-cascade, and derived from that
+/// cascade's own world texel inside `ow_csm_cascade`.
+fn build_cascade_caster_pipeline(
+    device: &wgpu::Device,
+    caster_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("axiom-cascade-caster-shader"),
+        source: wgpu::ShaderSource::Wgsl(CASCADE_CASTER_WGSL.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("axiom-cascade-caster-pl"),
+        bind_group_layouts: &[caster_layout],
+        push_constant_ranges: &[],
+    });
+    let position_attr = [wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    }];
+    let world_attrs: Vec<wgpu::VertexAttribute> = (0..4)
+        .map(|i| wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: WORLD_OFFSET + (i as u64) * 16,
+            shader_location: 1 + i,
+        })
+        .collect();
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("axiom-cascade-caster-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[
+                wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &position_attr,
+                },
+                wgpu::VertexBufferLayout {
+                    array_stride: INSTANCE_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &world_attrs,
+                },
+            ],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: CSM_ATLAS_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::RED,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState {
                 constant: 2,
                 slope_scale: 2.0,

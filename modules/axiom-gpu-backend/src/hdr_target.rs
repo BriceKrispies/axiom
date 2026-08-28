@@ -65,14 +65,17 @@ pub(crate) fn grant_hdr_targets(
 /// set with every *device-resolved* capability cleared.
 ///
 /// A backend that has resolved nothing must not claim a capability it cannot
-/// know without an adapter. There are two, and they are cleared here together
+/// know without an adapter. There are three, and they are cleared here together
 /// because they are the same kind of claim: [`RenderCapability::HdrTargets`],
-/// granted by [`grant_hdr_targets`] from the adapter's reported format features,
-/// and [`RenderCapability::GBuffer`], granted by
-/// [`crate::gbuffer::grant_gbuffer`] from the device's colour-attachment limits.
-/// Every other capability in the set is a property of *this source* — the
-/// shaders and evaluators either exist or they do not — and so is knowable
-/// without a device.
+/// granted by [`grant_hdr_targets`] from the adapter's reported format features;
+/// [`RenderCapability::GBuffer`], granted by
+/// [`crate::gbuffer::grant_gbuffer`] from the device's colour-attachment limits;
+/// and [`RenderCapability::CascadedShadows`], granted by
+/// [`crate::cascade::grant_cascaded_shadows`] from whether the adapter reports a
+/// single-channel float colour target usable as a render attachment. Every other
+/// capability in the set is a property of *this source* — the shaders and
+/// evaluators either exist or they do not — and so is knowable without a
+/// device.
 ///
 /// It is also the honest answer for the native off-screen capture path, whose
 /// target is a single `Rgba8UnormSrgb` texture by construction rather than by
@@ -81,6 +84,7 @@ pub(crate) fn unresolved_capability_profile() -> BackendCapabilityProfile {
     BackendCapabilityProfile::all()
         .without(RenderCapability::HdrTargets)
         .without(RenderCapability::GBuffer)
+        .without(RenderCapability::CascadedShadows)
 }
 
 /// **The one place the HDR present path is switched on**, and therefore the one
@@ -130,16 +134,21 @@ mod tests {
     fn a_bind_grants_the_hdr_bit_and_changes_nothing_else() {
         let unbound = unresolved_capability_profile();
         assert!(!unbound.contains(RenderCapability::HdrTargets));
-        // The other device-resolved bit is cleared too, and this grant does not
-        // touch it: `grant_gbuffer` is a separate answer to a separate question.
+        // The other device-resolved bits are cleared too, and this grant does
+        // not touch them: `grant_gbuffer` and `grant_cascaded_shadows` are
+        // separate answers to separate questions.
         assert!(!unbound.contains(RenderCapability::GBuffer));
+        assert!(!unbound.contains(RenderCapability::CascadedShadows));
         let capable = grant_hdr_targets(unbound, true);
         let incapable = grant_hdr_targets(unbound, false);
         assert_eq!(
             capable,
-            BackendCapabilityProfile::all().without(RenderCapability::GBuffer)
+            BackendCapabilityProfile::all()
+                .without(RenderCapability::GBuffer)
+                .without(RenderCapability::CascadedShadows)
         );
         assert!(!capable.contains(RenderCapability::GBuffer));
+        assert!(!capable.contains(RenderCapability::CascadedShadows));
         assert_eq!(incapable, unbound);
         assert_eq!(
             capable.bits() ^ incapable.bits(),

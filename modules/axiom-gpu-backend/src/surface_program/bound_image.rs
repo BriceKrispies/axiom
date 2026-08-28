@@ -125,6 +125,11 @@ fn capture(gpu: &ParityGpu, surfaces: &[Surface], program: u64, time: f32) -> Ve
         // program resolves is plain white: `ambient_lit = base * hemi * 1`. That
         // makes the unsurfaced control a legible picture rather than a black
         // frame, which is the only way "the surface changed it" means anything.
+        // No cascades: this harness compares one surface program's output
+        // against another's, and a cast shadow would be a second variable in a
+        // one-variable experiment. The frames it captures name no cascade
+        // capability either, so both halves of the gate agree.
+        0,
         FrameRenderLook::lit_by(FrameAmbient::new([1.0; 3], [1.0; 3])),
         1,
         // No G-buffer: this harness is comparing one surface program's output
@@ -514,6 +519,11 @@ fn the_skinned_pass_still_draws_with_the_surface_parameter_group_bound() {
         &[MaterialTexture::new(MATERIAL, 1, 1, vec![255, 255, 255, 255])],
         1,
         64,
+        // No cascades: this harness compares one surface program's output
+        // against another's, and a cast shadow would be a second variable in a
+        // one-variable experiment. The frames it captures name no cascade
+        // capability either, so both halves of the gate agree.
+        0,
         FrameRenderLook::lit_by(FrameAmbient::new([1.0; 3], [1.0; 3])),
         1,
         // No G-buffer: this harness is comparing one surface program's output

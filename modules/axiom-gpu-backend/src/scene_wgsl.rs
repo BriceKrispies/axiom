@@ -134,6 +134,10 @@ const CAP_NORMALMAP: u32 = 4u;
 const CAP_SHADOWS: u32 = 8u;
 const CAP_SPECULAR: u32 = 512u;
 const CAP_AERIAL: u32 = 2048u;
+// `RenderCapability::CascadedShadows`. The frame asks for the cascade path with
+// this bit; without it the single-volume `shadow_factor` below runs exactly as
+// it always has, which is the declared Substitute.
+const CAP_CSM: u32 = 32768u;
 
 // `axiom_host::FrameDepthFog::mix_fraction`, mirrored. That function is the
 // definition and this is the copy; the Rust side is the one with tests.
@@ -850,7 +854,31 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let N = select(geo_n, mapped, any(nmap.xy != vec2<f32>(0.0, 0.0)));
     // Shadow capability off → fully lit (`shadow_factor` is still evaluated in uniform
     // control flow via `select`, so its `textureSampleCompare` derivatives stay valid).
-    let shade = select(1.0, shadow_factor(in.world_pos), (caps & CAP_SHADOWS) != 0u);
+    let single_cascade = select(1.0, shadow_factor(in.world_pos), (caps & CAP_SHADOWS) != 0u);
+    // **The fragment's view depth, in metres, for free.**
+    //
+    // The cascade stage selects a slice by view depth, and this stage did not
+    // carry one. It does not need a new interstage lane or a new uniform: the
+    // engine's projection has the standard perspective fourth row `(0, 0, -1, 0)`
+    // — and `GL_TO_WGPU_DEPTH` touches only `z`, never `w` — so a clip position's
+    // `w` IS `-view_z`, the view depth. WGSL's `@builtin(position)` in a fragment
+    // holds `1 / clip.w` in its own `w` after the perspective divide, so one
+    // reciprocal recovers it exactly.
+    //
+    // This is the open question `csm.md` §6a left ("either add an interstage lane
+    // or reconstruct it from `camera_view_proj`") answered without doing either.
+    let view_depth = 1.0 / in.clip.w;
+    // The cascade path: four view-fitted slices, PCSS blocker search, Vogel PCF.
+    // Reads `csm.params.x` (strength) first and returns an exact 1.0 when it is
+    // zero, which is what every frame that did not ask for cascades packs — so
+    // the arm `select` evaluates but does not take costs one uniform compare, not
+    // 36 texture taps. `N` is the resolved shading normal, the same one the light
+    // loop below shades with.
+    let cascaded = ow_sun_shadow(view_depth, in.world_pos, N, in.clip.xy);
+    // One value, chosen by the frame's capability word. The single-cascade arm is
+    // byte-for-byte the expression it has always been, so a frame without
+    // `CAP_CSM` renders the pixels it rendered before this existed.
+    let shade = select(single_cascade, cascaded, (caps & CAP_CSM) != 0u);
     // Hemisphere ambient from the frame's ambient uniform (sky overhead, warm-dark
     // ground below, blended by the normal's up-component). Strength is folded into the
     // colours, so this is a plain mix — no extra scale. An absent frame ambient is

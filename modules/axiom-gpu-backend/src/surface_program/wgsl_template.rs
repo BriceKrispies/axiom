@@ -440,6 +440,22 @@ pub(crate) fn scene_shader(prefix: &str, displace: &str, program: &str, suffix: 
         // lives in `suffix`, which every scene shader carries. Its two-band fill
         // is what keeps shadowed geometry from collapsing to black.
         crate::indirect_lighting::INDIRECT_LIGHTING_WGSL,
+        // The cascaded shadow chunk — its constants, uniform struct, the three
+        // group-2 bindings it owns, and the fragment stage — spliced for exactly
+        // the reason the two layers above it are: the LIGHTING stage calls
+        // `ow_sun_shadow`, and the lighting stage lives in `suffix`, which every
+        // scene shader carries.
+        //
+        // Always present rather than a pipeline variant, and that is a
+        // deliberate trade. A variant would double the pipeline matrix — the
+        // main pass is already keyed by surface program, and a second key on
+        // "cascades or not" doubles every compile a frame can provoke — to save
+        // a chunk whose first line is `if (csm.params.x <= 0.0) { return 1.0; }`
+        // against a uniform every non-cascade frame packs as zero. The pixels
+        // are identical either way (see `scene_wgsl`'s `shade`); the variant
+        // would only have bought byte-identity of the shader TEXT, which nothing
+        // downstream reads.
+        &crate::cascade::wgsl::csm_chunk(),
         program,
         suffix,
     ]
@@ -536,6 +552,18 @@ mod tests {
             .expect("the indirect composition must be spliced into every scene shader");
         assert!(prefix_at < indirect_at);
         assert!(indirect_at < program_at);
+        // The cascade chunk sits with them, and for the same reason: the
+        // suffix's lighting stage calls `ow_sun_shadow`. Its three bindings must
+        // precede it, and the whole chunk must precede the program.
+        let csm_bind_at = spliced
+            .find("var<uniform> csm: CsmU;")
+            .expect("the cascade bindings must be spliced into every scene shader");
+        let csm_at = spliced
+            .find("fn ow_sun_shadow(")
+            .expect("the cascade stage must be spliced into every scene shader");
+        assert!(prefix_at < csm_bind_at);
+        assert!(csm_bind_at < csm_at);
+        assert!(csm_at < program_at);
         assert_eq!(
             spliced,
             scene_shader("PREFIX\n", "DISPLACE\n", "PROGRAM\n", "SUFFIX\n")
@@ -550,6 +578,7 @@ mod tests {
                 + "PREFIX\n".len()
                 + crate::material_shader::cloth::CLOTH_WGSL.len()
                 + crate::indirect_lighting::INDIRECT_LIGHTING_WGSL.len()
+                + crate::cascade::wgsl::csm_chunk().len()
                 + "PROGRAM\n".len()
                 + "SUFFIX\n".len()
         );

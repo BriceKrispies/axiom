@@ -391,6 +391,55 @@ fn render_lit_uv(
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
+    // The cascade trio, at the tail of the shadow group. This rig lights a
+    // fragment through the whole main-pass shader, so it has to bind everything
+    // that shader declares — but it deliberately binds the OFF configuration: a
+    // zeroed `CsmU` (whose `params.x` is zero, the value `ow_sun_shadow` returns
+    // 1.0 on before sampling anything) over a 1x1 four-layer atlas. That is what
+    // keeps these tests a measurement of the LIGHTING models rather than of a
+    // cast shadow that happens to fall across the probe.
+    let csm_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("axiom-lighting-parity-csm"),
+        size: (crate::cascade::UNIFORM_FLOATS * 4) as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let csm_atlas = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("axiom-lighting-parity-csm-atlas"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: crate::cascade::MAX_CASCADES as u32,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        // **Not** `CSM_ATLAS_FORMAT`, and the difference is this rig's, not the
+        // pipeline's. This harness derives its bind group layout from the SHADER
+        // (`pipeline.get_bind_group_layout(2)`), and a layout inferred from
+        // `texture_2d_array<f32>` plus a plain `sampler` comes back
+        // `Float { filterable: true }` — WGSL has no spelling for "unfilterable".
+        // The real pass declares its layout EXPLICITLY
+        // (`scene_renderer`'s `shadow_sample_layout`), where the atlas is
+        // `Float { filterable: false }` against a `NonFiltering` sampler, which is
+        // what `R32Float` requires and what the source's `NearestFilter`
+        // configuration means. So the rig binds a filterable neutral that its
+        // inferred layout accepts; nothing here ever samples it.
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let csm_view = csm_atlas.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    let csm_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("axiom-lighting-parity-csm-sampler"),
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
     let material_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("axiom-lighting-parity-material"),
         layout: &pipeline.get_bind_group_layout(0),
@@ -462,6 +511,18 @@ fn render_lit_uv(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::TextureView(&neutral),
+            },
+            wgpu::BindGroupEntry {
+                binding: crate::cascade::wgsl::CSM_UNIFORM_BINDING,
+                resource: csm_uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: crate::cascade::wgsl::CSM_ATLAS_BINDING,
+                resource: wgpu::BindingResource::TextureView(&csm_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: crate::cascade::wgsl::CSM_SAMPLER_BINDING,
+                resource: wgpu::BindingResource::Sampler(&csm_sampler),
             },
         ],
     });
