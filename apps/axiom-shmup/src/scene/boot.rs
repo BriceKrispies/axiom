@@ -91,7 +91,30 @@ pub fn shmup_start() {
     // The controller straddles the budget with a dead band (drop above 1.08x,
     // raise below 0.78x) so the resolution cannot visibly breathe at the exact
     // rate it was asked to hold.
-    let mut render_scale = axiom_host::RenderScaleController::for_display();
+    // A HARD 60 FLOOR, so the budget is not 60.
+    //
+    // `for_display()` defends 16.667 ms, and the controller does exactly that:
+    // it parks AT the budget. Measured, it settled on 16.8 ms — nominally 59.5
+    // fps and over the line on every single spike. A controller told to defend
+    // 60 delivers a median of 60 and a tail well under it, which is not a floor.
+    //
+    // The floor is set by the TAIL, so the budget has to be sized from it.
+    // Measured under camera motion (`scripts/frame_motion.py`): worst/median was
+    // 33.0/16.8 = 1.96, and p99/median 25.1/16.8 = 1.49. To keep the WORST frame
+    // inside 16.667 ms at that spread the median must sit near 8.5 ms, so the
+    // budget is 8 ms and the controller is left to find the rung that holds it.
+    //
+    // That is deliberately an aggressive cut: it will drive the ladder
+    // (0.50/0.62/0.75/0.87/1.0) down to a low rung and the image will be softer.
+    // The trade is stated rather than hidden, `scripts/quality_guard.py` measures
+    // what it costs, and the honest fix that would buy the quality back is
+    // cutting per-fragment work — at scale 1.0 this frame is 29.2 ms and the
+    // material shader composes twelve layers per fragment.
+    //
+    // `retarget` clamps to at most `SLOWEST_BUDGET_NANOS` (16.667 ms), so a
+    // budget can only ever be made tighter than 60, never looser.
+    const FRAME_BUDGET_NANOS: u64 = 8_000_000;
+    let mut render_scale = axiom_host::RenderScaleController::new(FRAME_BUDGET_NANOS);
     let set_render_scale = windowing.render_scale_control();
     windowing.set_ambient(scene.app.ambient());
     scene
