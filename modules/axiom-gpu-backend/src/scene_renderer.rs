@@ -60,8 +60,13 @@ struct SkyU {
     body_color: vec4<f32>,
     // x = halo strength; yzw unused.
     halo: vec4<f32>,
-    // x = cloud coverage (0 = clear sky); y = the cloud field's scale; zw unused.
+    // x = cloud coverage (0 = clear sky); y = the cloud field's scale;
+    // z = the coverage window's width (softness); w = the density ceiling.
     cloud: vec4<f32>,
+    // `FrameCloudDetail`, the half of the cloud that describes the *field*:
+    // x = octave count; y = domain-warp amount; z = footprint-filter strength;
+    // w unused.
+    cloud_detail: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> sky: SkyU;
 
@@ -93,15 +98,54 @@ fn cloud_octave(p: vec2<f32>, rotation: f32, frequency: f32) -> f32 {
     return sin(x) * sin(y) * 0.5 + 0.5;
 }
 
-// `FrameSky::cloud_field`, mirrored: the four `CLOUD_OCTAVES` summed by weight.
-// Written out rather than looped, which is both what keeps it branch-free and what
-// makes the weights visibly sum to exactly 1.0 — the property that pins the field
-// to 0..1 and gives the coverage threshold exact ends.
-fn cloud_field(p: vec2<f32>) -> f32 {
-    return 0.50 * cloud_octave(p, 0.00, 1.00)
-         + 0.25 * cloud_octave(p, 1.13, 2.31)
-         + 0.15 * cloud_octave(p, 2.47, 4.73)
-         + 0.10 * cloud_octave(p, 3.71, 9.17);
+// `FrameSky::cloud_field`, mirrored: `CLOUD_OCTAVES` summed by amplitude, with the
+// authored octave count applied as a 0/1 mask and each octave faded against the
+// deck footprint, then renormalised by the amplitudes that actually contributed.
+//
+// A loop rather than the four unrolled terms this was, for the same reason the
+// host side is a fold: the octave count is *data* now, so it cannot select how
+// many terms are written. The trip count is a compile-time constant and every
+// lane takes the same path, so this is uniform control flow — the divergence a
+// shader actually pays for is not here.
+//
+// The renormalisation is what pins the field to 0..1 for every count and every
+// filter strength, which is what gives the coverage threshold its exact ends. It
+// replaces the old "the four weights visibly sum to 1.0" argument with a
+// stronger one that does not depend on the literals.
+fn cloud_field(p: vec2<f32>, count: f32, warp: f32, filtering: f32, footprint: f32) -> f32 {
+    // `CLOUD_OCTAVES`, mirrored. Rows five and six continue rows one to four
+    // with the reference fbm's own ratios — lacunarity 2.04, gain 0.5, rotation
+    // step atan2(0.6, 0.8) — see the host-side table's doc for the citations.
+    var octaves = array<vec3<f32>, 6>(
+        vec3<f32>(0.0000000,  1.000000, 0.500),
+        vec3<f32>(1.1300000,  2.310000, 0.250),
+        vec3<f32>(2.4700000,  4.730000, 0.150),
+        vec3<f32>(3.7100000,  9.170000, 0.100),
+        vec3<f32>(4.3535011, 18.706800, 0.050),
+        vec3<f32>(4.9970022, 38.161872, 0.025),
+    );
+    // The domain warp: CLOUD_WARP_ROTATIONS = (0.83, 2.91) at
+    // CLOUD_WARP_FREQUENCY = 0.336, centred on zero. At the default amount of 0
+    // the displacement is exactly zero and `q` is `p`.
+    let wx = (cloud_octave(p, 0.83, 0.336) - 0.5) * warp;
+    let wy = (cloud_octave(p, 2.91, 0.336) - 0.5) * warp;
+    let q = p + vec2<f32>(wx, wy);
+
+    var weighted = 0.0;
+    var live = 0.0;
+    for (var i = 0u; i < 6u; i = i + 1u) {
+        let octave = octaves[i];
+        let counted = select(0.0, 1.0, f32(i) < count);
+        // CLOUD_DETAIL_LIMIT = 512.0. At filtering == 0 this is smoothstep(1.0),
+        // which is exactly 1.0 — so an unfiltered field is unchanged.
+        let visible = smoothstep(0.0, 1.0, 1.0 - filtering * octave.y * footprint / 512.0);
+        let amplitude = octave.z * counted * visible;
+        weighted = weighted + amplitude * cloud_octave(q, octave.x, octave.y);
+        live = live + amplitude;
+    }
+    // f32::MIN_POSITIVE, so a filter that removed every octave gives a clear sky
+    // rather than a NaN.
+    return weighted / max(live, 1.17549435e-38);
 }
 
 // `FrameSky::radiance`, mirrored. Branch-free, exactly as the Rust is — which is
@@ -155,13 +199,29 @@ fn fs(in: SkyOut) -> @location(0) vec4<f32> {
     // finite, and the density is faded across that same band (CLOUD_HORIZON_FADE)
     // so the layer dissolves into the haze rather than ending on a seam.
     let reach = max(sky.cloud.y, 0.0) / max(dir.y, 0.06);
-    let field = cloud_field(vec2<f32>(dir.x, dir.z) * reach);
-    // CLOUD_EDGE = 0.22. Threshold 1.0 at zero coverage — which the field, whose
-    // maximum is exactly 1.0, cannot beat — so a clear sky is exactly clear.
-    let threshold = 1.0 - clamp(sky.cloud.x, 0.0, 1.0) * (1.0 + 0.22);
-    let shaped = clamp((field - threshold) / 0.22, 0.0, 1.0);
+    // How much of the deck one radian of view angle sweeps: the reach, plus the
+    // foreshortening term that runs away as the ray flattens. This is a deck
+    // feature's screen footprint, and it is what each octave is filtered against.
+    let footprint = reach * (1.0 + 1.0 / max(dir.y, 0.06));
+    let field = cloud_field(
+        vec2<f32>(dir.x, dir.z) * reach,
+        clamp(sky.cloud_detail.x, 1.0, 6.0),
+        clamp(sky.cloud_detail.y, 0.0, 4.0),
+        clamp(sky.cloud_detail.z, 0.0, 1.0),
+        footprint,
+    );
+    // The coverage window, CLOUD_SOFTNESS_MIN/MAX = 0.02/1.0. Threshold 1.0 at
+    // zero coverage — which the field, whose maximum is 1.0, cannot beat — so a
+    // clear sky is exactly clear, whatever the window's width.
+    let edge = clamp(sky.cloud.z, 0.02, 1.0);
+    let threshold = 1.0 - clamp(sky.cloud.x, 0.0, 1.0) * (1.0 + edge);
+    let shaped = clamp((field - threshold) / edge, 0.0, 1.0);
     let fade = clamp(dir.y / 0.10, 0.0, 1.0);
-    let density = (shaped * shaped * (3.0 - 2.0 * shaped)) * (fade * fade * (3.0 - 2.0 * fade));
+    // ...times the authored density ceiling, so a covered pixel takes only as
+    // much of the sky as the deck's opacity says it should.
+    let density = (shaped * shaped * (3.0 - 2.0 * shaped))
+                * (fade * fade * (3.0 - 2.0 * fade))
+                * clamp(sky.cloud.w, 0.0, 1.0);
 
     // The cloud carries no colour of its own: CLOUD_FILL_GAIN = 1.6 of the sky
     // behind it fills its shaded body, and a broad forward lobe about the body
@@ -174,8 +234,8 @@ fn fs(in: SkyOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// The sky uniform's size in bytes: a `mat4x4` (64) plus six `vec4`s (96).
-const SKY_UBO_BYTES: u64 = 64 + 6 * 16;
+/// The sky uniform's size in bytes: a `mat4x4` (64) plus seven `vec4`s (112).
+const SKY_UBO_BYTES: u64 = 64 + 7 * 16;
 
 /// The fullscreen sky pass: its pipeline and the uniform it reads.
 ///
@@ -359,6 +419,7 @@ fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> 
         .as_cols_array();
     let dir = sky.body_direction();
     let (zenith, horizon, color) = (sky.zenith(), sky.horizon(), sky.body_color());
+    let detail = sky.cloud_detail();
     let mut bytes = Vec::with_capacity(SKY_UBO_BYTES as usize);
     inv.iter()
         .chain(
@@ -385,7 +446,15 @@ fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> 
                 0.0,
                 sky.cloud_coverage().get(),
                 sky.cloud_scale().get(),
-                0.0,
+                detail.softness().get(),
+                detail.opacity().get(),
+                // The octave count crosses as a float because the uniform is one.
+                // Unclamped on this side deliberately: the shader applies the same
+                // `1..=6` clamp `FrameSky::cloud_field` does, so the two agree on
+                // a count of zero — one octave, not a blank sky.
+                detail.octaves() as f32,
+                detail.warp().get(),
+                detail.filtering().get(),
                 0.0,
             ]
             .iter(),

@@ -29,9 +29,39 @@
 //! what makes it testable without a GPU, and what would let a software backend
 //! substitute it later without re-deriving the maths.
 //!
+//! # The cloud field, and why it is authored in two halves
+//!
+//! [`FrameSky::with_clouds`] says how *much* cloud there is and how *large* it
+//! reads. [`crate::FrameCloudDetail`] says what the field the coverage threshold is
+//! applied to actually *is*: how many octaves of it are summed, how far the
+//! field's own domain is warped before it is sampled, how wide the window
+//! between clear and opaque is, how much of the sky a fully covered pixel takes,
+//! and how aggressively the fine octaves are filtered away as the deck
+//! foreshortens toward the horizon.
+//!
+//! The split is not cosmetic. Coverage and scale are *weather* — an app rederives
+//! them from an hour and a wind. The detail is the *shape of the medium*, and it
+//! is what separates a sky whose cloud reads as soft and wispy from one whose
+//! cloud reads as discrete hard-edged blobs. Before it was authorable the field
+//! was four fixed sinusoid octaves thresholded through a fixed 0.22-wide window
+//! at full opacity, and that is a lump generator: summed sines give rounded
+//! lobes on a regular pitch, and thresholding them hard enough to be visible
+//! makes every lobe a paper-edged disc. Measured against a reference sky, that
+//! shape shows up as roughly three times the spectral energy above the smooth
+//! gradient at *every* scale, with edge gradients about 1.3x too steep and an
+//! aliasing rise at the finest band instead of a fractal falloff. No app-side
+//! number could fix that, because none of the four things that cause it — octave
+//! count, domain warp, edge width, opacity — crossed the boundary.
+//!
+//! Detail stays here, in the sky's own evaluation, for exactly the reason the
+//! cloud layer itself does: it degrades with the sky, by declaration, on any
+//! backend that drops [`crate::RenderCapability::Sky`].
+//!
 //! Colours are **linear** RGB, like every other colour crossing this boundary.
 
 use axiom_kernel::{Radians, Ratio};
+
+use crate::frame_cloud_detail::{cloud_field, smoothstep, FrameCloudDetail};
 
 /// A gradient sky with an optional celestial body.
 ///
@@ -50,6 +80,7 @@ pub struct FrameSky {
     halo_strength: f32,
     cloud_coverage: f32,
     cloud_scale: f32,
+    cloud_detail: FrameCloudDetail,
     haze_height: f32,
 }
 
@@ -72,6 +103,11 @@ impl FrameSky {
             // separate representation — the same posture the body takes.
             cloud_coverage: 0.0,
             cloud_scale: 1.0,
+            // The identity detail: four octaves, no warp, the edge width and the
+            // opacity this field evaluated with before either was authorable. A
+            // sky that never mentions `with_cloud_detail` therefore evaluates as
+            // it always did, the same posture the haze height takes below.
+            cloud_detail: FrameCloudDetail::plain(),
             // The identity haze height: `haze_lift` collapses to `up` exactly at
             // this value, so a sky that never mentions the parameter evaluates
             // bit-for-bit as it did before the parameter existed.
@@ -118,6 +154,21 @@ impl FrameSky {
         self.cloud_coverage = coverage.get();
         self.cloud_scale = scale.get();
         self
+    }
+
+    /// Shape the cloud field itself — see [`crate::FrameCloudDetail`].
+    ///
+    /// Orthogonal to [`Self::with_clouds`] on purpose: that pair says how much
+    /// cloud and how large, this says what the medium is made of. The default is
+    /// [`crate::FrameCloudDetail::plain`], so a sky that never calls this is unchanged.
+    pub const fn with_cloud_detail(mut self, detail: FrameCloudDetail) -> Self {
+        self.cloud_detail = detail;
+        self
+    }
+
+    /// How the cloud field is shaped. See [`Self::with_cloud_detail`].
+    pub const fn cloud_detail(&self) -> FrameCloudDetail {
+        self.cloud_detail
     }
 
     /// Set how high the **horizon haze** reaches — the gradient's *shape*, as
@@ -252,7 +303,7 @@ impl FrameSky {
         let halo = cos_angle.max(0.0).powf(self.halo_falloff.max(1.0)) * self.halo_strength;
         let emission = disc + halo;
 
-        let density = self.cloud_density(dir);
+        let density = self.cloud_density(dir).get();
         // The cloud's sunward face: one broad forward-scattering lobe about the
         // body, so the whole sun side of the sky carries lit tops and the far side
         // stays in the gradient's own shade. This is why a cloud needs no authored
@@ -280,16 +331,36 @@ impl FrameSky {
     /// lands somewhere finite and very far instead of at infinity, and the density
     /// is faded out across that same band so the layer dissolves into the horizon
     /// haze rather than shimmering along a seam.
-    fn cloud_density(&self, dir: [f32; 3]) -> f32 {
+    ///
+    /// **Public because coverage is not a coverage.** The authored
+    /// `cloud_coverage` is a threshold offset into a field whose distribution an
+    /// app cannot see, so "what fraction of the sky did I just cover?" has no
+    /// closed form on this side of the boundary — and an app matching a
+    /// reference sky has to answer exactly that question. Handing it the density
+    /// directly is the honest answer: it can sweep the rays it cares about, take
+    /// the fraction, and solve for the coverage it should have authored. The
+    /// alternative is a hidden calibration constant per app, which is the shape
+    /// of thing this engine exists not to accumulate.
+    pub fn cloud_density(&self, dir: [f32; 3]) -> Ratio {
         let reach = self.cloud_scale.max(0.0) / dir[1].max(CLOUD_HORIZON_FLOOR);
-        let field = cloud_field([dir[0] * reach, dir[2] * reach]);
+        // How much of the deck one radian of view angle sweeps: the reach itself,
+        // plus the foreshortening term that runs away as the ray flattens. This
+        // is the screen footprint of a deck feature, and it is what
+        // [`crate::FrameCloudDetail::with_filtering`] measures an octave against.
+        let footprint = reach * (1.0 + 1.0 / dir[1].max(CLOUD_HORIZON_FLOOR));
+        let field = cloud_field([dir[0] * reach, dir[2] * reach], self.cloud_detail, footprint);
         // The threshold the field must beat, laid out so both ends are exact
         // rather than nearly: at coverage `0` it is `1.0`, which the field (whose
         // maximum is exactly `1.0`) cannot beat at all — a provably clear sky, with
         // no branch. At coverage `1` it sits a full edge-width below zero, which
         // the field (whose minimum is `0.0`) always beats — overcast.
-        let threshold = 1.0 - self.cloud_coverage.clamp(0.0, 1.0) * (1.0 + CLOUD_EDGE);
-        smoothstep((field - threshold) / CLOUD_EDGE) * smoothstep(dir[1] / CLOUD_HORIZON_FADE)
+        let edge = self.cloud_detail.edge_width();
+        let threshold = 1.0 - self.cloud_coverage.clamp(0.0, 1.0) * (1.0 + edge);
+        Ratio::finite_or_zero(
+            smoothstep((field - threshold) / edge)
+                * smoothstep(dir[1] / CLOUD_HORIZON_FADE)
+                * self.cloud_detail.opacity().get().clamp(0.0, 1.0),
+        )
     }
 }
 
@@ -346,12 +417,6 @@ const MIN_ANGULAR_RADIUS: f32 = 1.0e-4;
 /// How much of the body's radius is spent softening its edge.
 const LIMB_SOFTNESS: f32 = 0.25;
 
-/// The width of the cloud field's coverage window — how much field value separates
-/// a clear pixel from a fully opaque one. Wide enough that a cumulus has a soft,
-/// wispy limb rather than a paper edge; narrow enough that it still reads as a
-/// distinct puff rather than a smear.
-const CLOUD_EDGE: f32 = 0.22;
-
 /// The smallest up-component the cloud plane is sampled at, so a ray at or below
 /// the horizon lands somewhere finite rather than at infinity.
 const CLOUD_HORIZON_FLOOR: f32 = 0.06;
@@ -370,48 +435,6 @@ const CLOUD_SUN_GAIN: f32 = 0.35;
 /// The forward-scattering lobe's exponent — small, because a cloud's sunward
 /// brightening is broad, not a second halo.
 const CLOUD_FORWARD: f32 = 6.0;
-
-/// The cloud field's octaves as `[rotation, frequency, weight]`.
-///
-/// A sum of separable sinusoids, not a hashed lattice noise: it is the same eight
-/// lines of arithmetic in Rust and in WGSL with no texture, no integer hashing and
-/// no `fract` precision cliff, which is what keeps this function portable to the
-/// shader unchanged the way the rest of [`FrameSky`] is.
-///
-/// Each octave is rotated by its own odd angle and scaled by a non-integer
-/// frequency ratio. Both matter: axis-aligned harmonics of a common frequency
-/// re-align into a visible grid, and a grid is the one thing a sky may not look
-/// like. The weights sum to exactly `1.0`, which is what pins the field's range to
-/// `0.0..=1.0` and lets the coverage threshold have exact ends.
-const CLOUD_OCTAVES: [[f32; 3]; 4] = [
-    [0.00, 1.00, 0.50],
-    [1.13, 2.31, 0.25],
-    [2.47, 4.73, 0.15],
-    [3.71, 9.17, 0.10],
-];
-
-/// One octave of the cloud field: a separable sinusoid on a rotated lattice,
-/// remapped to `0.0..=1.0`.
-fn cloud_octave(p: [f32; 2], rotation: f32, frequency: f32) -> f32 {
-    let (sin_r, cos_r) = (rotation.sin(), rotation.cos());
-    let x = (p[0] * cos_r + p[1] * sin_r) * frequency;
-    let y = (p[1] * cos_r - p[0] * sin_r) * frequency;
-    x.sin() * y.sin() * 0.5 + 0.5
-}
-
-/// The cloud field at a point on the cloud plane, in `0.0..=1.0`.
-fn cloud_field(p: [f32; 2]) -> f32 {
-    CLOUD_OCTAVES
-        .iter()
-        .map(|octave| octave[2] * cloud_octave(p, octave[0], octave[1]))
-        .sum()
-}
-
-/// Hermite smoothstep on an already-`0..1` value.
-fn smoothstep(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
 
 /// Where `value` sits between `from` and `to`, clamped to `0..1`, for a window
 /// running in either direction. A collapsed window degrades to a hard step at
@@ -452,7 +475,7 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 /// here: a NaN component multiplied by zero is still NaN, so a poisoned input
 /// would sail straight through the guard that exists to catch it and poison
 /// every pixel of the sky. Indexing never touches the bad value.
-fn normalize_or(v: [f32; 3], fallback: [f32; 3]) -> [f32; 3] {
+pub(crate) fn normalize_or(v: [f32; 3], fallback: [f32; 3]) -> [f32; 3] {
     let length = dot(v, v).sqrt();
     let usable = length.is_finite() & (length > f32::EPSILON);
     let scaled = [0, 1, 2].map(|c| v[c] / length.max(f32::EPSILON));
@@ -619,32 +642,12 @@ mod tests {
         [[0.0, 1.0, 0.0], [0.3, 0.6, 0.7], [0.0, 0.5, 0.87], [-0.4, 0.9, 0.2]]
             .into_iter()
             .for_each(|dir| {
-                assert_eq!(clear.cloud_density(normalize_or(dir, [0.0, 1.0, 0.0])), 0.0);
+                assert_eq!(clear.cloud_density(normalize_or(dir, [0.0, 1.0, 0.0])).get(), 0.0);
             });
         assert_eq!(clear.radiance([0.3, 0.6, 0.7]), {
             let blend = smoothstep(normalize_or([0.3, 0.6, 0.7], [0.0, 1.0, 0.0])[1]);
             [0, 1, 2].map(|c| lerp([0.5, 0.4, 0.3][c], [0.1, 0.2, 0.4][c], blend))
         });
-    }
-
-    /// The field the whole layer is thresholded against must actually span its
-    /// stated range, or neither end of the coverage window is exact.
-    #[test]
-    fn the_cloud_field_stays_inside_zero_to_one_and_is_not_a_flat_sheet() {
-        let samples: Vec<f32> = (0..64)
-            .map(|i| {
-                let t = i as f32 * 0.37;
-                cloud_field([t.cos() * 9.0 + t, t.sin() * 7.0 - t * 0.5])
-            })
-            .collect();
-        assert!(samples.iter().all(|v| (0.0..=1.0).contains(v)), "{samples:?}");
-        let lo = samples.iter().copied().fold(f32::INFINITY, f32::min);
-        let hi = samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        assert!(hi - lo > 0.3, "the field varies rather than sitting flat: {lo}..{hi}");
-        // The octaves are genuinely rotated against each other: a single unrotated
-        // separable sinusoid is symmetric under swapping x and z, and the field
-        // must not be.
-        assert!((cloud_field([1.7, 0.4]) - cloud_field([0.4, 1.7])).abs() > 1.0e-3);
     }
 
     #[test]
@@ -654,7 +657,7 @@ mod tests {
         let at = |c: f32| {
             FrameSky::gradient([0.1; 3], [0.2; 3])
                 .with_clouds(q(c), q(0.5))
-                .cloud_density(dir)
+                .cloud_density(dir).get()
         };
         assert_eq!(at(0.0), 0.0, "clear");
         let full = at(1.0);
@@ -674,14 +677,14 @@ mod tests {
         let sky = daylit();
         // Below the horizon the layer is exactly absent, and it fades in across the
         // band above it rather than starting at full strength on a seam.
-        assert_eq!(sky.cloud_density([0.0, -0.5, 0.86]), 0.0, "nothing below the horizon");
+        assert_eq!(sky.cloud_density([0.0, -0.5, 0.86]).get(), 0.0, "nothing below the horizon");
         let ray = |y: f32| normalize_or([0.0, y, 1.0], [0.0, 1.0, 0.0]);
-        assert_eq!(sky.cloud_density(ray(0.0)), 0.0, "nor exactly on it");
+        assert_eq!(sky.cloud_density(ray(0.0)).get(), 0.0, "nor exactly on it");
         // Across the whole fade band the density is held under the fade itself, so
         // however dense the field is down there the layer arrives gradually.
         (0..=20).for_each(|i| {
             let y = i as f32 * 0.006;
-            let d = sky.cloud_density(ray(y));
+            let d = sky.cloud_density(ray(y)).get();
             let fade = smoothstep(ray(y)[1] / CLOUD_HORIZON_FADE);
             assert!(d <= fade + 1.0e-6, "at y={y}: density {d} exceeds the fade {fade}");
         });
@@ -691,7 +694,7 @@ mod tests {
             let samples: Vec<f32> = (0..96)
                 .map(|i| {
                     let a = i as f32 * 0.02;
-                    sky.cloud_density(normalize_or([a.sin(), elevation, a.cos()], [0.0, 1.0, 0.0]))
+                    sky.cloud_density(normalize_or([a.sin(), elevation, a.cos()], [0.0, 1.0, 0.0])).get()
                 })
                 .collect();
             samples.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f32>()
@@ -748,10 +751,10 @@ mod tests {
         // Coverage outside its range is clamped, not extrapolated into a negative
         // or runaway density.
         let silly = FrameSky::gradient([0.1; 3], [0.2; 3]).with_clouds(q(9.0), q(0.0));
-        let d = silly.cloud_density(normalize_or([0.2, 0.8, 0.5], [0.0, 1.0, 0.0]));
+        let d = silly.cloud_density(normalize_or([0.2, 0.8, 0.5], [0.0, 1.0, 0.0])).get();
         assert!((0.0..=1.0).contains(&d), "{d}");
         let negative = FrameSky::gradient([0.1; 3], [0.2; 3]).with_clouds(q(-4.0), q(0.5));
-        assert_eq!(negative.cloud_density(normalize_or([0.2, 0.8, 0.5], [0.0; 3])), 0.0);
+        assert_eq!(negative.cloud_density(normalize_or([0.2, 0.8, 0.5], [0.0; 3])).get(), 0.0);
         // A poisoned view direction is caught upstream by `normalize_or`, so the
         // cloud layer sees only usable rays and the frame stays finite.
         assert!(daylit().radiance([f32::NAN, 1.0, 0.0]).iter().all(|v| v.is_finite()));
@@ -829,11 +832,14 @@ mod tests {
         // default leaves 45% of the way to go at the top of frame; the tighter
         // band leaves under a tenth of it.
         let togo = |sky: &FrameSky| sky.radiance(top)[1] - zenith[1];
+        // Bound to locals rather than recomputed inside the failure message: a
+        // format argument is only evaluated when the assertion fails, so calling
+        // the closure inline leaves a region no passing test can ever reach.
+        let (tight_togo, plain_togo) = (togo(&tight), togo(&plain));
         assert!(
-            togo(&tight) < togo(&plain) * 0.25,
-            "the visible top of frame is now most of the way to the zenith: {} vs {}",
-            togo(&tight),
-            togo(&plain)
+            tight_togo < plain_togo * 0.25,
+            "the visible top of frame is now most of the way to the zenith: \
+             {tight_togo} vs {plain_togo}"
         );
 
         // And it reaches in the other direction too: a *higher* midpoint holds
