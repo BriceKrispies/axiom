@@ -384,15 +384,38 @@ pub const AMBIENT_SAMPLES: usize = 64;
 /// `bake_ambient` runs the fragment body twice (once per output texel),
 /// exactly as the shader's `horizonBand = vUv.x > 0.5` selects between the
 /// two texels of a 2x1 render target.
+///
+/// The source's probe reads the sky-view LUT because that LUT is already on
+/// the GPU beside it. The *loop* does not care where a direction's radiance
+/// comes from, so it lives in [`ambient_probe`] and this is the sky-view
+/// supplier — see that function for the second supplier.
 pub fn bake_ambient(sky_view: &Lut2D, sun_altitude: f64, view_pos: Vec3) -> [Vec3; 2] {
     let sun_dir = Vec3::new(0.0, sun_altitude.sin(), -sun_altitude.cos());
+    ambient_probe(|dir| sky_view_lookup(sky_view, dir, sun_dir, view_pos))
+}
+
+/// The two ambient texels over **any** sky sampler — `AMBIENT_FRAG`'s loop
+/// (`luts.js:214-234`) with the `texture( uSkyViewLut, ... )` tap left to the
+/// caller.
+///
+/// Two callers, two suppliers, one definition of the probe:
+///
+/// * [`bake_ambient`] supplies the sky-view LUT, as the source's shader does;
+/// * [`crate::scene::wiring::look`] supplies
+///   [`crate::sky::atmosphere::raymarch_sky`] directly, because this port
+///   deliberately does **not** bake the 384x192 sky-view LUT (see
+///   [`super::super::scene::wiring::look`]'s `bake_luts`) and so has no
+///   texture for `bake_ambient` to read. Without this split the port's only
+///   route to the haze colour the volumetric composite needs would have been
+///   a second, divergent copy of the Fibonacci loop.
+pub fn ambient_probe(sample_sky: impl Fn(Vec3) -> Vec3) -> [Vec3; 2] {
     [
-        ambient_texel(sky_view, sun_dir, view_pos, false),
-        ambient_texel(sky_view, sun_dir, view_pos, true),
+        ambient_texel(&sample_sky, false),
+        ambient_texel(&sample_sky, true),
     ]
 }
 
-fn ambient_texel(sky_view: &Lut2D, sun_dir: Vec3, view_pos: Vec3, horizon_band: bool) -> Vec3 {
+fn ambient_texel(sample_sky: &impl Fn(Vec3) -> Vec3, horizon_band: bool) -> Vec3 {
     let mut sum = Vec3::splat(0.0);
     let mut wsum = 0.0;
     for i in 0..AMBIENT_SAMPLES {
@@ -407,7 +430,7 @@ fn ambient_texel(sky_view: &Lut2D, sun_dir: Vec3, view_pos: Vec3, horizon_band: 
         let st = (1.0 - ct * ct).max(0.0).sqrt();
         let d = Vec3::new(st * phi.cos(), ct, st * phi.sin());
         let w = if horizon_band { 1.0 } else { ct.max(0.0) };
-        sum = sum.add(sky_view_lookup(sky_view, d, sun_dir, view_pos).scale(w));
+        sum = sum.add(sample_sky(d).scale(w));
         wsum += w;
     }
     sum.scale(1.0 / wsum.max(1e-4))

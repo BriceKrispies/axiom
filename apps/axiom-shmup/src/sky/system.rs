@@ -251,8 +251,15 @@ pub struct WeatherPatch {
     pub shaft_gain: Option<f64>,
 }
 
-/// `this._fog`, `index.js:171-221`. `scatter` and `extinction` are
+/// `this._fog`, `index.js:187-237`. `scatter` and `extinction` are
 /// intentionally independent — see the source's note.
+///
+/// The citation was `171-221` and had **rotted**: `sky/index.js` grew 119 lines
+/// after this port was baselined at `102852b7` and the block moved down 16.
+/// Checked value by value against both revisions before it was renumbered —
+/// every field is byte-identical at `102852b7` and at HEAD, so this is a
+/// documentation repair and not a behavioural divergence. `volumetrics.js`,
+/// which this block's consumers live in, has not changed at all.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fog {
     /// 1/m at the fog base.
@@ -276,7 +283,7 @@ pub struct Fog {
 }
 
 impl Default for Fog {
-    /// The literal at `index.js:171-221`.
+    /// The literal at `index.js:187-237`.
     fn default() -> Self {
         Fog {
             scatter: 3.6e-3,

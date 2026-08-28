@@ -127,6 +127,7 @@ use crate::sky::luts::{
     MULTISCATTER_STEPS, TRANSMITTANCE_HEIGHT, TRANSMITTANCE_STEPS, TRANSMITTANCE_WIDTH,
 };
 use crate::sky::system::{KeyLight, SkySystem, WeatherPatch, SUN_KEY_GAIN};
+use crate::sky::volumetrics::{fog_ambient, fog_inscatter_phase, height_integral};
 use crate::world::palette::{Palette, PaletteEntry};
 
 /* ==================================================================== */
@@ -199,6 +200,36 @@ pub const SCENE_RADIANCE_SCALE: f64 = std::f64::consts::PI / KEY_INTENSITY_FULL_
 /// coefficient and `FrameDepthFog`'s `2`-based one. See [`SkyDriver::depth_fog`].
 const LN_2: f64 = std::f64::consts::LN_2;
 
+/// The altitude, in world metres, at which this port's uniform fog and the
+/// source's height fog are made to agree exactly.
+///
+/// **REDUCED FROM A PER-FRAGMENT QUANTITY, NOT INVENTED AND NOT FITTED.** The
+/// source's own expression is `skHeightIntegral`'s `uCamPos.y`
+/// (`volumetrics.js:137`) — the live camera altitude, evaluated per pixel
+/// against a density that also falls off with `y` along the ray.
+/// `FrameDepthFog` has no height term at all, so that density has to be
+/// evaluated at **one** altitude and folded into the rate (see
+/// [`SkyDriver::depth_fog`]), and this is the altitude chosen.
+///
+/// The value is the source's, not a knob: every camera in `dev/shots.js` stands
+/// at 1.70-1.75 and the three that matter here — `hero` (`shots.js:14`),
+/// `night` (`:42`) and `hud` (`:96`) — are all literally `[12, 1.75, 18]`. A
+/// level ray from there down a street stays at that altitude, and it is the ray
+/// the source tuned its 40% density cut against: *"does a facade at 60 m still
+/// have its own local contrast and its own hue"* (`index.js:189-200`).
+///
+/// **What deletes it:** a height term on `FrameDepthFog` — `base_y` plus a
+/// scale height, evaluated by the backends that already hold a world position.
+/// Then this port would pass the source's two numbers through and the reduction
+/// disappears rather than being re-tuned.
+///
+/// A constant rather than `shared.cam_pos.y` on purpose: the fog is authored
+/// once at level build, *before* a camera exists — `scene::app` reads
+/// `depth_fog()` while assembling the `App` and never re-pushes it — so reading
+/// the live camera here would silently sample an identity matrix at `y = 0` and
+/// make the haze 10% denser than it should be, for no gain.
+const FOG_EYE_ALTITUDE: f64 = 1.75;
+
 /// The sky's own radiance — the CPU stand-in for the dome pass and the
 /// environment bake, both of which are GPU-only in the source.
 ///
@@ -232,6 +263,24 @@ pub struct SkyRadiance {
     /// sky pass paints and the other is what lights the street. `dome.js`
     /// keeps the same two apart for the same reason.
     pub dome_zenith: Color,
+    /// **The haze** — the radiance a surface at infinite range fades to.
+    ///
+    /// This is the source's own aerial-perspective asymptote, not the sky. The
+    /// analytic composite (`volumetrics.js:370-383`, ported as
+    /// [`crate::sky::volumetrics::composite_analytic`]) is
+    ///
+    /// ```text
+    /// out = surface * exp( -sigmaExt * od )
+    ///     + ( key * phase(cosKey) * 0.55 + fogAmbient(cosKey) * ambientGain )
+    ///       * ( sigmaS / sigmaE ) * ( 1 - exp( -sigmaE * odS ) )
+    /// ```
+    ///
+    /// and the bracket times `sigmaS / sigmaE` is exactly what the second term
+    /// converges to as the optical depth grows — i.e. the colour the first term
+    /// is being replaced by. `FrameDepthFog` is a lerp toward one colour, so
+    /// *that bracket* is the colour it must lerp toward. See
+    /// [`SkyDriver::depth_fog`] for the `cosKey` this is evaluated at and why.
+    pub haze: Color,
 }
 
 /// Owns the ported [`SkySystem`], steps it, and publishes what a frame needs.
@@ -472,33 +521,78 @@ impl SkyDriver {
 
     /// The frame's atmospheric depth fog, from `SkySystem`'s `_fog` block.
     ///
-    /// ## What maps, and what does not
+    /// ## The shape of the source's term, and the shape of the engine's
     ///
-    /// The source's fog is a **height-fogged, per-channel, phase-functioned**
-    /// participating medium (`index.js:171-221`, evaluated by the unported
-    /// volumetrics pass). `FrameDepthFog` is a scalar extinction plus a
-    /// screen-space ramp. Three things therefore do not survive the boundary,
-    /// and are named rather than quietly dropped:
+    /// The source composites aerial perspective as
+    /// `surface * exp(-sigmaExt * od) + haze * (1 - exp(-sigmaE * odS))`
+    /// (`volumetrics.js:367-383`); `FrameDepthFog` evaluates
+    /// `mix(surface, colour, 1 - 2^(-rate * distance))`. They are the same
+    /// arithmetic under three substitutions, which is why this maps at all:
     ///
-    /// * **Height falloff.** `height_scale` (18 m) and `base_y` (-2 m) have no
-    ///   counterpart — the engine's fog is uniform in `y`.
+    /// * `colour` is the **haze asymptote**, [`SkyRadiance::haze`] — what the
+    ///   second term converges to, and therefore what the first is being
+    ///   replaced by. It is *not* the sky.
+    /// * `rate` is the source's coefficient in base 2 (`/ LN_2`), luminance-
+    ///   weighted across `extinction_tint`, and scaled by the **base density at
+    ///   eye level** so that `rate * distance` reproduces `sigmaE * od`.
+    /// * one mix fraction serves both terms, where the source uses `od` for the
+    ///   transmittance and `odS` for the inscatter.
+    ///
+    /// ## `od` is not `distance`, which is where the rate comes from
+    ///
+    /// `skHeightIntegral` (`volumetrics.js:136-141`) is the integral of
+    /// `exp(-(y - baseY) / H)` along the ray, so for a level ray it is
+    /// `exp(-(eye - baseY) / H) * distance` — the distance times the density at
+    /// the eye, **not** the distance. At the source's own `baseY = -2 m`,
+    /// `H = 18 m` and a `1.75 m` eye (`dev/shots.js`' `hero`/`interior`/`weapon`
+    /// all sit at 1.70-1.75) that factor is `0.812`. Dropping it, as this
+    /// function did, made the port's haze 23% denser than the source's along the
+    /// street. It is a constant here because `FrameDepthFog` is uniform in `y`
+    /// and the fog is authored once at level build; see [`FOG_EYE_ALTITUDE`].
+    ///
+    /// ## Three things do not survive the boundary
+    ///
+    /// * **Height falloff.** `height_scale` / `base_y` have no counterpart — the
+    ///   engine's fog is uniform in `y`, so a ray climbing out of the layer (a
+    ///   rooftop, the sky slot between buildings) is fogged as if it stayed in
+    ///   it. The constant above is the altitude at which the two agree exactly.
     /// * **Per-channel extinction.** `extinction_tint` (`[0.94, 1.02, 1.24]`,
     ///   blue-biased so distance loses red first, as Rayleigh does) collapses to
     ///   one rate. The rate used is the **luminance-weighted** mean of the three,
     ///   because the density a viewer reads is a luminance, and the hue the fog
     ///   pulls toward is carried by the colour instead.
-    /// * **The phase function** and `shaft_gain` — inscatter, which needs the
-    ///   volumetrics pass.
+    /// * **The near-field ramp.** `skFogNearRamp` (`volumetrics.js:118-120`)
+    ///   fades the first 12 m in, folded into the analytic path as
+    ///   `odS = od - odNear * 0.5` — i.e. the inscatter behaves as if the ray
+    ///   started `6 m` further out. `1 - 2^(-rate * d)` has no offset to put that
+    ///   in, so this port's haze is up to ~40% heavier than the source's *inside*
+    ///   12 m (a wash on the weapon and the hands, which is exactly what the
+    ///   source added the ramp to remove) and a flat `0.7%` heavier beyond it.
+    ///   Closing it needs one number on the engine contract — a `start` metre
+    ///   offset, `1 - 2^(-rate * max(0, d - start))` — not an app-side fudge.
     ///
-    /// The `[near, far]` ramp is deliberately a no-op (`strength = 0`):
-    /// `FrameDepthFog`'s own module doc shows that a normalized-depth window over
+    /// `max_distance` (900 m) is likewise not expressible; the town is ~110 m
+    /// deep, so nothing in this level reaches the clamp.
+    ///
+    /// ## Why `near = far = strength = 1`
+    ///
+    /// [`FrameDepthFog::mix_fraction`] is
+    /// `(1 - (1 - screen) * (1 - air)) * strength` — `strength` is the ceiling
+    /// on the **composed** result, not the amplitude of the `[near, far]` ramp
+    /// alone. This function used to author `strength = 0` with the comment "the
+    /// NDC ramp is a deliberate no-op", which is not what that field does: it
+    /// multiplied the extinction term by zero as well, so the port published a
+    /// correct rate and rendered **no aerial perspective at all**. The way to
+    /// park the screen ramp and keep the air is `near = far`, which floors
+    /// `screen` at `0` for every depth in front of the far plane —
+    /// `frame_depth_fog.rs`'s own
+    /// `the_depth_window_front_loads_its_whole_range_and_extinction_does_not`
+    /// isolates the air term exactly this way. The ramp stays parked because
+    /// `FrameDepthFog`'s module doc is right that a normalized-depth window over
     /// a ground plane running to the horizon is "a switch that flips at one
-    /// screen row", and the physical term has no such defect. A backend without
+    /// screen row"; a backend without
     /// `RenderCapability::AerialPerspective` (the Canvas 2D software raster)
-    /// therefore renders no fog rather than a seam.
-    ///
-    /// The colour distance recedes toward is the **clear colour** — the sky's own
-    /// radiance in the view band, which is what aerial perspective is.
+    /// therefore still renders no fog rather than a seam.
     pub fn depth_fog(&self) -> FrameDepthFog {
         let fog = self.system.fog;
         let tint = fog.extinction_tint;
@@ -506,13 +600,25 @@ impl SkyDriver {
         // the source's coefficient is Beer-Lambert in `e`, `FrameDepthFog`'s is
         // `1 - 2^(-rate * d)`.
         let luma = 0.2126 * tint.x + 0.7152 * tint.y + 0.0722 * tint.z;
-        let rate = fog.extinction * luma / LN_2;
-        let color = self.radiance.clear_color.to_array();
+        // `skHeightIntegral`'s own `d0` at eye level, through the source's own
+        // closed form rather than a second copy of it: a level ray (`dy = 0`)
+        // takes the `abs(x) < 1e-4` arm and returns `d0 * t`, so `t = 1` IS
+        // `d0`. `shared.fog[1]` is `uFog.y`, the `1 / heightScale` the source
+        // packs (`index.js:526-537`).
+        let base_density = height_integral(
+            FOG_EYE_ALTITUDE,
+            0.0,
+            1.0,
+            fog.base_y,
+            self.system.shared.fog[1],
+        );
+        let rate = fog.extinction * luma * base_density / LN_2;
+        let haze = self.radiance.haze.to_array();
         FrameDepthFog::new(
-            ratio(0.0),
             ratio(1.0),
-            ratio(0.0),
-            [color[0], color[1], color[2]],
+            ratio(1.0),
+            ratio(1.0),
+            [haze[0], haze[1], haze[2]],
         )
         .with_extinction(ratio(rate))
     }
@@ -599,6 +705,12 @@ fn raymarch(system: &SkySystem, transmittance: &Lut2D, multiscatter: &Lut2D) -> 
     // Hemisphere ambient: straight up is the sky term; the down term is the same
     // sky reflected off the ground albedo the shared block publishes.
     let up = radiance(Vec3::new(0.0, 1.0, 0.0));
+
+    // `uSkyAmbientLut` — the 2x1 probe the fog's own hue split reads. The
+    // source bakes it from the sky-view LUT (`luts.js:208-235`); this port
+    // never bakes that LUT, so the same Fibonacci loop is fed the raymarch
+    // directly. `luts::ambient_probe` is the one definition of the loop.
+    let ambient_probe = crate::sky::luts::ambient_probe(&radiance);
     SkyRadiance {
         // Drawn: the clear colour is the sky the camera looks into and the
         // colour distance recedes toward, so it has to be the sky the sky pass
@@ -609,7 +721,80 @@ fn raymarch(system: &SkySystem, transmittance: &Lut2D, multiscatter: &Lut2D) -> 
         // Lighting: the raw integral, no shoulder. See `dome_shoulder`.
         ambient_sky: scene_radiance(up),
         ambient_ground: scene_radiance(up.mul(shared.ground_albedo)),
+        // No shoulder here either, and for a different reason from the ambient's:
+        // the shoulder is the *dome pass's* display roll-off, and the source's
+        // fog composite adds its inscatter to the already-composited scene
+        // colour without going near it (`volumetrics.js:386`).
+        haze: scene_radiance(haze_radiance(system, ambient_probe)),
     }
+}
+
+/// **The aerial-perspective asymptote** — the bracket of the source's analytic
+/// composite, times `uFog.x / max( 1.0e-6, uFog2.x )` (`volumetrics.js:381-383`,
+/// unchanged since the port's baseline `102852b7`).
+///
+/// ```text
+/// vec3 inscatter = ( uKeyIrr * ( skFogInscatterPhase( cosKey ) * 0.55 )
+///                  + skFogAmbient( cosKey ) * uFog2.z )
+///                  * ( uFog.x / max( 1.0e-6, uFog2.x ) ) * mono;
+/// ```
+///
+/// Everything but `mono` — because `mono` is the opacity and this is the colour
+/// that opacity is fading toward. Written in the source's own grouping and
+/// evaluated with the two ported shader functions themselves
+/// ([`fog_inscatter_phase`], [`fog_ambient`]) rather than a paraphrase of them,
+/// so the haze this port fades to and the haze the source's fog shader computes
+/// are the same arithmetic on the same atmosphere.
+/// `haze_is_exactly_the_source_composites_inscatter_asymptote` pins that against
+/// [`crate::sky::volumetrics::composite_analytic`] rather than asserting it.
+///
+/// Every coefficient in it is the source's: `0.55` and the `sigmaS/sigmaE`
+/// grouping from `volumetrics.js:381-383`; `scatter = 3.6e-3`,
+/// `extinction = 1.45e-3`, `ambientGain = 0.22`, `shaftGain = 2.6` and the three
+/// phase terms from `index.js:201-234`; the two ambient texels from
+/// `AMBIENT_FRAG` (`luts.js:208-235`).
+///
+/// ## `cos_key = 0` — REDUCED FROM A PER-PIXEL QUANTITY, NOT DERIVED
+///
+/// The source's own expression is `dot( dir, uKeyDir )`
+/// (`volumetrics.js:380`), evaluated at every pixel. `skFogAmbient`'s whole
+/// thesis is that the haze therefore has **no single colour**: it is amber
+/// looking into a low sun and blue looking away, and averaging the two is what
+/// "grey fog at sunset" is (`volumetrics.js:58-64`). `FrameDepthFog` carries
+/// **one** colour for the whole frame, so the port has to collapse that axis to
+/// a point, and this is that collapse — not a tuning knob and not fitted to any
+/// measurement.
+///
+/// The point chosen is the geometric middle: `cos_key = 0` is the view
+/// perpendicular to the key, neither the forward lobe nor the back lobe, and it
+/// is the only value on the axis that does not bake a camera azimuth into a
+/// level the player is free to turn around in. It is also the conservative end
+/// — at hour 16.5 the asymptote runs `[0.141, 0.136, 0.134]` here against
+/// `[0.456, 0.396, 0.329]` at `cos_key = -1` — so a level authored here
+/// under-veils a sunward view rather than over-veiling every other one, which is
+/// the direction the source itself moved when it cut the density by 40%
+/// (`index.js:189-200`).
+///
+/// **What deletes it:** `FrameDepthFog` carrying the *pair* of colours and the
+/// key direction to mix them by — the shape `skFogAmbient` already has. Then the
+/// port passes both texels through and the collapse disappears.
+fn haze_radiance(system: &SkySystem, ambient: [Vec3; 2]) -> Vec3 {
+    const COS_KEY: f64 = 0.0;
+    let fog = system.fog;
+    let key = system.shared.key_irr;
+    let phase = fog_inscatter_phase(
+        COS_KEY,
+        fog.phase_forward,
+        fog.phase_backward,
+        fog.phase_back_weight,
+        fog.shaft_gain,
+    );
+    key.scale(phase * 0.55)
+        .add(fog_ambient(COS_KEY, ambient, key).scale(fog.ambient_gain))
+        // `uFog.x / max( 1.0e-6, uFog2.x )` — the single-scattering albedo the
+        // source deliberately does *not* tie to one number
+        // (`volumetrics.js:29-35`): 3.6e-3 / 1.45e-3 = 2.48.
+        .scale(fog.scatter / fog.extinction.max(1.0e-6))
 }
 
 /// **The dome's own shoulder** — `skRolloff` (`sky/dome.js:140-154`), applied
@@ -999,58 +1184,6 @@ mod tests {
         SkyDriver::new(Quality::High, HOUR)
     }
 
-    /// TEMPORARY EXPLORATION — deleted before the change lands.
-    #[test]
-    fn explore_haze_asymptote() {
-        use crate::sky::volumetrics::{fog_ambient, fog_inscatter_phase};
-        let sky = authored_hour();
-        let sh = sky.system.shared;
-        let (tl, ml) = sky.luts();
-        let sun = sky.system.sun_direction();
-        let moon = sky.system.moon_direction();
-        let radiance = |dir: Vec3| -> Vec3 {
-            raymarch_sky(
-                sh.view_pos, dir, sun, sh.sun_irradiance, moon, sh.moon_irradiance,
-                DIRECTION_STEPS, sh.mie_scale,
-                |p, d| { let (u, v) = lut_uv(p, d); tl.sample(u, v) },
-                |p, d| { let (u, v) = lut_uv(p, d); ml.sample(u, v) },
-            )
-        };
-        let probe = |horizon_band: bool| -> Vec3 {
-            let n = 64usize;
-            let mut sum = Vec3::splat(0.0);
-            let mut wsum = 0.0;
-            for i in 0..n {
-                let fi = (i as f64 + 0.5) / n as f64;
-                let phi = i as f64 * 2.399_963_23;
-                let ct = if horizon_band { -0.12 + (0.35 - -0.12) * fi } else { (1.0 - fi).sqrt() };
-                let st = (1.0 - ct * ct).max(0.0).sqrt();
-                let d = Vec3::new(st * phi.cos(), ct, st * phi.sin());
-                let w = if horizon_band { 1.0 } else { ct.max(0.0) };
-                sum = sum.add(radiance(d).scale(w));
-                wsum += w;
-            }
-            sum.scale(1.0 / wsum.max(1e-4))
-        };
-        let ambient = [probe(false), probe(true)];
-        println!("ambient cool {:?}", ambient[0]);
-        println!("ambient hor  {:?}", ambient[1]);
-        println!("key_irr {:?}", sh.key_irr);
-        println!("key_dir {:?}", sh.key_dir);
-        println!("sun {sun:?}");
-        println!("clear_color(scene) {:?}", sky.clear_color().to_array());
-        let f = sky.system.fog;
-        for cos in [-1.0_f64, -0.7, -0.3, 0.0, 0.3, 0.7, 1.0] {
-            let insc = sh
-                .key_irr
-                .scale(fog_inscatter_phase(cos, f.phase_forward, f.phase_backward, f.phase_back_weight, f.shaft_gain) * 0.55)
-                .add(fog_ambient(cos, ambient, sh.key_irr).scale(f.ambient_gain))
-                .scale(f.scatter / f.extinction);
-            println!("cos {cos:+.1}: raw {:?} scene {:?}", insc, scene_radiance(insc).to_array());
-        }
-        panic!("explore");
-    }
-
 
     /// **The defect this file was rewritten to fix, written down as a number.**
     ///
@@ -1249,19 +1382,181 @@ mod tests {
         assert_eq!(clear, sky.clear_color());
     }
 
+    /// **The defect this rewrite exists to fix, written down as a number.**
+    ///
+    /// `FrameDepthFog::mix_fraction` multiplies the *composed* screen-and-air
+    /// density by `strength`, so the `strength = 0` this function used to author
+    /// — intended to park the NDC ramp — multiplied the extinction term by zero
+    /// too. The port published a correct-looking rate and rendered no aerial
+    /// perspective at all. Nothing but an evaluation of the contract catches
+    /// that, so this test evaluates it.
     #[test]
-    fn the_fog_is_the_physical_term_only_and_recedes_toward_the_sky() {
+    fn the_fog_is_the_physical_term_only_and_actually_reaches_the_pixel() {
+        use axiom::prelude::Meters;
         let sky = authored_hour();
         let fog = sky.depth_fog();
-        assert_eq!(fog.strength().get(), 0.0, "the NDC ramp is a deliberate no-op");
-        let rate = fog.extinction().get();
+
         // `1.45e-3 /m` in base e is ~2.1e-3 in base 2, luminance-weighted a
-        // touch above that by the blue-biased tint.
-        assert!(rate > 2.0e-3 && rate < 2.3e-3, "got {rate}");
-        let clear = sky.clear_color().to_array();
-        assert_eq!(fog.color(), [clear[0], clear[1], clear[2]]);
-        // Half the haze is in at ~470 m, which is the street's whole depth.
-        assert!(fog.extinction().get() * 470.0 > 0.9);
+        // touch above that by the blue-biased tint, then scaled by the source's
+        // own height density at eye level (`exp(-3.75/18) = 0.812`).
+        let rate = fog.extinction().get();
+        assert!(rate > 1.68e-3 && rate < 1.78e-3, "got {rate}");
+        // Half the haze is in at ~578 m — the source's coefficient, not a fit.
+        assert!((f64::from(rate).recip() - 578.0).abs() < 12.0);
+
+        // THE REGRESSION GUARD. Every distance in the level has to produce a
+        // non-zero mix, at a plausible magnitude: the gate terminating the
+        // street is ~62 m out and the source's own tuning note says a facade at
+        // 60 m keeps ~92% of its own light.
+        let at = |m: f32| fog.mix_fraction(Ratio::finite_or_zero(0.0), Meters::finite_or_zero(m)).get();
+        assert!(at(1.0) > 0.0, "the fog is inert: {fog:?}");
+        assert!((at(62.0) - 0.072).abs() < 0.005, "62 m reads {}", at(62.0));
+        assert!(at(250.0) > at(62.0) && at(900.0) > at(250.0), "not monotone");
+        assert!(at(900.0) < 0.80, "900 m is a haze, not a wall: {}", at(900.0));
+
+        // The NDC ramp contributes nothing in front of the far plane, which is
+        // what `near == far` buys — and a backend without
+        // `RenderCapability::AerialPerspective` (distance 0) still gets nothing.
+        let ramp_only = |z: f32| {
+            fog.mix_fraction(Ratio::finite_or_zero(z), Meters::finite_or_zero(0.0)).get()
+        };
+        [0.0_f32, 0.5, 0.976, 0.994, 0.9999].into_iter().for_each(|z| {
+            assert_eq!(ramp_only(z), 0.0, "the ramp fired at ndc {z}");
+        });
+    }
+
+    /// The colour distance recedes toward is the **haze**, not the sky.
+    ///
+    /// The two are different objects and the port used to conflate them: the
+    /// clear colour is the atmosphere's own radiance in the view band, and at
+    /// 16.5 it is strongly blue; the haze is the ground layer's single-scattering
+    /// asymptote, and it is near-neutral because `skFogAmbient` mixes a cool
+    /// whole-sky average with a warm horizon band and the key's forward lobe
+    /// sits on top. Fading a warm sunlit street toward the *sky* tints distance
+    /// blue; fading it toward the haze desaturates it, which is what aerial
+    /// perspective does and what the original measures as.
+    #[test]
+    fn the_fog_recedes_toward_the_haze_and_the_haze_is_not_the_sky() {
+        let sky = authored_hour();
+        let haze = sky.radiance().haze.to_array();
+        let clear = sky.radiance().clear_color.to_array();
+        assert_eq!(sky.depth_fog().color(), [haze[0], haze[1], haze[2]]);
+
+        let ratio_rb = |c: [f32; 4]| c[0] / c[2];
+        // The sky is blue: red is a third of blue. The haze is neutral to within
+        // 15%, and slightly WARM of neutral rather than cool.
+        assert!(ratio_rb(clear) < 0.45, "the clear colour stopped being sky: {clear:?}");
+        assert!(
+            (1.0..1.15).contains(&ratio_rb(haze)),
+            "the haze is not near-neutral: {haze:?}"
+        );
+        // And it is brighter than the sky band it replaced, so distance now
+        // desaturates *upward* toward a bright grey rather than sinking blue.
+        let luma = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        assert!(luma(haze) > luma(clear), "haze {haze:?} clear {clear:?}");
+    }
+
+    /// **The base conversion, verified rather than trusted.**
+    ///
+    /// The source's coefficient is Beer-Lambert in `e`
+    /// (`trans = exp( -uFogExt * od )`, `volumetrics.js:368`);
+    /// `FrameDepthFog`'s is in `2` (`1 - 2^(-rate * d)`). An inverted `LN_2`
+    /// here is a pure 2.08x multiplier on all fog density and would read as a
+    /// tuning problem, not as a bug — so this evaluates both transmittances at
+    /// four distances instead of asserting the constant.
+    #[test]
+    fn the_e_to_2_base_conversion_reproduces_the_sources_transmittance() {
+        let sky = authored_hour();
+        let fog = sky.system.fog;
+        let tint = fog.extinction_tint;
+        let luma = 0.2126 * tint.x + 0.7152 * tint.y + 0.0722 * tint.z;
+        let d0 = (-(FOG_EYE_ALTITUDE - fog.base_y) / fog.height_scale).exp();
+        // `exp( -uFogExt * skHeightIntegral(...) )` along a level ray at eye
+        // height, luminance-collapsed: the quantity the engine's rate stands in
+        // for.
+        let source = |d: f64| (-(fog.extinction * luma) * (d0 * d)).exp();
+        let rate = f64::from(sky.depth_fog().extinction().get());
+        let engine = |d: f64| 2.0_f64.powf(-rate * d);
+        [10.0_f64, 62.0, 250.0, 900.0].into_iter().for_each(|d| {
+            let (a, b) = (source(d), engine(d));
+            assert!(
+                (a - b).abs() / a < 2.0e-6,
+                "at {d} m the source keeps {a} and this port keeps {b}"
+            );
+        });
+        // And the height density really is in there: without it the rate is
+        // 1/0.812 too big, which this catches.
+        assert!(d0 > 0.81 && d0 < 0.813, "d0 moved: {d0}");
+    }
+
+    /// **The haze is the source's own asymptote, pinned against the source's own
+    /// composite.**
+    ///
+    /// [`haze_radiance`] is a hand-lifted bracket out of
+    /// `COMPOSITE_FRAG`'s `VOL_ANALYTIC` arm, and a hand-lifted expression is
+    /// exactly the thing that drifts from the expression it was lifted from. So
+    /// this drives the *whole* ported composite
+    /// ([`crate::sky::volumetrics::composite_analytic`]) over a black surface at
+    /// a distance long enough for `mono` to saturate, and requires that what it
+    /// returns is the haze. The probe is synthetic and arbitrary on purpose —
+    /// the identity has to hold for any sky, not just this hour's.
+    #[test]
+    fn haze_is_exactly_the_source_composites_inscatter_asymptote() {
+        use crate::sky::volumetrics::{composite_analytic, FogUniforms};
+        let sky = authored_hour();
+        let fog = sky.system.fog;
+        let shared = sky.system.shared;
+        let probe = [
+            Vec3::new(0.057, 0.108, 0.208),
+            Vec3::new(0.207, 0.317, 0.445),
+        ];
+        let haze = haze_radiance(&sky.system, probe);
+
+        // A LEVEL ray PERPENDICULAR to the key: `dir.y = 0` puts
+        // `skHeightIntegral` on its `abs(x) < 1e-4` arm (so the optical depth is
+        // `d0 * t`), and `dot( dir, uKeyDir ) = 0` is the `cos_key` the haze is
+        // authored at.
+        let key = shared.key_dir;
+        let dir = Vec3::new(-key.z, 0.0, key.x).normalize();
+        assert!(dir.dot(key).abs() < 1.0e-12, "the probe ray is not perpendicular");
+
+        let u = FogUniforms {
+            sigma_s: fog.scatter,
+            inv_height_scale: shared.fog[1],
+            base_y: fog.base_y,
+            max_distance: fog.max_distance,
+            sigma_e: fog.extinction,
+            shaft_gain: fog.shaft_gain,
+            ambient_boost: fog.ambient_gain,
+            noise_amount: fog.noise,
+            fog_ext: shared.fog_ext,
+            g_fwd: fog.phase_forward,
+            g_back: fog.phase_backward,
+            back_weight: fog.phase_back_weight,
+            noise_scale: fog.noise_scale,
+            key_dir: key,
+            key_irr: shared.key_irr,
+            fog_drift: Vec3::splat(0.0),
+            ambient: probe,
+        };
+        // Far enough that `mono` is 1 to double precision, over a black surface
+        // so the whole result IS the inscatter.
+        let far = composite_analytic(Vec3::splat(0.0), dir, 1.0e7, FOG_EYE_ALTITUDE, &u);
+        [(far.x, haze.x), (far.y, haze.y), (far.z, haze.z)]
+            .into_iter()
+            .for_each(|(got, want)| {
+                assert!(
+                    (got - want).abs() / want < 1.0e-12,
+                    "the composite converges to {got}, the authored haze is {want}"
+                );
+            });
+        // Half-way out it is the same colour at a lower opacity — the property
+        // `FrameDepthFog`'s single colour depends on.
+        let near = composite_analytic(Vec3::splat(0.0), dir, 400.0, FOG_EYE_ALTITUDE, &u);
+        let mix = near.x / haze.x;
+        assert!(mix > 0.05 && mix < 0.95, "400 m is saturated or empty: {mix}");
+        assert!((near.y / haze.y - mix).abs() < 1.0e-12, "the haze changed hue with range");
+        assert!((near.z / haze.z - mix).abs() < 1.0e-12, "the haze changed hue with range");
     }
 
     #[test]
