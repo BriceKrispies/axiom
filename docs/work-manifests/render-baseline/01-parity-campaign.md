@@ -22,6 +22,78 @@ Servers: original `http://localhost:8087/`, port `http://localhost:8088/`.
 - `apps/` is outside the Branchless Law and the Coverage Law. `crates/` and
   `modules/` are not.
 
+## THE DOMINANT DEFECT — the port cannot make anything dark
+
+Established by independent audit at matched camera on two shots. **This outranks
+everything else in this document.**
+
+- **Interior/exterior is INVERTED.** Original room = **0.399x** the street outside
+  (2.5x darker). Port room = **1.454x** (brighter). The `interior` shots entire
+  subject, backwards, by 3.6x. Interior wall x2.69 too bright, exterior through
+  the door x0.74 too dark.
+- **The error is in the shadows and in RED.** Shadowed sidewalk on `hero`:
+  original `0.097,0.127,0.159`, port `0.546,0.331,0.163`. **Blue matches to x1.02;
+  red is inflated x5.63.** Split-tone: shadow warmth 0.80 -> 1.55 (x1.94),
+  highlight warmth 1.12 -> 1.20 (x1.07). **The highlights already match.**
+- **Coherent shadow area x0.34.** Road rect: original 2 dark blobs over 22.7%;
+  port 10 fragments over 7.7%. Port p10 luminance 0.221 vs 0.109 — its darkest
+  decile is twice as bright as the originals.
+
+**Cause, structural and stated in the ports own source:** `look.rs:42-45` records
+that the originals ambient comes from a **GPU env bake** the port does not have;
+`look.rs:32` calls hemisphere ambient "partial". The substitute is a **fixed
+two-band fill** (`look.rs:433-437`, `SKY_FILL 0.32`, `INTERIOR_INDIRECT 0.035`)
+with **no occlusion or visibility term**. A constant fill is structurally
+incapable of making an interior darker than a street. **No value of those
+constants fixes it — do not tune them.**
+
+Consequence for the cascade work: **even a perfect cascade will not read correctly
+until the ambient stops flooding the shadows.**
+
+## THE INSTRUMENTS WERE WRONG
+
+- **Bimodality and p90:p10 do not measure cast shadows.** Both are histogram
+  statistics; a histogram is spatially blind, so a shadow slab and salt-and-pepper
+  noise score identically. **Bimodality has the SIGN BACKWARDS** on a road rect
+  (orig 0.178, port 0.287). The 0.656/0.541 whole-frame reading was the
+  sky/ground/viewmodel split. p90:p10 is unreproducible (3.28 vs 2.45 on clean
+  road) and is an outlier detector.
+  **Correct instrument: `scripts/shadow_structure.py`.** Target: top-3 blobs
+  >= 22.7% in <= 2 components.
+- **Every metric is blind to a dead frame.** Two black captures scored a PERFECT
+  match (`maxdiff=0.0`). Run `scripts/frame_sanity.py` before scoring anything.
+- **Means over mixed regions launder inversions.** `hero`s global tone reads SAME
+  only because x2.69 and x0.74 errors cancel; `interior` reads +0.474 stop. **Never
+  quote a global tone number again without a paired local ratio.**
+- **The capture recipe fails silently.** `?capture=1` ALONE did not raise
+  `__READY__` during the audit (engine never stepped, black page, live HUD).
+  **`?capture=1&prewarm=0` works.** `lockstep=1` reaches ready but renders a wrong
+  frame. Some existing numbers are of unknown provenance.
+
+## CENSUS CONTRADICTION — SETTLED
+
+Both agents were right and measuring different instruments. Claim Bs ratios
+reproduce exactly by dividing port per-frame/inventory numbers by the originals
+BUILD-TIME numbers: 140/62 = 2.26, 506/308 = 1.64, 686822/586000 = 1.17 — that
+last dividing total mesh tris by a static-only subtotal, discarding the originals
+own 115k instanced tris. **Like for like: x0.980.** Edge cross-correlation peaks
+at exactly (0,0) on both shots. **The buildings match to sub-two-pixel accuracy;
+the clutter does not.** The -1.80 stop `shade` residual re-attributes from town
+difference to the ambient defect above.
+
+## NEWLY FOUND (nobody had looked)
+
+- **Minimap renders no world geometry** — empty grid vs the originals footprints
+  and street network.
+- **Compass heading is wrong and not by a constant offset** — `hero` orig NW, port
+  SE (180deg); `interior` ~105deg apart. Geometric truth at `hero` is N33.7W; the
+  original is correct.
+- **Viewmodel is a far lower-detail mesh**, flat-shaded, offset ~60px left/20px up.
+  ~15% of the frame.
+- **Sky colour does NOT match** (earlier claim refuted): cloud-excluded zenith R
+  0.765 -> 0.641, and the **vertical gradient is inverted** — original brighter at
+  the horizon (correct air-mass scattering), port brighter at the zenith.
+
 ## EXECUTION FREEZE (in force)
 
 Ten concurrent agents building at once thrashed the machine. **Agents are
@@ -140,11 +212,20 @@ Witness, same binary, same tree:
 
 Instances and draw calls match the golden exactly. **This unblocks scoring.**
 
-Residual, deliberately not hidden: `staticTris` is **294 short (0.05%)**. Every
-instanced placement matches, so this is a GEOMETRY defect in `crate::world`, not a
-seeding one. Recorded as `the_static_triangle_count_still_falls_short`, `#[ignore]`d
-with the un-ignore command in its doc comment, so it cannot be forgotten while the
-world agent is still moving that number. Target: 585630.
+Residual **CLOSED**. `staticTris` lands on 585630 exactly. Two causes, both cited:
+a hoisted `sr.int(1, 3)` loop bound in `buildGround`s seam pass (230 tris,
+`ground.js:205` — the source puts the bound in the loop CONDITION, so it redraws
+before every iteration including the one that fails) and an f32-narrowed width
+flipping `Math.round(11.4 / 1.2)` from 10 to 9 on four buildings jagged parapets
+(64 tris, `util.js:480`). Pinned by
+`the_static_triangle_count_matches_the_golden`, un-ignored and passing.
+
+Found by a **per-emit trace** — every `Assembler.add` with its palette key and
+triangle delta, from BOTH sides, the originals taken by running its JS headless
+under Node. 17,133 entries, matching entry for entry. That instrument also caught a
+defect no count could ever find: two `rng.pick` calls drawn AFTER their transform,
+so each cushion gets the colour that belonged to its neighbours x-offset — same
+four draws, zero triangle delta, wrong only in the frame.
 
 Correction to earlier notes: the "original world stream `2835107428,…`" is the
 world forks INITIAL state; `rng-golden.json`s `systems.world` is the POST-BOOT
