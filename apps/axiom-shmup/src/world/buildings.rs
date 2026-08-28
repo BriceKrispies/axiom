@@ -115,8 +115,10 @@ fn patch_key(wall_key: &str) -> &'static str {
     }
 }
 
-/// `sideLen(spec, side)` (`buildings.js:79`).
-fn side_len(w: f32, d: f32, side: u32) -> f32 {
+/// `sideLen(spec, side)` (`buildings.js:79`). Generic over precision: the
+/// same selection serves this port's `f32` vertex maths and the `f64`
+/// footprint the source's integer counts are derived from.
+fn side_len<T>(w: T, d: T, side: u32) -> T {
     if side == 0 || side == 2 {
         w
     } else {
@@ -152,21 +154,43 @@ pub struct Footprint {
     pub d: f32,
 }
 
-/// `floorSpec(spec, f)` (`buildings.js:87-107`).
-fn floor_footprint(spec: &Building, f: u32) -> Footprint {
-    let base = Footprint { x: spec.x as f32, z: spec.z as f32, w: spec.w as f32, d: spec.d as f32 };
+/// `floorSpec(spec, f)` (`buildings.js:87-107`) at the SOURCE's own `f64`
+/// precision, as `[x, z, w, d]`.
+///
+/// This exists because the source turns this footprint into **integers**:
+/// `Math.round(len / 3.05)` for the bay count and `Math.round(w / 1.2)` for a
+/// jagged parapet's step count. An `f32` length can sit on the other side of a
+/// half-way point from the `f64` one the source rounds — measured, at the shop
+/// facade's `w = 11.4`: `11.4 / 1.2` is `9.500000000000002` in f64 and
+/// `9.4999995` in f32, so the source stepped 10 and this port stepped 9. One
+/// jag vertex fewer is eight triangles fewer, on two panels in each of four
+/// buildings — 64 of the level's 294-triangle shortfall against
+/// `rng-golden.json`.
+///
+/// [`floor_footprint`] is this, narrowed. There is one implementation of the
+/// set-back arithmetic, not two.
+fn floor_footprint_exact(spec: &Building, f: u32) -> [f64; 4] {
+    let base = [spec.x, spec.z, spec.w, spec.d];
     match spec.setback {
         Some(sb) if f >= sb.from => {
-            let d = sb.depth as f32;
+            let d = sb.depth;
+            let [x, z, w, dep] = base;
             match sb.side.unwrap_or(spec.street_side) {
-                1 => Footprint { x: base.x - d / 2.0, w: base.w - d, ..base },
-                3 => Footprint { x: base.x + d / 2.0, w: base.w - d, ..base },
-                0 => Footprint { z: base.z + d / 2.0, d: base.d - d, ..base },
-                _ => Footprint { z: base.z - d / 2.0, d: base.d - d, ..base },
+                1 => [x - d / 2.0, z, w - d, dep],
+                3 => [x + d / 2.0, z, w - d, dep],
+                0 => [x, z + d / 2.0, w, dep - d],
+                _ => [x, z - d / 2.0, w, dep - d],
             }
         }
         _ => base,
     }
+}
+
+/// `floorSpec(spec, f)` (`buildings.js:87-107`), narrowed to this port's `f32`
+/// vertex precision. See [`floor_footprint_exact`] for what is NOT narrowed.
+fn floor_footprint(spec: &Building, f: u32) -> Footprint {
+    let [x, z, w, d] = floor_footprint_exact(spec, f);
+    Footprint { x: x as f32, z: z as f32, w: w as f32, d: d as f32 }
 }
 
 /// The strip of roof left exposed by a setback: slab, coping and a parapet
@@ -351,13 +375,19 @@ struct FacadeCtx {
 fn build_facade(asm: &mut Assembler, rng: &mut Rng, fp: &Footprint, building: &Building, info: &mut BuildingInfo, ctx: FacadeCtx) {
     let FacadeCtx { side, f, y, h, t, street_side, floors } = ctx;
     let len = side_len(fp.w, fp.d, side);
+    // The same length at the source's precision. Every INTEGER the source
+    // derives from it (`bays` here, the jag/ragged step counts inside
+    // `wall_panel`) is rounded from this, never from `len` — see
+    // `floor_footprint_exact`.
+    let [_, _, ew, ed] = floor_footprint_exact(building, f);
+    let len_exact = side_len(ew, ed, side);
     let pm = panel_matrix(fp.x, fp.z, fp.w, fp.d, side, y);
     let street = side == street_side;
     let secondary = building.secondary_side == Some(side);
     let open_face = street || secondary;
     let wall_key = building.wall_key;
 
-    let bays = ((len / 3.05).round() as i32).max(1) as u32;
+    let bays = ((len_exact / 3.05).round() as i32).max(1) as u32;
     let bw = len / bays as f32;
     let ruin_top = building.ruin && f == floors - 1;
 
@@ -486,7 +516,7 @@ fn build_facade(asm: &mut Assembler, rng: &mut Rng, fp: &Footprint, building: &B
     facade_wall(
         asm,
         &pm,
-        FacadeSpec { w: len, h: h + if is_top { 0.02 } else { 0.0 }, t, key: wall_key, openings: &opening_holes, rng: Some(rng), bevel: 0.022, top, warp: 0.02, paint: Some(&mut paint) },
+        FacadeSpec { w: len_exact, h: h + if is_top { 0.02 } else { 0.0 }, t, key: wall_key, openings: &opening_holes, rng: Some(rng), bevel: 0.022, top, warp: 0.02, paint: Some(&mut paint) },
     );
 
     // ---- deferred deco (phase B — see this module's doc, divergence 1) ----
@@ -807,7 +837,10 @@ fn build_interior(asm: &mut Assembler, rng: &mut Rng, spec: &Building, info: &Bu
                     out[1] = (out[1] + base * base * 0.5).min(1.0);
                     out[2] = (out[2] + base * base * 0.35).min(1.0);
                 };
-                facade_wall(asm, &pm, FacadeSpec { w: len, h: fh, t: it, key: "plaster_white", openings: &holes, rng: Some(rng), bevel: 0.012, top: WallTop::Flat { jag: 0.0 }, warp: 0.012, paint: Some(&mut paint) });
+                // `f64::from` rather than an exact f64 length: this partition is
+                // `top: flat` with `jag: 0`, so `wall_panel` derives no integer
+                // step count from it and the widening cannot change a count.
+                facade_wall(asm, &pm, FacadeSpec { w: f64::from(len), h: fh, t: it, key: "plaster_white", openings: &holes, rng: Some(rng), bevel: 0.012, top: WallTop::Flat { jag: 0.0 }, warp: 0.012, paint: Some(&mut paint) });
                 for hole in &holes {
                     let leaf = rng.float() < 0.4;
                     door_unit(asm, &pm, hole, rng, DoorOpts { t: it, frame_key: "wood_dark", leaf, leaf_key: "wood_dark", open: 1.4 });

@@ -14,7 +14,11 @@ use super::{solid_slabs, wall_panel, WallHole, WallPanelOpts, WallTop};
 /// arguments; the source's defaults are named here: `bevel = 0.022`,
 /// `top = Flat { jag: 0.0 }`, `warp = 0.018`.
 pub struct FacadeSpec<'a> {
-    pub w: f32,
+    /// The panel width at the SOURCE's f64 precision (`sideLen(spec, side)`,
+    /// `buildings.js:79`). [`wall_panel`] turns it into two integer step
+    /// counts, and an f32 width rounds one of them differently — see
+    /// `wall_panel`'s jag branch.
+    pub w: f64,
     pub h: f32,
     pub t: f32,
     pub key: &'a str,
@@ -66,7 +70,7 @@ pub fn facade_wall<'a>(asm: &mut Assembler, pm: &Mat4, spec: FacadeSpec<'a>) -> 
     asm.add_once(spec.key, &g, Some(pm), opts);
 
     let surface = asm.surface_of(spec.key);
-    for s in solid_slabs(spec.w, spec.h, spec.openings) {
+    for s in solid_slabs(spec.w as f32, spec.h, spec.openings) {
         asm.slab_box(surface, pm, s.x, s.y, s.w, s.h, spec.t);
     }
 

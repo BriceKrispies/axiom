@@ -1083,11 +1083,10 @@ mod tests {
     /// | #3 (the source's slot)   | 585336 | **308** | **62** |
     /// | `rng-golden.json`        | 585630 | **308** | **62** |
     ///
-    /// The placement counts land on the golden the moment the world generator
-    /// draws from the right fork, which is the strongest available evidence
-    /// that the seeding is now the source's. `staticTris` does not, and that
-    /// residue is a *geometry* defect rather than a seeding one - see
-    /// `the_static_triangle_count_still_falls_short` below.
+    /// The placement counts landed on the golden the moment the world generator
+    /// drew from the right fork. `staticTris` did not, and that residue was a
+    /// *geometry* defect rather than a seeding one; it is closed - see
+    /// `the_static_triangle_count_matches_the_golden` below for the two causes.
     #[test]
     fn the_generated_level_matches_the_sources_witness() {
         let game = Game::new(CAPTURE_SEED);
@@ -1098,27 +1097,31 @@ mod tests {
         );
     }
 
-    /// **THE OPEN SECOND DEFECT — 294 static triangles missing.**
+    /// **The third witness number, and the two defects it caught.**
     ///
-    /// With the fork order corrected the port's merged static geometry comes to
+    /// With the fork order corrected the port's merged static geometry came to
     /// `585336` triangles against the golden's `585630`: a shortfall of 294,
-    /// 0.05%. Every instanced placement matches exactly, so this is not a
-    /// reseed - the same passes run in the same order off the same stream and
-    /// one of them emits slightly less merged geometry than the source's.
+    /// 0.05%, with every instanced placement already exact. Two causes, found
+    /// by diffing this port's per-`Assembler::add` emit trace against the same
+    /// trace taken from the ORIGINAL JavaScript run headless under Node:
     ///
-    /// Ignored rather than left red because the world generator
-    /// (`crate::world`) is under active change and this number moves with it;
-    /// un-ignore it to work the defect:
+    /// * **230** in `buildGround`'s material-seam scatter. The source's
+    ///   `for (let k = 0; k < sr.int(1, 3); k++)` (`ground.js:205`) re-draws
+    ///   its bound before every iteration *including the failing one*; this
+    ///   port had hoisted it to a single draw, which desynchronised the seam
+    ///   pass's private `sr` stream and emitted the wrong mix of `sand` /
+    ///   `road_dust` / `concrete` / `dirt` / `gravel` patches.
+    ///   `world::ground::seam` now uses `int_loop_continues`, as the other 24
+    ///   sites of that idiom already did.
+    /// * **64** in four buildings' jagged parapets. `Math.round(w / 1.2)`
+    ///   (`util.js:480`) is an integer derived from a length, and at
+    ///   `w = 11.4` f64 rounds to 10 where f32 rounds to 9. `wall_panel` now
+    ///   takes the width at the source's precision; see
+    ///   `world::buildings::floor_footprint_exact`.
     ///
-    /// ```text
-    /// cargo test -p axiom-shmup --lib the_static_triangle_count -- --ignored
-    /// ```
-    ///
-    /// It is recorded here rather than in prose so it cannot be forgotten: the
-    /// port does not generate the source's town until this passes.
+    /// The number is asserted rather than described so neither can come back.
     #[test]
-    #[ignore = "open defect: 294 static triangles short of rng-golden.json's witness"]
-    fn the_static_triangle_count_still_falls_short() {
+    fn the_static_triangle_count_matches_the_golden() {
         let game = Game::new(CAPTURE_SEED);
         assert_eq!(
             game.level.static_tris, 585_630,

@@ -534,8 +534,17 @@ fn furnish_living(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz:
     for _ in 0..3 {
         let mut g = chamfer_box(0.42, 0.14, 0.42, 0.06);
         g.fill_masks(0.2, 0.4, 0.2);
+        // THE PICK IS DRAWN FIRST. `A.addOnce(rng.pick([...]), g, LL(..., rng.range,
+        // ..., rng.range, rng.float), ...)` (`interiors.js:503-508`): JavaScript
+        // evaluates arguments left to right, so the colour comes off the stream
+        // BEFORE the two offsets and the yaw. Drawing them the other way round
+        // consumes the same FOUR values, so nothing downstream shifts and the
+        // witness still passes — it just hands each cushion the colour that
+        // belonged to its neighbour's x-offset. That is exactly how this defect
+        // hid: it is invisible in every count and visible only in the frame.
+        let key = *rng.pick(&["fabric_red", "fabric_teal", "fabric_cream"]);
         let m = ll(&Mat4::IDENTITY, cx + rng.range(-1.0, 1.0) as f32, y + 0.07, cz + rng.range(-1.0, 1.0) as f32, rng.float() as f32 * 6.28, 1.0, 1.0, 1.0, 0.0, 0.0);
-        asm.add_once(*rng.pick(&["fabric_red", "fabric_teal", "fabric_cream"]), &g, Some(&m), None);
+        asm.add_once(key, &g, Some(&m), None);
     }
     asm.put("cabinet", x1 - 0.35, y, cz + rng.range(-0.6, 0.6) as f32, -std::f32::consts::FRAC_PI_2, 1.0, Some([1.0, 1.0, 1.0]), 0.0, 0.0);
     asm.collide_box(Surface::Wood, x1 - 0.35, y + 0.6, cz, 0.5, 1.2, 0.9, 0.0);
@@ -709,8 +718,11 @@ fn furnish_ruin(asm: &mut Assembler, rng: &mut Rng, r: &RoomRect, cx: f32, cz: f
 /// `addRug(A, rng, x, y, z, size)` (`interiors.js:612-628`).
 fn add_rug(asm: &mut Assembler, rng: &mut Rng, x: f32, y: f32, z: f32, size: f32) {
     let g = cloth_geometry(size, size * rng.range(0.55, 0.75) as f32, ClothOpts { seg_x: 8, seg_y: 6, sag: 0.0, wrinkle: 0.02, thickness: 0.0038, fray: 0.012, ..ClothOpts::default() }, Some(rng));
+    // The pick before the yaw (`interiors.js:622-625`) — argument order, see
+    // the cushions in `furnish_living` for what swapping them costs.
+    let key = *rng.pick(&["fabric_red", "fabric_teal", "fabric_cream"]);
     let m = ll(&Mat4::IDENTITY, x, y + 0.014, z, rng.range(-0.4, 0.4) as f32, 1.0, 1.0, 1.0, -std::f32::consts::FRAC_PI_2, 0.0);
-    asm.add_once(*rng.pick(&["fabric_red", "fabric_teal", "fabric_cream"]), &g, Some(&m), Some(AccumAddOpts { masks: Some([0.45, 0.55, 0.25]), paint: None }));
+    asm.add_once(key, &g, Some(&m), Some(AccumAddOpts { masks: Some([0.45, 0.55, 0.25]), paint: None }));
 }
 
 /// `stackCrates(A, rng, x, y, z, n)` (`interiors.js:630-653`). `pub` — the

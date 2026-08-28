@@ -37,6 +37,7 @@
 use crate::rng::Rng;
 use crate::world::accum::AccumAddOpts;
 use crate::world::assembler::Assembler;
+use crate::world::dressing::int_loop_continues;
 use crate::world::geo::WorldGeo;
 use crate::world::kit::{chamfer_box, cylinder_geometry, patch_geometry, plane_geometry, trs};
 use crate::world::layout::{road_y, ALLEYS, STREET};
@@ -316,8 +317,20 @@ fn seam(asm: &mut Assembler, sr: &mut Rng, ax: f64, az: f64, bx: f64, bz: f64, k
             asm.add_once(key, &g, Some(&m), Some(AccumAddOpts { masks: Some([0.15, mask_g, mask_b]), paint: None }));
         }
         if asm.has("rock_b") {
-            let k_count = sr.int(1, 3);
-            for _ in 0..k_count {
+            // `for (let k = 0; k < sr.int(1, 3); k++)` (`ground.js:205`). The
+            // bound is in the loop CONDITION, so the source re-draws it before
+            // every iteration INCLUDING the one that fails — between one and
+            // four draws, not one. Hoisting it to a single `k_count` drew once,
+            // and every `sr` value after the first seam vertex was a different
+            // number: patches that should have been skipped by the `0.22`
+            // continue were emitted, and patches that should have been emitted
+            // were skipped. That is the whole of the level's 294-triangle
+            // shortfall against `rng-golden.json`. `int_loop_continues`
+            // (`dressing/mod.rs`) is how the rest of this port spells the
+            // idiom; this was the one site that did not.
+            let mut k = 0;
+            while int_loop_continues(sr, k, 1, 3) {
+                k += 1;
                 let off = sr.range(-0.55, 0.55);
                 let id = if sr.float() < 0.68 { "rock_b" } else { "rock_a" };
                 let x = px + nxs * off + sr.range(-0.2, 0.2);

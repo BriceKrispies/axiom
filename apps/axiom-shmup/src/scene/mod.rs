@@ -11,7 +11,6 @@
 //! | [`wiring`]    | every ported `<name>/index.js` facade, constructed and stepped |
 //! | [`game`]      | `player/index.js`'s `PlayerSystem` + `core/engine.js`'s frame ordering |
 //! | [`app`]       | `main.js` — the browser bootstrap, on Axiom's engine path |
-//! | [`furniture`] | **not** a port — a labelled placeholder standing in for the unported `dressing.js`, so the prop library is not dead |
 //!
 //! The dependency direction is one-way: everything here reads the ported
 //! subsystems, and no ported subsystem reads anything here.
@@ -22,7 +21,6 @@ pub mod composition;
 pub mod console;
 pub mod draw;
 pub mod install;
-pub mod furniture;
 pub mod wiring;
 pub mod game;
 pub mod level;

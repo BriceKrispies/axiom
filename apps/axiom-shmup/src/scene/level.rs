@@ -1,10 +1,10 @@
 //! **The level, built once.** The composition step `world/index.js`'s
-//! `WorldSystem.init` performs (`src/world/index.js:88-160`), reduced to what
-//! this port actually has: the [`Assembler`] is set to the level transform, the
-//! ported [`build_ground`] runs against it, and [`Assembler::finalize`]'s two
-//! outputs are split to the two consumers that need them —
+//! `WorldSystem.init` performs (`src/world/index.js:88-160`): the [`Assembler`]
+//! is set to the level transform, every pass runs against it, and
+//! [`Assembler::finalize`]'s outputs are split to the consumers that need them —
 //!
 //! * `statics` → engine meshes (one [`MeshData`] + one material per batch key),
+//! * `instanced` → one batch per surviving prototype, one node per placement,
 //! * `collision` → the [`StaticWorld`] BVH the character controller and every
 //!   world probe query.
 //!
@@ -18,28 +18,38 @@
 //! as it builds; everything after that is a draw against the same shared `rng`,
 //! so the order is part of the level's identity, not a preference.
 //!
-//! This port runs the four of those that exist: `register_props`,
-//! `build_ground`, `build_building` × 20, and `collapse_roof` for the one spec
-//! flagged for it.
+//! **All of it is ported**, in that order, by
+//! [`crate::world::system::WorldSystem::init`] — which this function is a thin
+//! adapter over. `init_observed` reports the shared stream's state at each of
+//! those boundaries, which is how the order is pinned rather than described.
 //!
-//! ## What is still not here, and why
+//! ## The level generates the source's town, and three numbers say so
 //!
-//! * **`buildGate` / `buildPerimeter`** — neither name exists in
-//!   `buildings.js` (`crate::world::buildings`'s module doc records the check),
-//!   and no other file carrying them is ported. The street's far end is
-//!   therefore open rather than closed by the arched gate.
-//! * **`registerDressingProps`, `dressStreet`, `dressBuildings`,
-//!   `scatterDebris`** — all of `src/world/dressing.js`, unported. In its place
-//!   [`crate::scene::furniture`] puts a deliberately small, clearly-labelled set
-//!   of prototypes on the authored `SET_PIECES` positions so the prop library is
-//!   not dead. That file is a placeholder and says so; it is not a dressing
-//!   pass.
-//! * **`_addLights`** — unported, so `finalize`'s `lights` list is empty and the
-//!   scene's only light is the sun ([`crate::scene::sky_look`]). The practicals
-//!   (lamp lenses, window glow) are geometry with an emissive palette key and no
-//!   light behind them.
-//! * **`interiors.js`'s `furnishRoom`** — `build_interior` ports the partitions
-//!   and stairs but not the furnishing (see `crate::world::buildings`).
+//! `apps/shmup/tools/rng-golden.json`'s `witness` — `staticTris 585630`,
+//! `instances 308`, `drawCalls 62` — is a committed snapshot of what the
+//! ORIGINAL produced in capture mode. This port hits all three exactly, and
+//! `scene::game`'s `the_static_triangle_count_matches_the_golden` and
+//! `the_generated_level_matches_the_sources_witness` hold it there.
+//!
+//! Getting there needed a finer oracle than three numbers. The one that found
+//! the last 294 triangles is a **per-emit trace**: the ordered list of every
+//! `Assembler::add` call with its palette key and triangle delta, taken from
+//! this port and from the original's own JavaScript running headless under
+//! Node (import `world/{builder,layout,ground,buildings,props,dressing}.js`,
+//! seed a `Rng` with the `world` fork's state, stub `materials.get`, and run
+//! `index.js`'s init sequence by hand). The two traces are 17133 entries long
+//! and now agree entry for entry. Any future divergence localises to one
+//! `add` call rather than to "somewhere in the world".
+//!
+//! ## What the arena floor policy leaves standing
+//!
+//! `crate::world::clutter` discards every ground-standing prototype inside
+//! [`Assembler::place`] — 7771 placements — leaving nine architecture-attached
+//! prototypes and 308 placements. `only_architecture_survives_the_arena_floor_policy`
+//! below pins that set. Every flat tan patch on the street is therefore *not*
+//! clutter: it is the ground pass's own merged `sand` / `road_dust` / `dirt` /
+//! `asphalt` decal geometry, which the original draws too, in the same place,
+//! to the triangle.
 //!
 //! ## Instancing is the draw-call budget, and it is honoured
 //!
@@ -504,6 +514,60 @@ mod tests {
         assert!(level.collide_tris > 0);
         assert_eq!(level.world.tri_count(), level.collide_tris);
         assert!(level.world.node_count() > 1, "the BVH was built");
+    }
+
+    /// **Nothing stands on the floor of this arena.**
+    ///
+    /// `ClutterPolicy::ARENA_FLOOR` discards every ground-standing prototype
+    /// at `Assembler::place`, and what survives should be *architecture only*:
+    /// roof units, wall boxes, hanging signs and street lamps. This pins the
+    /// exact surviving set against the ORIGINAL's own, captured by running
+    /// `apps/shmup/src/world/`'s generator headless under Node from the world
+    /// fork's state and reading `A._protos` — the same run that produces
+    /// `rng-golden.json`'s `witness`. Nine prototypes, 308 placements:
+    ///
+    /// ```text
+    /// ac_unit 109  conduit_box 58  water_tank 45  sat_dish 43  roof_vent 32
+    /// sign_hang 8  lamp_post 5  lamp_glass 5  sign_board 3
+    /// ```
+    ///
+    /// `the_generated_level_matches_the_sources_witness` (`scene::game`) pins
+    /// the TOTAL, which a policy that suppressed one id too many and one too
+    /// few would still satisfy. This pins the composition, and it is the test
+    /// that would catch a prototype escaping `GROUND_CLUTTER` and littering the
+    /// street — the failure mode the whole `clutter` module exists to prevent.
+    #[test]
+    fn only_architecture_survives_the_arena_floor_policy() {
+        // `Game::new`, not this module's `level()` helper. The helper hands
+        // `build_level` a FRESH root, so the world draws from fork #1; the
+        // shipping level draws from fork #3, behind `render` and `physics`
+        // (`scene::game::Game::new_observed`'s prepare-pass table). Fork #1
+        // builds a different, legitimate-looking town - 295 placements instead
+        // of 308 - so a witness test that used it would pin the wrong world.
+        let game = crate::scene::game::Game::new(crate::engine::CAPTURE_SEED);
+        let level = &game.level;
+        let mut placed: Vec<(String, usize)> = level
+            .batches
+            .iter()
+            .filter(|b| b.key != b.palette_key)
+            .map(|b| (b.key.clone(), b.instances.len()))
+            .collect();
+        placed.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        assert_eq!(
+            placed,
+            vec![
+                ("ac_unit".to_string(), 109),
+                ("conduit_box".to_string(), 58),
+                ("water_tank".to_string(), 45),
+                ("sat_dish".to_string(), 43),
+                ("roof_vent".to_string(), 32),
+                ("sign_hang".to_string(), 8),
+                ("lamp_glass".to_string(), 5),
+                ("lamp_post".to_string(), 5),
+                ("sign_board".to_string(), 3),
+            ],
+            "the surviving prototypes are not the original's"
+        );
     }
 
     #[test]

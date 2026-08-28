@@ -725,17 +725,28 @@ fn quadratic_bezier_point(t: f64, p0: (f64, f64), p1: (f64, f64), p2: (f64, f64)
 ///    called directly); reuse was judged the better trade for a wall panel,
 ///    where the difference is invisible at render distance and the shape
 ///    (hole positions, bevel profile, triangle topology) is otherwise exact.
-pub fn wall_panel(w: f32, h: f32, t: f32, holes: &[WallHole], opts: WallPanelOpts, mut rng: Option<&mut Rng>) -> WorldGeo {
-    let x0 = -w / 2.0;
-    let x1 = w / 2.0;
+pub fn wall_panel(w: f64, h: f32, t: f32, holes: &[WallHole], opts: WallPanelOpts, mut rng: Option<&mut Rng>) -> WorldGeo {
+    // `w` arrives at the SOURCE's precision, not this port's f32 vertex
+    // precision, because two of the counts below are `Math.round(w / k)`
+    // and an f32 width can land on the other side of a half-way point (see
+    // the jag branch). Every VERTEX still goes out as f32: `wf` is the same
+    // number the callers used to pass, so no geometry moves.
+    let wf = w as f32;
+    let x0 = -wf / 2.0;
+    let x1 = wf / 2.0;
     let mut contour: Vec<[f64; 2]> = vec![[f64::from(x0), 0.0], [f64::from(x1), 0.0]];
 
     match opts.top {
         WallTop::Ragged { amp } => {
+            // `Math.max(4, Math.round(w / 0.55))` (`util.js:459`), computed in
+            // **f64** as the source's JS numbers are. Rounding a division is
+            // exactly where an `f32` narrowing flips an integer result, and a
+            // different step count is a different silhouette — the same trap
+            // `striped_cloth_defaults` (`dressing/mod.rs`) documents.
             let steps = (w / 0.55).round().max(4.0) as u32;
             let mut pts: Vec<(f32, f32)> = Vec::with_capacity(steps as usize + 1);
             for i in 0..=steps {
-                let x = x1 - (i as f32 / steps as f32) * w;
+                let x = x1 - (i as f32 / steps as f32) * wf;
                 let f = i as f32 / steps as f32;
                 let drop = amp * h * (0.25 + 0.75 * fbm3(f64::from(x) * 0.6 + 11.0, 3.1, 2.7, 3) as f32) * (0.35 + f);
                 pts.push((x, (h - drop).max(0.4)));
@@ -753,9 +764,17 @@ pub fn wall_panel(w: f32, h: f32, t: f32, holes: &[WallHole], opts: WallPanelOpt
         WallTop::Flat { jag } => {
             contour.push([f64::from(x1), f64::from(h)]);
             if jag > 0.0 {
+                // `Math.max(3, Math.round(w / 1.2))` (`util.js:480`), in
+                // **f64**. This one was measured, not guessed: at the shop
+                // facade's `w = 11.4`, `11.4 / 1.2` is `9.500000000000002` in
+                // f64 and `9.4999995` in f32, so `round` gave 10 in the source
+                // and 9 here — one jag vertex fewer, eight triangles fewer per
+                // panel, on two panels in each of four buildings. That was 64
+                // of the level's 294-triangle shortfall against
+                // `rng-golden.json`.
                 let steps = (w / 1.2).round().max(3.0) as u32;
                 for i in (1..steps).rev() {
-                    let x = x0 + (i as f32 / steps as f32) * w;
+                    let x = x0 + (i as f32 / steps as f32) * wf;
                     let y = h + (fbm3(f64::from(x) * 1.7, 5.5, 1.3, 2) as f32 - 0.5) * jag;
                     contour.push([f64::from(x), f64::from(y)]);
                 }
