@@ -14,6 +14,7 @@
 //! than the habit it is replacing.
 
 mod apply;
+mod cite;
 mod edit;
 // `proc-macro2` is a dependency for its `span-locations` FEATURE, which is what
 // gives `syn` real file:line for every AST node. Nothing here calls it directly.
@@ -38,6 +39,7 @@ use repo::Repo;
 /// Flags that never take a value.
 const BOOL_FLAGS: &[&str] = &[
     "--all", "--json", "-i", "--ignore-case", "-F", "--fixed", "--apply", "--help", "-h",
+    "--moved",
 ];
 
 fn main() -> ExitCode {
@@ -79,6 +81,7 @@ fn main() -> ExitCode {
         "impact" => cmd_impact(&repo, &args, &mut rec),
         "index" => cmd_index(&repo, &mut rec),
         "file" | "files" => cmd_files(&repo, &args, &mut rec),
+        "cite" | "cites" => cmd_cite(&repo, &args, &mut rec),
         "read" => cmd_read(&repo, &args, &mut rec),
         "edit" => cmd_edit(&repo, &args, &mut rec),
         "apply" => cmd_apply(&repo, &mut rec),
@@ -492,6 +495,337 @@ fn cmd_files(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         }
     }
     Ok(if found.is_empty() { Status::Empty } else { Status::Found })
+}
+
+/// `ax cite <glob> [--baseline REV]` — resolve `foo.js:NNN` citations.
+///
+/// A port that ties each ported constant to the source line it came from is
+/// only as trustworthy as those citations are, and nothing checked them: a
+/// citation is prose, so it compiles, it passes every gate, and it rots (or is
+/// wrong the day it is typed) in silence. Resolving one by hand costs a
+/// `git show` and a read; the `apps/axiom-shmup` corpus holds ~3800 of them.
+///
+/// Two revisions are resolved, not one, because "wrong now" and "wrong when
+/// written" are different findings with different fixes — the first is
+/// documentation rot, the second means the port was read against the wrong
+/// tree. See `cite.rs` for what the classifier can and cannot decide.
+fn cmd_cite(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let pattern = args
+        .arg(0)
+        .ok_or_else(|| Failure::Usage("`cite` needs a path glob or regex".to_owned()))?;
+
+    let req = cite::Request {
+        pattern: pattern.to_owned(),
+        baseline: args.value("--baseline").map(str::to_owned),
+        source_root: args.value("--source-root").map(str::to_owned),
+        limit: args.limit(60),
+        only: args.value("--verdict").map(str::to_uppercase),
+        moved: args.has("--moved"),
+    };
+
+    rec.query = Some(pattern.to_owned());
+    rec.scope = Scope { path: Some(pattern.to_owned()), lang: None };
+
+    let report = cite::run(repo, &req).map_err(|e| match e {
+        cite::CiteError::Usage(m) => Failure::Usage(m),
+        cite::CiteError::Refused(m) => Failure::Refused(m),
+    })?;
+    rec.hits = report.head.total;
+    rec.files_matched = report.per_file.len();
+    rec.top_paths = report.per_file.iter().take(10).map(|f| f.file.clone()).collect();
+    rec.note = Some(format!(
+        "{} citations, {:.0}% confirmed at HEAD",
+        report.head.total,
+        report.head.accuracy() * 100.0
+    ));
+
+    match args.json() {
+        true => emit_cite_json(&report),
+        false => emit_cite_text(&report, &req),
+    }
+    Ok(status(report.head.total))
+}
+
+fn cite_row_shown(row: &cite::Row, only: Option<&str>) -> bool {
+    only.is_none_or(|want| {
+        row.class() == want
+            || row.history().is_some_and(|h| h == want)
+            || (want == "EXTERNAL-BASE" && row.external_base.is_some())
+    })
+}
+
+fn emit_cite_text(report: &cite::Report, req: &cite::Request) {
+    let only = req.only.as_deref();
+    let mut shown = 0usize;
+    let mut current = String::new();
+    let mut suppressed = 0usize;
+
+    for row in &report.rows {
+        if !cite_row_shown(row, only) {
+            continue;
+        }
+        if shown >= req.limit {
+            suppressed += 1;
+            continue;
+        }
+        if row.file != current {
+            println!("\n{}", row.file);
+            current.clone_from(&row.file);
+        }
+        shown += 1;
+        let target = row.target.as_deref().unwrap_or("(no such source file)");
+        let amb = row.ambiguous.then_some("  [ambiguous basename]").unwrap_or("");
+        println!(
+            "  {}:{}  {}  ->  {}{}",
+            row.file, row.line, row.raw, target, amb
+        );
+        let hist = row.history().map(|h| format!("  [{h}]")).unwrap_or_default();
+        println!(
+            "      HEAD {:<15} conf {:.2}{}",
+            row.head.label(),
+            row.head.confidence(),
+            hist
+        );
+        row.head_text
+            .as_deref()
+            .map(|t| println!("        cited line reads: {t}"));
+        if let Some(base) = &row.base {
+            println!(
+                "      {:<4} {:<15} conf {:.2}",
+                report.baseline.as_deref().unwrap_or(""),
+                base.label(),
+                base.confidence()
+            );
+            row.base_text
+                .as_deref()
+                .filter(|t| Some(*t) != row.head_text.as_deref())
+                .map(|t| println!("        read at baseline: {t}"));
+        }
+        row.suggest.map(|s| {
+            let lo = row.ranges.first().map(|r| r.0).unwrap_or(0);
+            println!(
+                "      the quoted content is at line {s} ({:+})",
+                i64::from(s) - i64::from(lo)
+            )
+        });
+        row.moved_to
+            .as_deref()
+            .map(|m| println!("      and a better home exists in another file: {m}"));
+        row.external_base
+            .as_deref()
+            .map(|b| println!("      cited against a base OUTSIDE this checkout: {b}"));
+    }
+    if suppressed > 0 {
+        println!("\n... {suppressed} more row(s) (raise --limit)");
+    }
+
+    println!("\nper citing file");
+    println!(
+        "  {:<52} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>7}",
+        "file", "cites", "ok", "part", "wrong", "eof", "nofil", "undec", "drift"
+    );
+    for f in &report.per_file {
+        let d = f
+            .drift
+            .filter(|_| f.drift_samples >= 3)
+            .map(|d| format!("{d:+}"))
+            .unwrap_or_else(|| "-".to_owned());
+        println!(
+            "  {:<52} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>7}",
+            f.file,
+            f.head.total,
+            f.head.ok,
+            f.head.partial,
+            f.head.wrong,
+            f.head.out_of_range,
+            f.head.unresolved,
+            f.head.unverifiable,
+            d
+        );
+    }
+
+    println!(
+        "\n{} citation(s) across {} file(s), {} file(s) scanned",
+        report.head.total,
+        report.per_file.len(),
+        report.files_scanned
+    );
+    print_cite_offsets(report);
+    print_cite_external(report);
+    print_cite_tally("HEAD", &report.head);
+    report
+        .baseline
+        .as_deref()
+        .filter(|_| report.base.total > 0)
+        .map(|rev| print_cite_tally(rev, &report.base));
+
+    let failures = report.rotted + report.wrong_when_written;
+    (failures > 0).then(|| {
+        println!(
+            "\n  rotted                {:>6}   was right at the baseline, wrong now",
+            report.rotted
+        );
+        println!(
+            "  wrong when written    {:>6}   wrong at both revisions ({:.0}% of failures)",
+            report.wrong_when_written,
+            100.0 * report.wrong_when_written as f64 / failures as f64
+        );
+    });
+    println!(
+        "\n  A citation is CONFIRMED only when everything its doc quotes is inside the\n  \
+         cited range. UNVERIFIABLE means the doc quotes nothing findable — those rows\n  \
+         are excluded from the rate rather than counted as passes."
+    );
+}
+
+/// Files whose drifted citations share one or two offsets.
+///
+/// This is the difference between a corpus that one shift repairs and one that
+/// needs reading. `physics/system.rs` is the first kind — two clean offsets, a
+/// mechanical fix for every citation in it. `physics/character.rs` is the
+/// second: its offsets scatter, so no shift is the answer and a human has to
+/// look. Collapsing both into a median would hide exactly that distinction.
+fn print_cite_offsets(report: &cite::Report) {
+    // The question is not "do most citations agree" but "does ONE offset
+    // explain a useful number of them" — a file can be half noise and still
+    // have twenty citations repaired by a single shift. Requiring the top modes
+    // to dominate hid exactly the two files this was built to find
+    // (`physics/system.rs` +15 x23 of 72, `player/system.rs` +14 x19 of 51)
+    // while surfacing three-sample coincidences.
+    let mut interesting: Vec<&cite::FileStat> = report
+        .per_file
+        .iter()
+        .filter(|f| f.drift_modes.first().is_some_and(|(_, n)| *n >= 5))
+        .collect();
+    interesting.sort_by_key(|f| std::cmp::Reverse(f.drift_modes[0].1));
+    if interesting.is_empty() {
+        return;
+    }
+    println!("
+mechanical offsets — a consistent shift is a one-command repair");
+    for f in interesting {
+        let shifts: Vec<String> = f
+            .drift_modes
+            .iter()
+            .take(2)
+            .filter(|(_, n)| *n >= 3)
+            .map(|(d, n)| format!("{d:+} x{n}"))
+            .collect();
+        println!(
+            "  {:<52} {:<18} explains {}/{} drifted citation(s)",
+            f.file,
+            shifts.join(", "),
+            f.drift_modes.iter().take(2).filter(|(_, n)| *n >= 3).map(|(_, n)| n).sum::<usize>(),
+            f.drift_samples
+        );
+    }
+}
+
+/// Citations written against a source tree that is not this checkout.
+///
+/// A corpus answering to two citation bases at once cannot be repaired by any
+/// single shift, because half of it is measured from a file the repo does not
+/// have. That is a finding about the corpus, not about any one citation, so it
+/// is reported on its own rather than folded into a verdict.
+fn print_cite_external(report: &cite::Report) {
+    if report.external == 0 {
+        return;
+    }
+    println!(
+        "
+{} citation(s) name a base OUTSIDE this checkout:",
+        report.external
+    );
+    report
+        .external_bases
+        .iter()
+        .take(8)
+        .for_each(|(b, n)| println!("  {n:>5}  {b}"));
+}
+
+fn print_cite_tally(label: &str, t: &cite::Tally) {
+    println!(
+        "\n  {label}: ok {} | partial {} | wrong {} | past-eof {} | no-such-file {} | unverifiable {}",
+        t.ok, t.partial, t.wrong, t.out_of_range, t.unresolved, t.unverifiable
+    );
+    println!(
+        "  {label}: confirmed {:.0}% of {} decidable citation(s)   (upper bound {:.0}% counting partials)",
+        t.accuracy() * 100.0,
+        t.decidable(),
+        t.accuracy_upper() * 100.0
+    );
+}
+
+fn emit_cite_json(report: &cite::Report) {
+    let rows: Vec<_> = report
+        .rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "file": r.file,
+                "line": r.line,
+                "citation": r.raw,
+                "target": r.target,
+                "ambiguous": r.ambiguous,
+                "ranges": r.ranges.iter().map(|(a, b)| [a, b]).collect::<Vec<_>>(),
+                "class": r.class(),
+                "confidence": r.head.confidence(),
+                "anchors": r.anchors,
+                "head_text": r.head_text,
+                "baseline_class": r.base.as_ref().map(cite::Judgement::label),
+                "baseline_text": r.base_text,
+                "history": r.history(),
+                "suggested_line": r.suggest,
+                "moved_to": r.moved_to,
+                "external_base": r.external_base,
+            })
+        })
+        .collect();
+    let files: Vec<_> = report
+        .per_file
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "file": f.file,
+                "head": cite_tally_json(&f.head),
+                "baseline": cite_tally_json(&f.base),
+                "drift_median": f.drift,
+                "drift_samples": f.drift_samples,
+                "drift_modes": f.drift_modes.iter().map(|(d, n)| serde_json::json!({"offset": d, "count": n})).collect::<Vec<_>>(),
+                "external_base_citations": f.external,
+            })
+        })
+        .collect();
+    println!(
+        "{}",
+        serde_json::json!({
+            "citations": rows,
+            "per_file": files,
+            "head": cite_tally_json(&report.head),
+            "baseline_rev": report.baseline,
+            "baseline": cite_tally_json(&report.base),
+            "rotted": report.rotted,
+            "wrong_when_written": report.wrong_when_written,
+            "files_scanned": report.files_scanned,
+            "external_base_citations": report.external,
+            "external_bases": report.external_bases.iter().map(|(b, n)| serde_json::json!({"base": b, "count": n})).collect::<Vec<_>>(),
+        })
+    );
+}
+
+fn cite_tally_json(t: &cite::Tally) -> serde_json::Value {
+    serde_json::json!({
+        "total": t.total,
+        "ok": t.ok,
+        "partial": t.partial,
+        "wrong": t.wrong,
+        "out_of_range": t.out_of_range,
+        "unresolved_file": t.unresolved,
+        "unverifiable": t.unverifiable,
+        "decidable": t.decidable(),
+        "accuracy": t.accuracy(),
+        "accuracy_upper": t.accuracy_upper(),
+    })
 }
 
 fn distinct_paths(hits: &[search::Hit], n: usize) -> Vec<String> {
@@ -1258,6 +1592,16 @@ fn print_usage() {
     ax def <symbol> [--lang L]        where a symbol is defined
     ax refs <symbol> [--lang L]       every mention of a symbol
     ax file <regex> [--limit N]       find files by path
+    ax cite <glob> [--baseline REV] [--source-root P] [--verdict K]
+                   [--moved] [--limit N] [--json]
+                                      resolve `foo.js:NNN` citations against
+                                      HEAD and a baseline revision, and report
+                                      how many still point where they claim.
+                                      --verdict OK|PARTIAL|WRONG|OUT-OF-RANGE|
+                                      UNRESOLVED-FILE|UNVERIFIABLE|ROTTED|
+                                      WRONG-WHEN-WRITTEN|EXTERNAL-BASE
+                                      --moved hunts the other source files for
+                                      where a lost citation's content went
 
   Read and change (scoped to this repo, always)
     ax read <path> [--range A:B]
