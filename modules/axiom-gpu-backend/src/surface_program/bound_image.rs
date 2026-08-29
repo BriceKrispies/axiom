@@ -126,6 +126,9 @@ fn capture(gpu: &ParityGpu, surfaces: &[Surface], program: u64, time: f32) -> Ve
         // makes the unsurfaced control a legible picture rather than a black
         // frame, which is the only way "the surface changed it" means anything.
         FrameRenderLook::lit_by(FrameAmbient::new([1.0; 3], [1.0; 3])),
+        // This harness renders on the native adapter, which holds every G-buffer
+        // format, so the prepass is usable.
+        true,
         1,
         // No G-buffer: this harness is comparing one surface program's output
         // against another's, and an ambient-occlusion term would be a second
@@ -515,6 +518,9 @@ fn the_skinned_pass_still_draws_with_the_surface_parameter_group_bound() {
         1,
         64,
         FrameRenderLook::lit_by(FrameAmbient::new([1.0; 3], [1.0; 3])),
+        // This harness renders on the native adapter, which holds every G-buffer
+        // format, so the prepass is usable.
+        true,
         1,
         // No G-buffer: this harness is comparing one surface program's output
         // against another's, and an ambient-occlusion term would be a second

@@ -356,6 +356,49 @@ fn sun_direction(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> [f32; 3] {
 /// to the identity, which yields a usable — if wrong — ray rather than a NaN
 /// that would poison every pixel of the frame. This is the same defensive
 /// posture `FrameSky::normalize_or` takes on the Rust side.
+/// **`?debug=normal|shadow|ao|albedo|ambient|geonormal`** — replace the mesh
+/// pass's final colour with one intermediate of its lighting.
+///
+/// The instrument of last resort for a device you cannot attach a debugger to.
+/// A phone rendering a black world under a correct sky has had exactly one of
+/// its lighting terms collapse, and from the outside the candidates are
+/// indistinguishable: a zero normal, a shadow factor stuck at zero, an occlusion
+/// texture reading black and a black albedo all produce the same picture. Each
+/// mode paints one of them directly, so one screenshot per mode names the
+/// culprit instead of narrowing it.
+///
+/// `0` -- every value not listed, and every native build -- is an ordinary
+/// frame: the shader's probe arithmetic is an exact identity there.
+#[cfg(target_arch = "wasm32")]
+fn debug_probe() -> u32 {
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    let Some(value) = search
+        .split("debug=")
+        .nth(1)
+        .map(|rest| rest.split('&').next().unwrap_or(rest))
+    else {
+        return 0;
+    };
+    match value {
+        "normal" => 1,
+        "shadow" => 2,
+        "ao" => 3,
+        "albedo" => 4,
+        "ambient" => 5,
+        "geonormal" => 6,
+        "contact" => 7,
+        _ => 0,
+    }
+}
+
+/// Native builds have no URL to read, so the frame is never probed.
+#[cfg(not(target_arch = "wasm32"))]
+fn debug_probe() -> u32 {
+    0
+}
+
 /// Say once, on the browser console, what stop the scene pass is metering at.
 ///
 /// Per-frame and therefore unreachable from the bind-time report, but the value
@@ -475,7 +518,8 @@ struct Lights {
     // read here for the same reason: a raymarched surface and a triangle at the
     // same place must be metered by the same stop.
     scene_exposure: f32,
-    _pad2: u32,
+    // The shader probe — layout parity with the mesh pass, unread here.
+    debug_mode: u32,
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
     sky: vec4<f32>,
     ground: vec4<f32>,
@@ -870,6 +914,18 @@ pub(crate) struct SceneRenderer {
     /// "a device without the bit renders the bytes it always did" a property of
     /// the code rather than a hope.
     prepass: Option<(crate::gbuffer::GBufferTargets, crate::gbuffer::GBufferPass)>,
+    /// Whether the bound device can actually hold the prepass's attachments.
+    ///
+    /// Separate from "the chain was built" and from the frame's capability word,
+    /// because those are both statements of INTENT and this is a statement about
+    /// the hardware. A device that cannot render one of the G-buffer's formats
+    /// does not politely decline the pass — its attachments never resolve, and
+    /// the targets keep their clear. Since the occlusion terms MULTIPLY, that
+    /// clear is not "no data", it is "fully occluded": the ambient, the indirect
+    /// fill and (through the contact term) the sun are all multiplied away.
+    ///
+    /// So execution asks the device, not the intent.
+    prepass_usable: bool,
     gtao: Option<crate::gtao::pass::GtaoPass>,
     /// The screen-space contact shadow built on the same prepass. `Some` exactly
     /// when `prepass` is, for the same reason `gtao` is: it reads the G-buffer's
@@ -1113,6 +1169,9 @@ impl SceneRenderer {
         max_instances: u32,
         shadow_size: u32,
         look: axiom_host::FrameRenderLook,
+        // Whether this device can hold the prepass's attachments at all — see the
+        // field of the same name.
+        prepass_usable: bool,
         device_max_anisotropy: u16,
         // The colour target's full allocated size, and therefore the size of the
         // G-buffer and the half-resolution ambient-occlusion chain built beside
@@ -1331,13 +1390,38 @@ impl SceneRenderer {
             view_formats: &[],
         });
         let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // **`Nearest`, and it has to be `Nearest`.**
+        //
+        // This sampler reads a `Depth32Float` texture through
+        // `textureSampleCompare`. WebGPU exempts a COMPARISON sampler from the
+        // filterable-format rule, so `Linear` here passes validation on every
+        // backend and reaches the driver unchallenged -- but wgpu's own GLES
+        // adapter does not advertise `SAMPLED_LINEAR` for depth formats, and
+        // GLES 3.0's texture-completeness rule (3.8.13) has no carve-out for
+        // depth compare: a non-filterable texture sampled with `LINEAR` is
+        // INCOMPLETE, and an incomplete sampler returns 0.0. For a shadow
+        // compare 0.0 means FULLY SHADOWED -- on all twenty-five taps of the PCF
+        // kernel, for every fragment in the frame.
+        //
+        // That is invisible on a permissive implementation. ANGLE-on-D3D11 and
+        // every WebGPU arm do hardware PCF and look perfect, so the fault only
+        // appears on a strict mobile GLES driver: a world lit by ambient alone
+        // under a sky that is completely unaffected, because the sky pass binds
+        // no shadow map. It is not a quality difference between devices; it is
+        // one class of device rendering a black picture.
+        //
+        // `Nearest` costs nothing worth having. Each tap still returns 0 or 1
+        // through the compare, and the 5x5 kernel still averages to twenty-six
+        // penumbra steps -- the edge is marginally crisper and nothing else
+        // changes -- while the frame stops depending on a filterability the
+        // format is not required to have anywhere.
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("axiom-shadow-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
@@ -1635,6 +1719,7 @@ impl SceneRenderer {
             look,
             skinning,
             prepass,
+            prepass_usable,
             gtao,
             contact,
             prepass_instances,
@@ -1801,6 +1886,7 @@ impl SceneRenderer {
                     .unwrap_or_else(axiom_host::FrameDepthFog::none),
                 caps,
                 scene_exposure,
+                debug_probe(),
                 // An unauthored fill is every-lane zero, an exact no-op — so a
                 // look with none renders as one from before the fill existed.
                 self.look
@@ -1827,6 +1913,7 @@ impl SceneRenderer {
         // the main pass reads a stale target — the targets stay allocated once
         // built — so this cannot be decided at build time.
         let contact_live = self.contact.is_some()
+            & self.prepass_usable
             & ((caps & (axiom_host::RenderCapability::GBuffer as u32)) != 0);
         let mut shadow_uniform = [0.0_f32; SHADOW_LIGHT_UBO_FLOATS];
         shadow_uniform[..16].copy_from_slice(&light_view_proj);
@@ -1965,6 +2052,7 @@ impl SceneRenderer {
         self.prepass
             .as_ref()
             .zip(self.prepass_instances.as_ref())
+            .filter(|_| self.prepass_usable)
             .filter(|_| (caps & (axiom_host::RenderCapability::GBuffer as u32)) != 0)
             .map(|((targets, pass), instances)| {
                 // The prepass reads `world` and `prev_world`; the forward stream
@@ -2971,6 +3059,8 @@ fn pack_lights(
     // unmetered frame passes `1.0` — the exact identity the lane held while it
     // was `_pad1`, so such a frame's uniform is byte-identical to before.
     scene_exposure: f32,
+    // The shader probe (`?debug=`). `0` is an ordinary frame.
+    debug_mode: u32,
     // The frame's two-band indirect fill. Every lane zero is the identity.
     indirect: axiom_host::FrameIndirect,
     camera_view_proj: [f32; 16],
@@ -2983,10 +3073,10 @@ fn pack_lights(
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
     // The capability mask occupies the first header pad slot (the WGSL `caps`
-    // field) and the exposure the second; the last u32 pad stays zero.
+    // field), the exposure the second and the shader probe the third.
     bytes.extend_from_slice(&caps.to_le_bytes());
     bytes.extend_from_slice(&scene_exposure.to_le_bytes());
-    bytes.extend_from_slice(&[0u8; 4]);
+    bytes.extend_from_slice(&debug_mode.to_le_bytes());
     let (sky, ground) = (ambient.sky(), ambient.ground());
     let fog = depth_fog.color();
     let eye = camera_eye(camera_view_proj);
@@ -3363,6 +3453,7 @@ mod tests {
                 axiom_host::FrameDepthFog::none(),
                 0xABCD_1234,
                 exposure,
+                0,
                 axiom_host::FrameIndirect::none(),
                 [0.0; 16],
                 0.0,
@@ -3373,8 +3464,9 @@ mod tests {
         assert_eq!(&bytes[0..4], &0_u32.to_le_bytes());
         assert_eq!(&bytes[4..8], &0xABCD_1234_u32.to_le_bytes());
         assert_eq!(&bytes[8..12], &4.0_f32.to_le_bytes());
-        // The last header lane is still a pad, and still zero.
-        assert_eq!(&bytes[12..16], &[0_u8; 4]);
+        // The last header lane is the shader probe, and an unprobed frame writes
+        // the zero the lane held when it was a pad.
+        assert_eq!(&bytes[12..16], &0_u32.to_le_bytes());
 
         // An unmetered frame writes the exact identity. This is the byte-identity
         // guarantee for every app that authors no tone map: a `1.0` here is a

@@ -176,6 +176,25 @@ pub(crate) fn dropped_by_url(
     dropped
 }
 
+/// **`?device=no-r32f,no-depth-filter,…` — render as a LESS capable device.**
+///
+/// The lever that makes a foreign device's frame reproducible here. See
+/// [`crate::device_facts`] for the token list and for why it can only ever take
+/// capability away.
+///
+/// wasm32 only — the URL is the platform edge, so ordinary control flow is fine
+/// here, exactly as in `backend_preference`.
+#[cfg(target_arch = "wasm32")]
+fn impersonation_spec() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default()
+        .split("device=")
+        .nth(1)
+        .map(|rest| rest.split('&').next().unwrap_or(rest).to_owned())
+        .unwrap_or_default()
+}
+
 fn classify(error: &wgpu::SurfaceError) -> SurfaceStatus {
     match error {
         wgpu::SurfaceError::Timeout => SurfaceStatus::Timeout,
@@ -448,13 +467,46 @@ impl LiveGpuBinding {
         // the previous target, so a render-attachment-only format would let the
         // scene pass succeed and the chain that consumes it fail — the same rule
         // `surface_encode::scene_target_format` applies to the sRGB upgrade.
-        let hdr_usages = adapter
-            .get_texture_format_features(wgpu::TextureFormat::Rgba16Float)
-            .allowed_usages;
-        let hdr_targets = crate::hdr_target::device_hdr_targets(
-            hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
-            hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
-        );
+        // **Every device fact this bind depends on, resolved once, here.**
+        //
+        // Each of these used to be read at its point of use, straight off the
+        // adapter. That is why a device-class rendering fault could not be
+        // reproduced anywhere but on the device: the render path depended on a
+        // third input that was neither named nor suppliable. Resolving them into
+        // one value makes them DATA -- see `crate::device_facts`.
+        let usages = |format: wgpu::TextureFormat| {
+            adapter.get_texture_format_features(format).allowed_usages
+        };
+        let renderable = |format: wgpu::TextureFormat| {
+            usages(format).contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        };
+        let depth_filterable = adapter
+            .get_texture_format_features(crate::scene_renderer::DEPTH_FORMAT)
+            .flags
+            .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE);
+        let measured = crate::device_facts::DeviceFacts {
+            hdr_renderable: renderable(wgpu::TextureFormat::Rgba16Float),
+            hdr_samplable: usages(wgpu::TextureFormat::Rgba16Float)
+                .contains(wgpu::TextureUsages::TEXTURE_BINDING),
+            rg16float_renderable: renderable(wgpu::TextureFormat::Rg16Float),
+            r32float_renderable: renderable(wgpu::TextureFormat::R32Float),
+            depth_filterable,
+            max_color_attachments: device.limits().max_color_attachments,
+            max_color_attachment_bytes_per_sample: device
+                .limits()
+                .max_color_attachment_bytes_per_sample,
+        };
+        // `?device=` lets this machine render as a LESS capable one. The whole
+        // reason the record exists — a fault that only appears on one class of
+        // device has to be reproducible on the machine doing the fixing.
+        let facts = measured.impersonating(&impersonation_spec());
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "axiom: device facts = {facts:?}{}",
+            [" (measured)", " (IMPERSONATED via ?device=)"]
+                [usize::from(facts != measured)]
+        )));
+        let hdr_targets =
+            crate::hdr_target::device_hdr_targets(facts.hdr_renderable, facts.hdr_samplable);
         // **What this device actually resolved**, on one line, because the answer
         // decides how the frame is exposed and is otherwise invisible from
         // outside the binary. A phone reporting a dark frame and a desktop
@@ -464,8 +516,8 @@ impl LiveGpuBinding {
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "axiom: hdr_targets = {hdr_targets} (render_attachment = {}, texture_binding = {}), \
              caps_at_bind = {:#010x} (PRE-grant; the frame's own word is reported by \n             `scene_exposure` below), tonemap_authored = {}",
-            hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
-            hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
+            facts.hdr_renderable,
+            facts.hdr_samplable,
             profile.bits(),
             look.tonemap().is_some(),
         )));
@@ -511,12 +563,32 @@ impl LiveGpuBinding {
         // rather than assumed from the arm. `device_gbuffer` also requires HDR,
         // because an `Rgba16Float` normal target IS an HDR target — asking twice
         // in two places is how the two answers drift apart.
-        let device_limits = device.limits();
+        // **Every format the chain renders into, asked about individually.**
+        //
+        // `hdr_targets` alone is the wrong question here, and on exactly one
+        // class of device it gives the wrong answer. It is measured from
+        // `Rgba16Float`, but the prepass also writes `R32Float` and the occlusion
+        // and contact chains render `Rg16Float`. On WebGL2 those are two
+        // different extensions: `EXT_color_buffer_half_float` makes `Rgba16Float`
+        // renderable and does NOT make `R32Float` renderable -- only
+        // `EXT_color_buffer_float` does. A phone with the first and not the
+        // second reports HDR, is granted a G-buffer it cannot actually hold, and
+        // then renders one whose attachments never resolve. The occlusion target
+        // stays at its zero clear, and zero occlusion is not "unoccluded" -- it
+        // multiplies the ambient, the fill and the sun to nothing.
+        //
+        // So each format is asked about on its own terms. A device that can hold
+        // some of them and not others has no G-buffer, and says so at the bind
+        // rather than three passes later in a black frame.
         let gbuffer = crate::gbuffer::device_gbuffer(
-            device_limits.max_color_attachments,
-            device_limits.max_color_attachment_bytes_per_sample,
-            hdr_targets,
+            facts.max_color_attachments,
+            facts.max_color_attachment_bytes_per_sample,
+            facts.gbuffer_formats_renderable(),
         );
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "axiom: gbuffer = {gbuffer} (formats renderable = {})",
+            facts.gbuffer_formats_renderable()
+        )));
 
         let scene_format = crate::surface_encode::scene_target_format(
             format,
@@ -545,6 +617,11 @@ impl LiveGpuBinding {
             // unlit faces, recedes its horizon and paints its sky exactly as the
             // offscreen capture and the Canvas 2D fallback do.
             look,
+            // Whether this device can hold the prepass's attachments AT ALL. The
+            // capability word says whether the frame wants them; this says
+            // whether the hardware can, and the two are different questions on
+            // exactly the devices where it matters.
+            facts.gbuffer_formats_renderable(),
             // Anisotropic filtering rides on an extension the WebGL2 arm may not
             // have; asking the adapter here is what lets `texture_sampling`
             // resolve a clamp that is already legal for this device rather than

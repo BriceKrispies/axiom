@@ -135,6 +135,9 @@ pub(crate) fn render_to_rgba(
         max_instances,
         shadow_size,
         look,
+        // The native capture adapter holds every G-buffer format; nothing here
+        // negotiates, so the prepass is always usable on this path.
+        true,
         // The capture path renders on a real native adapter, so it gets the same
         // anisotropy the browser arm does — which is what keeps a still usable as
         // evidence about how the live frame samples its ground surfaces.

@@ -72,7 +72,16 @@ struct Lights {
     // anywhere to go), but the metering is not the curve, and a frame that loses
     // it is not softer — it is black. See `crate::hdr_target::ldr_scene_exposure`.
     scene_exposure: f32,
-    _pad2: u32,
+    // **The shader probe** (`?debug=` on the page), the last header lane.
+    //
+    // `0` is an ordinary frame and the arithmetic below is an exact identity.
+    // Any other value replaces the fragment's final colour with one INTERMEDIATE
+    // of the lighting, so a screenshot from a device you cannot attach a
+    // debugger to says which term collapsed. That is the whole reason it exists:
+    // a phone rendering a black world under a correct sky is one of `N`, `shade`,
+    // `ao` or the albedo being wrong, and guessing between them from the outside
+    // is exactly what this replaces.
+    debug_mode: u32,
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
     sky: vec4<f32>,
     ground: vec4<f32>,
@@ -141,6 +150,9 @@ const CAP_TEXTURES: u32 = 1u;
 const CAP_ALPHAMASK: u32 = 2u;
 const CAP_NORMALMAP: u32 = 4u;
 const CAP_SHADOWS: u32 = 8u;
+// `RenderCapability::GBuffer`. Read here for the ambient-occlusion texture,
+// which is bound once at build but WRITTEN per frame — see `ao` below.
+const CAP_GBUFFER: u32 = 16384u;
 const CAP_SPECULAR: u32 = 512u;
 const CAP_AERIAL: u32 = 2048u;
 
@@ -841,7 +853,30 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // On the 1x1 white neutral this uv runs past 1, and that is harmless: the
     // sampler clamps to edge and every texel of a white texture is white.
     let ao_uv = in.clip.xy / (vec2<f32>(textureDimensions(gtao_tex)) * 2.0);
-    let ao = textureSample(gtao_tex, gtao_samp, ao_uv).r;
+    // **Gated, because an unwritten occlusion texture is not neutral — it is
+    // BLACK, and this term multiplies.**
+    //
+    // The 1x1 white neutral is chosen once, when the renderer is built, from
+    // whether the DEVICE could hold a G-buffer. Whether the occlusion chain
+    // actually RUNS is decided per frame, from this capability word. When those
+    // two disagree — a device that can hold one, on a frame whose profile drops
+    // it — the bind group still points at the real target and the chain never
+    // wrote it. A zero-initialized texture reads `0.0`, which is not "no
+    // occlusion" but "fully occluded", and it multiplies the hemisphere ambient,
+    // the two-band fill and (through `ao_micro`) every light in the frame.
+    //
+    // Measured: with the capability dropped this sampled `0.002` against `0.997`
+    // with it, and the world went black under a correct sky — the sky pass binds
+    // none of this. The contact term one screen down already carries a live bit
+    // for exactly this reason; this is the same bit, for the same reason.
+    //
+    // `select` takes the VALUE, so the sample stays in uniform control flow and
+    // its derivatives stay valid.
+    let ao = select(
+        1.0,
+        textureSample(gtao_tex, gtao_samp, ao_uv).r,
+        (caps & CAP_GBUFFER) != 0u,
+    );
     // ---- the two-band indirect fill -------------------------------------
     //
     // `hemi` above is a hemisphere AMBIENT: one `mix` between two colours by the
@@ -1128,6 +1163,22 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // and the air in front of it alike. That is the same place and the same
     // order the HDR composite applies its own exposure, which is what makes the
     // two arms one image at two precisions rather than two different grades.
-    return vec4<f32>(fogged * lights.scene_exposure, base.a);
+    let shaded = fogged * lights.scene_exposure;
+    // The probe. `select` rather than branches so the derivatives above stay in
+    // uniform control flow, and `debug_mode == 0u` leaves `shaded` untouched.
+    let dbg = lights.debug_mode;
+    var probe = shaded;
+    probe = select(probe, N * 0.5 + 0.5, dbg == 1u);
+    probe = select(probe, vec3<f32>(shade), dbg == 2u);
+    probe = select(probe, vec3<f32>(ao), dbg == 3u);
+    probe = select(probe, base.rgb, dbg == 4u);
+    probe = select(probe, hemi, dbg == 5u);
+    probe = select(probe, geo_n * 0.5 + 0.5, dbg == 6u);
+    // `contact` is the one term that can extinguish the KEY LIGHT outright: it
+    // multiplies the sun's attenuation raw, with no floor, and its target clears
+    // to zero. A probe that could not show it was missing the most dangerous
+    // value in the frame.
+    probe = select(probe, vec3<f32>(contact), dbg == 7u);
+    return vec4<f32>(probe, base.a);
 }
 "#;

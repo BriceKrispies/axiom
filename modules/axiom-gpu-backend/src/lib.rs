@@ -84,6 +84,12 @@ mod draw2d_offscreen;
 #[cfg(any(target_arch = "wasm32", test))]
 mod surface_recovery;
 
+// What the bound device can do, as one resolved value rather than a dozen
+// scattered adapter reads. See its module docs: this is what makes a frame a
+// function of (data, capability profile) again, and therefore reproducible on a
+// machine other than the one that rendered it.
+mod device_facts;
+
 // The shared, target-agnostic renderer (pipeline + caches + draw).
 #[cfg(any(target_arch = "wasm32", feature = "offscreen"))]
 mod scene_renderer;
