@@ -480,16 +480,21 @@ impl LiveGpuBinding {
         let renderable = |format: wgpu::TextureFormat| {
             usages(format).contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
         };
-        let depth_filterable = adapter
-            .get_texture_format_features(crate::scene_renderer::DEPTH_FORMAT)
-            .flags
-            .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE);
+        let filterable = |format: wgpu::TextureFormat| {
+            adapter
+                .get_texture_format_features(format)
+                .flags
+                .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE)
+        };
+        let depth_filterable = filterable(crate::scene_renderer::DEPTH_FORMAT);
         let measured = crate::device_facts::DeviceFacts {
             hdr_renderable: renderable(wgpu::TextureFormat::Rgba16Float),
             hdr_samplable: usages(wgpu::TextureFormat::Rgba16Float)
                 .contains(wgpu::TextureUsages::TEXTURE_BINDING),
             rg16float_renderable: renderable(wgpu::TextureFormat::Rg16Float),
             r32float_renderable: renderable(wgpu::TextureFormat::R32Float),
+            rgba16float_filterable: filterable(wgpu::TextureFormat::Rgba16Float),
+            rg16float_filterable: filterable(wgpu::TextureFormat::Rg16Float),
             depth_filterable,
             max_color_attachments: device.limits().max_color_attachments,
             max_color_attachment_bytes_per_sample: device
@@ -617,6 +622,12 @@ impl LiveGpuBinding {
             // unlit faces, recedes its horizon and paints its sky exactly as the
             // offscreen capture and the Canvas 2D fallback do.
             look,
+            // Whether the occlusion targets can be sampled with a FILTERING
+            // sampler on this device. A `Linear` sampler over a format the device
+            // declares unfilterable makes the texture incomplete on a strict
+            // driver, and every sample returns zero — which these terms read as
+            // fully occluded.
+            facts.rg16float_filterable,
             // Whether this device can hold the prepass's attachments AT ALL. The
             // capability word says whether the frame wants them; this says
             // whether the hardware can, and the two are different questions on

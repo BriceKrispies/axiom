@@ -135,6 +135,9 @@ pub(crate) fn render_to_rgba(
         max_instances,
         shadow_size,
         look,
+        // The native adapter filters half-float colour, so the occlusion fetch
+        // keeps the linear upsample it was written for.
+        true,
         // The native capture adapter holds every G-buffer format; nothing here
         // negotiates, so the prepass is always usable on this path.
         true,

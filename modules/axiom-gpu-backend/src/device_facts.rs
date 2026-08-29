@@ -67,6 +67,24 @@ pub(crate) struct DeviceFacts {
     /// proxy for the other is what let a phone be granted a G-buffer it could
     /// not hold.
     pub(crate) r32float_renderable: bool,
+    /// `Rgba16Float` may be sampled with a LINEAR filter.
+    ///
+    /// Renderability and filterability are different device answers and on
+    /// WebGL2 they come from different extensions: a colour-buffer extension
+    /// makes the format RENDERABLE, and `OES_texture_float_linear` makes it
+    /// FILTERABLE. A device can have the first and not the second — and mobile
+    /// commonly does.
+    pub(crate) rgba16float_filterable: bool,
+    /// `Rg16Float` may be sampled with a LINEAR filter.
+    ///
+    /// The one that decides whether the world is lit. The occlusion and contact
+    /// targets are `Rg16Float` and the main pass samples them through a
+    /// FILTERING sampler, because the fetch upsamples a half-resolution signal.
+    /// If the device cannot filter the format, GLES texture completeness makes
+    /// that texture INCOMPLETE and every sample returns `0.0` — which these two
+    /// terms read as "fully occluded", multiplying the ambient, the indirect
+    /// fill and the sun away while the sky, which samples neither, is untouched.
+    pub(crate) rg16float_filterable: bool,
     /// The depth format may be sampled with a LINEAR filter.
     ///
     /// A comparison sampler is exempt from WebGPU's filterable-format rule, so a
@@ -91,6 +109,8 @@ impl DeviceFacts {
         hdr_samplable: false,
         rg16float_renderable: false,
         r32float_renderable: false,
+        rgba16float_filterable: false,
+        rg16float_filterable: false,
         depth_filterable: false,
         max_color_attachments: 0,
         max_color_attachment_bytes_per_sample: 0,
@@ -108,6 +128,7 @@ impl DeviceFacts {
     /// | `no-hdr` | `Rgba16Float` render **and** sample |
     /// | `no-rg16f` | `Rg16Float` render |
     /// | `no-r32f` | `R32Float` render |
+    /// | `no-float-filter` | linear filtering of `Rgba16Float` **and** `Rg16Float` |
     /// | `no-depth-filter` | linear filtering of the depth format |
     /// | `no-mrt` | multiple colour attachments (drops the count to 1) |
     ///
@@ -123,6 +144,8 @@ impl DeviceFacts {
                 hdr_samplable: facts.hdr_samplable & hdr,
                 rg16float_renderable: facts.rg16float_renderable & kept("no-rg16f"),
                 r32float_renderable: facts.r32float_renderable & kept("no-r32f"),
+                rgba16float_filterable: facts.rgba16float_filterable & kept("no-float-filter"),
+                rg16float_filterable: facts.rg16float_filterable & kept("no-float-filter"),
                 depth_filterable: facts.depth_filterable & kept("no-depth-filter"),
                 max_color_attachments: facts
                     .max_color_attachments
@@ -156,6 +179,8 @@ mod tests {
         hdr_samplable: true,
         rg16float_renderable: true,
         r32float_renderable: true,
+        rgba16float_filterable: true,
+        rg16float_filterable: true,
         depth_filterable: true,
         max_color_attachments: 8,
         max_color_attachment_bytes_per_sample: 32,
@@ -211,6 +236,23 @@ mod tests {
         );
     }
 
+    /// **Renderable and filterable are different questions.**
+    ///
+    /// The distinction this field pair exists for: a device can render into a
+    /// float target and be unable to FILTER it, because on WebGL2 those are two
+    /// different extensions. A record that collapsed them would report a phone
+    /// as identical to a workstation — which is exactly what the first version
+    /// of this record did, and why it could not reproduce one.
+    #[test]
+    fn a_format_can_be_renderable_without_being_filterable() {
+        let phone = FULL.impersonating("no-float-filter");
+        assert!(phone.rg16float_renderable, "still a valid render target");
+        assert!(!phone.rg16float_filterable, "but it cannot be filtered");
+        assert!(!phone.rgba16float_filterable);
+        // And the G-buffer gate, which is about RENDERING, is unmoved by it.
+        assert!(phone.gbuffer_formats_renderable());
+    }
+
     /// Several at once, and the tokens are order-independent.
     #[test]
     fn a_spec_narrows_by_every_token_it_lists_in_any_order() {
@@ -238,14 +280,25 @@ mod tests {
     #[test]
     fn impersonation_can_never_grant_a_capability() {
         let bare = DeviceFacts::UNRESOLVED;
-        ["no-hdr", "no-r32f", "no-rg16f", "no-depth-filter", "no-mrt", "", "anything"]
-            .iter()
-            .for_each(|spec| {
-                let after = bare.impersonating(spec);
-                assert!(!after.hdr_renderable);
-                assert!(!after.r32float_renderable);
-                assert!(!after.rg16float_renderable);
-                assert!(!after.depth_filterable);
-            });
+        [
+            "no-hdr",
+            "no-r32f",
+            "no-rg16f",
+            "no-float-filter",
+            "no-depth-filter",
+            "no-mrt",
+            "",
+            "anything",
+        ]
+        .iter()
+        .for_each(|spec| {
+            let after = bare.impersonating(spec);
+            assert!(!after.hdr_renderable);
+            assert!(!after.r32float_renderable);
+            assert!(!after.rg16float_renderable);
+            assert!(!after.rg16float_filterable);
+            assert!(!after.rgba16float_filterable);
+            assert!(!after.depth_filterable);
+        });
     }
 }

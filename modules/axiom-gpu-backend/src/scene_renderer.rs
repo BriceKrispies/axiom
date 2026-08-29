@@ -883,6 +883,10 @@ pub(crate) struct SceneRenderer {
     /// Group 2 of the main pass: shadow map + comparison sampler + light VP.
     shadow_sample_bind_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
+    /// The shadow atlas edge, in texels — the grid `record` snaps the light
+    /// view-projection to. Kept because the snap is a per-frame operation and
+    /// the size is a bind-time decision; see `crate::cascade::snap_view_proj`.
+    shadow_size: u32,
     instance_buffer: wgpu::Buffer,
     max_instances: u32,
     /// The fullscreen-triangle SDF raymarch pipeline (composites after the mesh
@@ -1169,6 +1173,8 @@ impl SceneRenderer {
         max_instances: u32,
         shadow_size: u32,
         look: axiom_host::FrameRenderLook,
+        // Whether the occlusion targets may be sampled with a filtering sampler.
+        ao_filterable: bool,
         // Whether this device can hold the prepass's attachments at all — see the
         // field of the same name.
         prepass_usable: bool,
@@ -1580,8 +1586,20 @@ impl SceneRenderer {
             // G-buffer with: this fetch upsamples a half-resolution, already
             // bilaterally blurred signal, so filtering is what stops the
             // occlusion reading as visible half-res blocks.
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            //
+            // But only where the DEVICE says it can filter this format. These
+            // targets are `Rg16Float`, and on WebGL2 renderability and
+            // filterability are different extensions: a device may render into
+            // the format and be unable to filter it. Sampling it `Linear` there
+            // makes the texture incomplete under GLES texture-completeness rules
+            // and every sample returns `0.0` — which the occlusion and contact
+            // terms read as FULLY OCCLUDED, multiplying the ambient, the fill and
+            // the sun to nothing while the sky is untouched. Blocky occlusion is
+            // a blemish; a black world is not a blemish.
+            mag_filter: [wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear]
+                [usize::from(ao_filterable)],
+            min_filter: [wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear]
+                [usize::from(ao_filterable)],
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -1707,6 +1725,7 @@ impl SceneRenderer {
             shadow_pass_bind_group,
             shadow_sample_bind_group,
             shadow_view,
+            shadow_size,
             instance_buffer,
             max_instances,
             sdf_pipeline,
@@ -1915,6 +1934,21 @@ impl SceneRenderer {
         let contact_live = self.contact.is_some()
             & self.prepass_usable
             & ((caps & (axiom_host::RenderCapability::GBuffer as u32)) != 0);
+        // **Snap the light's matrix to whole shadow texels.**
+        //
+        // `axiom_render_pipeline::shadow_view` fits the ortho box to the view
+        // frustum's bounding sphere, which stops the box CHANGING SIZE as the
+        // camera turns — but the box is centred on the camera and slides with
+        // it, so without this the texel grid slides under the world and the
+        // whole quantised penumbra crawls across the ground while the player
+        // walks. `crate::cascade`'s header states the rule the fit follows only
+        // half of: the sphere fixes the grid's size, the snap fixes its phase,
+        // and both are required.
+        //
+        // It belongs here rather than in the pipeline for a plain reason: the
+        // grid is the ATLAS's, and the atlas edge is a device-tier decision this
+        // backend makes and the pipeline never sees.
+        let light_view_proj = crate::cascade::snap_view_proj(light_view_proj, self.shadow_size);
         let mut shadow_uniform = [0.0_f32; SHADOW_LIGHT_UBO_FLOATS];
         shadow_uniform[..16].copy_from_slice(&light_view_proj);
         shadow_uniform[16..19].copy_from_slice(&sun_dir_world);
