@@ -389,6 +389,7 @@ fn debug_probe() -> u32 {
         "ambient" => 5,
         "geonormal" => 6,
         "contact" => 7,
+        "normaldiff" => 8,
         _ => 0,
     }
 }

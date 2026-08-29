@@ -1179,6 +1179,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // to zero. A probe that could not show it was missing the most dangerous
     // value in the frame.
     probe = select(probe, vec3<f32>(contact), dbg == 7u);
+    // The shading normal against the GEOMETRIC one, amplified. Black means the
+    // two agree and the tangent-frame path is behaving; anything bright means
+    // the shading normal has been tilted away from the surface, which is what a
+    // normal published in the wrong space does — and the tilt's DIRECTION comes
+    // from screen-space derivatives, so it can differ between drivers.
+    probe = select(probe, vec3<f32>(clamp(dot(N, geo_n), 0.0, 1.0)), dbg == 8u);
     return vec4<f32>(probe, base.a);
 }
 "#;
