@@ -143,6 +143,24 @@ pub struct Input {
     pub wheel: f64,
     pending_wheel: f64,
 
+    /// **The pad the platform edge installed**, read by [`Self::begin_frame`]
+    /// when its caller passes none.
+    ///
+    /// The source's `beginFrame` polls `navigator.getGamepads()` itself
+    /// (`input.js:180`). This port hoisted that read out to the browser edge so
+    /// the rest of the type is testable, which left `begin_frame` taking the
+    /// axes as an argument - and `Game::frame`, the only non-test caller, had no
+    /// pad to give it and passed `None`. That `None` did not mean "no pad": it
+    /// ran [`Self::poll_gamepad`], which RESETS the stick, one line after the
+    /// frame loop had installed one. Every stick input was wiped before it could
+    /// be read, so neither a gamepad nor the touch overlay ever moved the player.
+    ///
+    /// This lane is where the edge's poll lands instead, so the pad survives the
+    /// call the way the source's does - polled inside `beginFrame`, not handed
+    /// down through a caller that cannot know it. An explicit argument still
+    /// wins, which is what keeps the tests driving the stick directly.
+    pending_pad: Option<[f64; 4]>,
+
     /// **Why the last pointer-lock request failed**, or `None`.
     ///
     /// The source's comment — *"failing to lock is not a game error"* — is true
@@ -312,7 +330,16 @@ impl Input {
         self.wheel = self.pending_wheel;
         self.pending_wheel = 0.0;
 
-        self.poll_gamepad(pad);
+        // An explicit pad wins; otherwise the one the platform edge installed.
+        // Never an unconditional `pad`, which would let a caller with nothing to
+        // say reset a stick it did not set - see `pending_pad`.
+        self.poll_gamepad(pad.or(self.pending_pad));
+    }
+
+    /// Install the pad the platform edge polled, for the next
+    /// [`Self::begin_frame`] to consume. See [`Self::pending_pad`].
+    pub fn set_pad(&mut self, pad: Option<[f64; 4]>) {
+        self.pending_pad = pad;
     }
 
     /// `endFrame()`. `input.js:177` — empty in the source, and empty here; it
@@ -466,19 +493,32 @@ pub mod dom {
         Some([at(0), at(1), at(2), at(3)])
     }
 
+    fn on(target: &web_sys::EventTarget, name: &str, cb: Closure<dyn FnMut(web_sys::Event)>) {
+        target
+            .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())
+            .expect("adding a listener to a live target");
+        cb.forget();
+    }
+
     /// `attach()`. `input.js:67-78`. The closures are `forget`ten deliberately:
     /// they live exactly as long as the page, which is what `detach()` would
     /// otherwise have to end, and this app never tears its input down.
+    ///
+    /// The source attaches one undivided set because it only ever runs on a
+    /// desktop. This port splits it in two, because a touchscreen must take the
+    /// first half and NOT the second - see [`attach_mouse`].
     pub fn attach(input: &SharedInput, canvas: &web_sys::HtmlElement) {
-        let window = web_sys::window().expect("a browser window");
-        let document = window.document().expect("a document");
+        attach_keyboard(input);
+        attach_mouse(input, canvas);
+    }
 
-        fn on(target: &web_sys::EventTarget, name: &str, cb: Closure<dyn FnMut(web_sys::Event)>) {
-            target
-                .add_event_listener_with_callback(name, cb.as_ref().unchecked_ref())
-                .expect("adding a listener to a live target");
-            cb.forget();
-        }
+    /// Keys and focus loss - the half that is safe on every device.
+    ///
+    /// A phone with a Bluetooth keyboard is a real thing, and `blur` has to
+    /// release held state wherever the tab is backgrounded, so nothing here is
+    /// conditional on having a mouse.
+    pub fn attach_keyboard(input: &SharedInput) {
+        let window = web_sys::window().expect("a browser window");
 
         let i = Rc::clone(input);
         on(
@@ -525,6 +565,32 @@ pub mod dom {
         );
 
         let i = Rc::clone(input);
+        on(
+            window.as_ref(),
+            "blur",
+            Closure::wrap(Box::new(move |_e: web_sys::Event| {
+                i.borrow_mut().blur();
+            }) as Box<dyn FnMut(_)>),
+        );
+    }
+
+    /// The mouse arm, and the pointer lock it owns.
+    ///
+    /// **This must never be attached alongside the touch overlay.** A browser
+    /// synthesises compatibility mouse events from touches, so on a phone every
+    /// press of the on-screen joystick also arrives here as a `mousedown`: it
+    /// fires the weapon, and it calls `request_pointer_lock`. Once that lock
+    /// takes, `clientX`/`clientY` stop reporting a position at all, which kills
+    /// the overlay's stick deflection and its look deltas - both are measured
+    /// from client coordinates. The failure looks like three unrelated bugs (the
+    /// stick sticks, taps never register, the gun fires by itself) and is one.
+    ///
+    /// The two paths cannot coexist, so `scene::boot` picks exactly one.
+    pub fn attach_mouse(input: &SharedInput, canvas: &web_sys::HtmlElement) {
+        let window = web_sys::window().expect("a browser window");
+        let document = window.document().expect("a document");
+
+        let i = Rc::clone(input);
         let lock_target = canvas.clone();
         on(
             window.as_ref(),
@@ -569,15 +635,6 @@ pub mod dom {
             Closure::wrap(Box::new(move |e: web_sys::Event| {
                 let e: web_sys::WheelEvent = e.unchecked_into();
                 i.borrow_mut().wheel_event(e.delta_y());
-            }) as Box<dyn FnMut(_)>),
-        );
-
-        let i = Rc::clone(input);
-        on(
-            window.as_ref(),
-            "blur",
-            Closure::wrap(Box::new(move |_e: web_sys::Event| {
-                i.borrow_mut().blur();
             }) as Box<dyn FnMut(_)>),
         );
 

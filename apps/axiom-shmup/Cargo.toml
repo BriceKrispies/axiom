@@ -125,7 +125,14 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     "Gamepad",
     "KeyboardEvent",
+    # The touch overlay (`crate::touch`). `PointerEvent` rather than
+    # `TouchEvent`: it unifies mouse, touch and pen behind one event, carries the
+    # `pointerId` the multi-touch bookkeeping needs, and extends `MouseEvent`
+    # which is already here. `MediaQueryList` answers `(pointer: coarse)`, which
+    # is half of "is this really a phone" — the other half is the width test.
+    "MediaQueryList",
     "MouseEvent",
+    "PointerEvent",
     "Navigator",
     "Performance",
     "WheelEvent",

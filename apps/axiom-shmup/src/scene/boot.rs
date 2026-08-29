@@ -40,9 +40,57 @@ pub fn shmup_start() {
         .get_element_by_id(SURFACE_ID)
         .expect("the page hosts the presentation element")
         .unchecked_into();
-    crate::input::dom::attach(&input, &canvas);
+    // Keys are wired on every device; the pointer arm depends on which one this
+    // is, so it is chosen below once `is_mobile` has answered.
+    crate::input::dom::attach_keyboard(&input);
+    // The touch overlay, only where the primary input really is a finger on a
+    // small screen. On anything else this is `None` and costs one branch at boot.
+    //
+    // It produces a synthetic gamepad quad and the same `Mouse0`/`Mouse2` codes a
+    // mouse produces, so nothing downstream knows a phone is involved: the dead
+    // zone, the look curve, the fire gate and the ADS blend are the ones the port
+    // already has. A second control path would have been a second place for "what
+    // does aiming feel like" to live.
+    let touch = crate::touch::is_mobile()
+        .then(|| crate::touch::attach(&input));
+    // Exactly one pointer path. Attaching the mouse arm as well would fire the
+    // weapon on every joystick press and take a pointer lock that freezes the
+    // client coordinates the overlay measures from - see `input::dom::attach_mouse`.
+    touch
+        .is_none()
+        .then(|| crate::input::dom::attach_mouse(&input, &canvas));
 
-    let (width, height) = (1280u32, 720u32);
+    // The surface follows the VIEWPORT, not a fixed 16:9 plate.
+    //
+    // 1280x720 was hardcoded and the canvas is `width:100vw;height:100vh`, so on a
+    // 414x896 phone the browser stretched a 16:9 render into a 0.46 portrait and
+    // the street visibly sheared. A backbuffer that does not match the element it
+    // is presented into is a distortion no camera setting can undo.
+    //
+    // Capped on the long axis: past 1280 the extra pixels cost fill rate — this
+    // frame is fill-bound, see `RenderScaleController` below — and buy nothing a
+    // phone panel can show. The adaptive scaler trims from there.
+    const MAX_LONG_EDGE: f64 = 1280.0;
+    let vw = window
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(MAX_LONG_EDGE)
+        .max(1.0);
+    let vh = window
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(720.0)
+        .max(1.0);
+    let fit = (MAX_LONG_EDGE / vw.max(vh)).min(1.0);
+    let (width, height) = (
+        (vw * fit).round().max(1.0) as u32,
+        (vh * fit).round().max(1.0) as u32,
+    );
+    // The camera has to be told, or the projection keeps the 16:9 it was built
+    // with and shears in the other direction.
+    scene.game.aspect = f64::from(width) / f64::from(height);
     // `.ow-hud` is `position: fixed; inset: 0`, so the HUD sizes to the
     // VIEWPORT, not to the surface's backing store.
     let hud_w = window
@@ -322,10 +370,20 @@ pub fn shmup_start() {
         set_render_scale(render_scale.observe((dt * 1.0e9) as u64));
         last = now;
 
-        let pad = crate::input::dom::poll_pad();
+        // Touch first, then a real gamepad. They cannot both be live in
+        // practice, and `TouchControls::pad` reports `None` while the stick is
+        // idle, so a phone with a controller attached still works.
+        let pad = touch
+            .as_ref()
+            .and_then(crate::touch::TouchControls::pad)
+            .or_else(crate::input::dom::poll_pad);
         let pose = {
             let mut input = input.borrow_mut();
-            input.poll_gamepad(pad);
+            // INSTALL it, do not apply it. `Game::frame` calls `begin_frame`,
+            // which polls the pad itself; applying it here as well meant the
+            // game's own call reset the stick a line later and no stick input
+            // ever reached the player.
+            input.set_pad(pad);
             // The console's input pin (`freeze on`). `Input::frozen` was ported
             // faithfully and then had no writer outside its own tests, so capture
             // mode existed in the type and could not be entered.
@@ -355,8 +413,21 @@ pub fn shmup_start() {
                 .and_then(|d| d.pointer_lock_element())
                 .map(|e| e.id())
                 .unwrap_or_else(|| "null".to_owned());
+            // The pad and the move vector are reported for the same reason the
+            // lock state is: a stick that deflects on screen and moves nobody is
+            // indistinguishable, from outside, from a stick that is not being
+            // read. `pad` is what the frame HANDED the input; `move` is what the
+            // movement machine ASKED for afterwards. When those two disagree the
+            // fault is between them, and when they agree and the player stands
+            // still it is downstream of both.
+            let (mvx, mvy) = inp.move_vector();
+            let pad_text = pad.map_or_else(
+                || "none".to_owned(),
+                |a| format!("{:.3},{:.3},{:.3},{:.3}", a[0], a[1], a[2], a[3]),
+            );
             scene.console.borrow_mut().set_status(format!(
-                "pointer_locked={} enabled={} frozen={} pointerLockElement={} lock_error={}",
+                "pointer_locked={} enabled={} frozen={} pointerLockElement={} lock_error={} \
+                 pad={pad_text} move={mvx:.3},{mvy:.3}",
                 inp.pointer_locked,
                 inp.enabled,
                 inp.frozen,

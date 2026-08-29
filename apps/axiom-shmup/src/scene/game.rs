@@ -350,6 +350,9 @@ impl Game {
             fx_audio,
             pulse: crate::scene::wiring::fx_audio::MovementPulse::default(),
             ai,
+            // Overwritten at bind from the real surface (`scene::boot`). This
+            // default is only what a native test sees; a browser frame that kept
+            // it would shear the moment the window was not 16:9.
             aspect: 1280.0 / 720.0,
             time,
             accumulator: 0.0,
@@ -398,8 +401,10 @@ impl Game {
         self.time.elapsed += self.time.dt;
         self.time.fixed = FIXED_DT;
 
-        let pad = None;
-        input.begin_frame(&self.config, pad);
+        // No pad from here on purpose: `Game` sits above the browser and cannot
+        // poll one. The frame loop installs it with `Input::set_pad` and
+        // `begin_frame` reads it, which is where the source polls it too.
+        input.begin_frame(&self.config, None);
         self.handle_pause(input);
 
         // ---- fixed steps ----------------------------------------------------

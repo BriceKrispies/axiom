@@ -834,11 +834,13 @@ name = "axiom-shmup"
 version = "0.1.0"
 dependencies = [
  "axiom",
+ "axiom-agent",
  "axiom-gpu-backend",
  "axiom-host",
  "axiom-introspect",
  "axiom-kernel",
  "axiom-math",
+ "axiom-runtime",
  "axiom-windowing",
  "console_error_panic_hook",
  "js-sys",

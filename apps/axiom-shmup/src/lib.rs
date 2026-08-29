@@ -64,6 +64,9 @@ pub mod render;
 pub mod rng;
 pub mod scene;
 pub mod sky;
+/// Touch controls for a phone-shaped screen. `wasm32`-only, and INVENTED — the
+/// source has no touch path, so nothing here is a transcription.
+pub mod touch;
 pub mod ui;
 pub mod viewer;
 pub mod weapons;
