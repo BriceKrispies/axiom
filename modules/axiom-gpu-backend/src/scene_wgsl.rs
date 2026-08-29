@@ -317,6 +317,12 @@ struct ShadowU {
     // beside the matrix that answers "where does the sun see from". The frame's
     // FIRST directional light is the one packed; see `crate::scene_renderer`.
     sun: vec4<f32>,
+    // `x` = the shadow atlas edge in texels, as the renderer ALLOCATED it.
+    //
+    // Told rather than queried: `textureDimensions` on a depth texture bound to
+    // a comparison sampler is the most driver-variable read in this shader, and
+    // the PCF kernel's whole footprint is derived from it. `yzw` unused.
+    atlas: vec4<f32>,
 };
 @group(2) @binding(2) var<uniform> shadow: ShadowU;
 // The resolved screen-space ambient occlusion, half resolution, `.r` = visibility.
@@ -598,12 +604,29 @@ fn vs_skinned(
 // derivatives and so must not sit behind a possibly-non-uniform branch (an early
 // `return` here is rejected by the browser's WGSL validator, though native wgpu
 // accepts it).
+/// Where `world_pos` lands in the shadow atlas, for the probe. Same arithmetic
+/// as `shadow_factor`'s first three lines, kept beside it so the two cannot
+/// drift - a probe that measures something the shader does not do is worse than
+/// no probe.
+fn shadow_uv(world_pos: vec3<f32>) -> vec2<f32> {
+    let clip = shadow.light_vp * vec4<f32>(world_pos, 1.0);
+    let ndc = clip.xyz / clip.w;
+    return vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+}
+
+/// The depth `world_pos` compares WITH, for the probe.
+fn shadow_ref(world_pos: vec3<f32>) -> f32 {
+    let clip = shadow.light_vp * vec4<f32>(world_pos, 1.0);
+    return clip.z / clip.w;
+}
+
 fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let clip = shadow.light_vp * vec4<f32>(world_pos, 1.0);
     let ndc = clip.xyz / clip.w;
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
-    let dim = vec2<f32>(textureDimensions(shadow_map));
-    let texel = 1.0 / dim;
+    // The atlas edge the renderer allocated, not what the driver reports for a
+    // depth texture behind a comparison sampler. See `ShadowU::atlas`.
+    let texel = 1.0 / max(shadow.atlas.x, 1.0);
     let bias = 0.0015;
     // 5x5 PCF with a slight kernel spread for a softer penumbra than a 3x3 tap.
     let spread = 1.25;
@@ -1185,6 +1208,27 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // normal published in the wrong space does — and the tilt's DIRECTION comes
     // from screen-space derivatives, so it can differ between drivers.
     probe = select(probe, vec3<f32>(clamp(dot(N, geo_n), 0.0, 1.0)), dbg == 8u);
+    // The driver's own answer for the shadow atlas size, against the size the
+    // renderer allocated. White means the two agree and `textureDimensions` was
+    // telling the truth here; anything else means the PCF kernel was stepping by
+    // the wrong texel and this is the fault.
+    // The atlas edge the RENDERER says it allocated, as an absolute value.
+    // White = 2048 reached the shader; black = the lane is zero and the PCF step
+    // is garbage. A ratio against `textureDimensions` could not tell those apart
+    // - if both are wrong the ratio is still one.
+    probe = select(probe, vec3<f32>(shadow.atlas.x / 2048.0), dbg == 9u);
+    // The DRIVER's answer for the same number, on the same scale.
+    probe = select(
+        probe,
+        vec3<f32>(f32(textureDimensions(shadow_map).x) / 2048.0),
+        dbg == 10u,
+    );
+    // Where this fragment lands in the shadow map. Red/green ramp across the
+    // atlas; flat or clamped means the projection is wrong, not the compare.
+    probe = select(probe, vec3<f32>(shadow_uv(in.world_pos), 0.0), dbg == 11u);
+    // The depth this fragment compares WITH. A smooth ramp is healthy; flat 0 or
+    // flat 1 means the reference is degenerate and everything reads shadowed.
+    probe = select(probe, vec3<f32>(shadow_ref(in.world_pos)), dbg == 12u);
     return vec4<f32>(probe, base.a);
 }
 "#;

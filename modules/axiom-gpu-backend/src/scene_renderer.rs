@@ -390,6 +390,10 @@ fn debug_probe() -> u32 {
         "geonormal" => 6,
         "contact" => 7,
         "normaldiff" => 8,
+        "shadowdim" => 9,
+        "shadowdimdriver" => 10,
+        "shadowuv" => 11,
+        "shadowref" => 12,
         _ => 0,
     }
 }
@@ -766,7 +770,7 @@ const LIGHTS_UBO_BYTES: u64 = 208 + (MAX_LIGHTS as u64) * 32;
 /// The depth pass's own `ShadowU` declares only the matrix, which is legal
 /// against a larger buffer; the main pass declares both and would be a
 /// validation error against a 64-byte one.
-const SHADOW_LIGHT_UBO_BYTES: u64 = 64 + 16;
+const SHADOW_LIGHT_UBO_BYTES: u64 = 64 + 16 + 16;
 /// Floats in [`SHADOW_LIGHT_UBO_BYTES`].
 const SHADOW_LIGHT_UBO_FLOATS: usize = (SHADOW_LIGHT_UBO_BYTES / 4) as usize;
 /// Maximum SDF primitives uploaded per frame (must match the WGSL
@@ -1954,6 +1958,21 @@ impl SceneRenderer {
         shadow_uniform[..16].copy_from_slice(&light_view_proj);
         shadow_uniform[16..19].copy_from_slice(&sun_dir_world);
         shadow_uniform[19] = f32::from(u8::from(contact_live));
+        // **The atlas edge, in texels, told rather than asked.**
+        //
+        // `shadow_factor` derived its PCF step from `textureDimensions(shadow_map)`.
+        // That reads a DEPTH texture bound to a COMPARISON sampler, which is the
+        // most driver-variable query in the frame, and the whole 5x5 kernel's
+        // footprint hangs off it: get the size wrong and every tap lands outside
+        // the intended texel neighbourhood, clamps to the atlas edge, and
+        // compares as shadowed — a coarse, hard-edged mask that kills the sun and
+        // drops ambient to its shadow floor while the sky, which binds no shadow
+        // map, is untouched.
+        //
+        // The renderer allocated that texture and knows its edge exactly. Passing
+        // the number costs one uniform lane and removes a device-dependent query
+        // from the per-fragment path entirely.
+        shadow_uniform[20] = self.shadow_size as f32;
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
