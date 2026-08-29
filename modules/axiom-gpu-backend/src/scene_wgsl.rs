@@ -317,6 +317,13 @@ struct ShadowU {
     // beside the matrix that answers "where does the sun see from". The frame's
     // FIRST directional light is the one packed; see `crate::scene_renderer`.
     sun: vec4<f32>,
+    // `y` = the COMPOSITE's tone-map exposure, carried here so a debug probe can
+    // cancel it. Without that every probe is multiplied by it and run through
+    // AgX before anyone sees it, so any value above roughly a tenth saturates to
+    // white and "healthy" becomes indistinguishable from "a seventh of healthy".
+    // Every white probe reading taken before this lane existed meant only
+    // "greater than about 0.1".
+    //
     // `x` = the shadow atlas edge in texels, as the renderer ALLOCATED it.
     //
     // Told rather than queried: `textureDimensions` on a depth texture bound to
@@ -612,6 +619,12 @@ fn shadow_uv(world_pos: vec3<f32>) -> vec2<f32> {
     let clip = shadow.light_vp * vec4<f32>(world_pos, 1.0);
     let ndc = clip.xyz / clip.w;
     return vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+}
+
+/// The perspective divisor this fragment's shadow projection divides by. Zero
+/// here is a NaN one line later, and NaN is a silently fully-shadowed frame.
+fn shadow_clip_w(world_pos: vec3<f32>) -> f32 {
+    return (shadow.light_vp * vec4<f32>(world_pos, 1.0)).w;
 }
 
 /// The depth `world_pos` compares WITH, for the probe.
@@ -1229,6 +1242,37 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // The depth this fragment compares WITH. A smooth ramp is healthy; flat 0 or
     // flat 1 means the reference is degenerate and everything reads shadowed.
     probe = select(probe, vec3<f32>(shadow_ref(in.world_pos)), dbg == 12u);
-    return vec4<f32>(probe, base.a);
+    // **Is the light matrix there at all, and does it divide?**
+    //
+    // Booleans, not magnitudes, because a magnitude needs a scale to be read
+    // and the interesting answers are all at the ends. Red = the matrix's first
+    // diagonal term is non-zero, green = its second, blue = the perspective
+    // divisor for THIS fragment is non-zero.
+    //
+    //   white  - matrix populated and the divide is safe; a flat `shadowuv`
+    //            then means the projection is wrong, not absent.
+    //   black  - the uniform never arrived; `clip` is all zeros, `ndc` is 0/0 =
+    //            NaN, every comparison in the `outside` guard is false so it
+    //            cannot early-return, and `textureSampleCompare` with a NaN
+    //            reference returns 0 - which is a fully shadowed world.
+    //   yellow - matrix present but `clip.w` is zero for this fragment, which is
+    //            the same NaN by a different route.
+    probe = select(
+        probe,
+        vec3<f32>(
+            f32(shadow.light_vp[0][0] != 0.0),
+            f32(shadow.light_vp[1][1] != 0.0),
+            f32(shadow_clip_w(in.world_pos) != 0.0),
+        ),
+        dbg == 13u,
+    );
+    // **Cancel the composite's exposure for a probe, and only for a probe.**
+    //
+    // `dbg == 0` is an ordinary frame and takes an exact 1.0, so nothing about
+    // the shipped picture depends on this. Any other mode divides by the stop
+    // the composite is about to multiply by, which is what makes a probe's grey
+    // readable as a NUMBER instead of saturating to white.
+    let probe_scale = select(1.0, 1.0 / max(shadow.atlas.y, 1.0e-6), dbg != 0u);
+    return vec4<f32>(probe * probe_scale, base.a);
 }
 "#;

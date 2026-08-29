@@ -394,6 +394,7 @@ fn debug_probe() -> u32 {
         "shadowdimdriver" => 10,
         "shadowuv" => 11,
         "shadowref" => 12,
+        "lightvp" => 13,
         _ => 0,
     }
 }
@@ -1973,6 +1974,12 @@ impl SceneRenderer {
         // the number costs one uniform lane and removes a device-dependent query
         // from the per-fragment path entirely.
         shadow_uniform[20] = self.shadow_size as f32;
+        // The exposure the composite will apply, so a probe can divide it back
+        // out and be read as the value it is rather than as a saturated white.
+        shadow_uniform[21] = self
+            .look
+            .tonemap()
+            .map_or(1.0, |tonemap| tonemap.exposure().get());
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
