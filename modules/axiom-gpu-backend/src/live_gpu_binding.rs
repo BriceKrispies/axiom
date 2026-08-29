@@ -402,6 +402,21 @@ impl LiveGpuBinding {
             hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
             hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
         );
+        // **What this device actually resolved**, on one line, because the answer
+        // decides how the frame is exposed and is otherwise invisible from
+        // outside the binary. A phone reporting a dark frame and a desktop
+        // reporting a correct one differ HERE or nowhere, and "the sky is right
+        // and the world is black" is not a guess anyone should have to make from
+        // a screenshot.
+        web_sys::console::log_1(&JsValue::from_str(&format!(
+            "axiom: hdr_targets = {hdr_targets} (render_attachment = {}, texture_binding = {}), \
+             caps = {:#010x}, tonemap_authored = {}",
+            hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+            hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
+            profile.bits(),
+            look.tonemap().is_some(),
+        )));
+
         // **Does this frame render in high dynamic range?** Both halves, together:
         // the app authored a tone map, and the profile — the host's, with this
         // device's answer folded in by the same grant `bind_canvas` will apply —

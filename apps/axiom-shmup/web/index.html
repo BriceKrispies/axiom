@@ -24,6 +24,34 @@
 <!-- `scene::wiring::hud::HOST_ID`. The HUD builds its overlay, its four layers
      and every widget's DOM in here, and injects `style.css.tpl` alongside. -->
 <div id="ui"></div>
+<!-- `?diag=1` — mirror the engine's own `axiom:` console lines onto the page.
+
+     A phone has no console you can read over someone's shoulder, and the two
+     facts that decide how a frame is exposed (which backend won, and whether
+     the device granted HDR attachments) are logged and nowhere else. This turns
+     a screenshot into a measurement. Off unless asked for, and it captures
+     rather than generates: it prints what the engine already said. -->
+<script>
+  if (new URLSearchParams(location.search).has("diag")) {
+    const box = document.createElement("pre");
+    box.style.cssText =
+      "position:fixed;left:0;top:0;z-index:99;margin:0;padding:8px;max-width:100vw;" +
+      "white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,.82);" +
+      "color:#8fe;font:11px/1.35 ui-monospace,Menlo,Consolas,monospace";
+    box.textContent = "axiom diag: waiting for the backend to bind\u2026\n";
+    addEventListener("DOMContentLoaded", () => document.body.append(box));
+    const seen = [];
+    const log = console.log.bind(console);
+    console.log = (...a) => {
+      const line = a.map(String).join(" ");
+      if (line.startsWith("axiom:")) {
+        seen.push(line);
+        box.textContent = seen.join("\n\n");
+      }
+      log(...a);
+    };
+  }
+</script>
 <script type="module">
   import init, { shmup_start } from "./pkg/axiom_shmup.js";
   await init();
