@@ -196,7 +196,29 @@ impl GpuBackendApi {
     /// is no longer unconditionally full — it gates on the same profile the Canvas 2D
     /// backend does.
     pub fn set_capability_profile(&mut self, profile: axiom_host::BackendCapabilityProfile) {
-        self.capability = profile;
+        // The page's capability bisect (`?nocaps=`) is applied HERE, on the one
+        // field every consumer reads, rather than at the bind: the bind's local
+        // profile only decides the HDR attachment, while `self.capability.bits()`
+        // is the word that reaches the shader, the pass gating and the Canvas 2D
+        // arm alike. Masking the wrong one produced a lever that logged a
+        // narrowed capability set and changed no pixel.
+        self.capability = Self::bisected(profile);
+    }
+
+    /// `?nocaps=` on wasm; the identity everywhere else.
+    #[cfg(target_arch = "wasm32")]
+    fn bisected(
+        profile: axiom_host::BackendCapabilityProfile,
+    ) -> axiom_host::BackendCapabilityProfile {
+        crate::live_gpu_binding::dropped_by_url(profile)
+    }
+
+    /// Native builds have no URL to read, so the profile is whatever the host set.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn bisected(
+        profile: axiom_host::BackendCapabilityProfile,
+    ) -> axiom_host::BackendCapabilityProfile {
+        profile
     }
 
     /// The optional render capabilities this backend attempts.

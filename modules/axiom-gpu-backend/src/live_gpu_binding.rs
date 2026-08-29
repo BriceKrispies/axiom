@@ -123,6 +123,59 @@ pub struct LiveGpuBinding {
 
 /// Translate a `wgpu` surface acquisition failure into the engine's
 /// [`SurfaceStatus`], whose [`SurfaceStatus::recovery_action`] decides what to do.
+/// **`?nocaps=shadows,normalmap,…` — switch a capability off from the URL.**
+///
+/// A frame that renders correctly on one GPU and wrongly on another is a
+/// bisect, and until now there was no way to run one: the capability word is
+/// resolved inside the binary from what the adapter reports, and the machine
+/// showing the fault is usually a phone with no console and no debugger. This
+/// is `?backend=`'s sibling — the same idea one level down. Instead of picking
+/// which backend runs, it turns off one of the things that backend does, so the
+/// subsystem responsible can be found in a couple of page loads by whoever is
+/// holding the device.
+///
+/// It can only ever CLEAR bits. A capability the device did not grant cannot be
+/// switched on from a query string, so this can make a frame simpler but never
+/// asks for something the hardware cannot do.
+///
+/// wasm32 only — the URL is the platform edge, so ordinary control flow is fine
+/// here, exactly as in `backend_preference`.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn dropped_by_url(
+    profile: axiom_host::BackendCapabilityProfile,
+) -> axiom_host::BackendCapabilityProfile {
+    use axiom_host::RenderCapability;
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    let Some(list) = search
+        .split("nocaps=")
+        .nth(1)
+        .map(|rest| rest.split('&').next().unwrap_or(rest))
+    else {
+        return profile;
+    };
+    let dropped = list.split(',').fold(profile, |p, name| match name {
+        "shadows" => p.without(RenderCapability::Shadows),
+        "normalmap" => p.without(RenderCapability::NormalMapping),
+        "specular" => p.without(RenderCapability::Specular),
+        "sky" => p.without(RenderCapability::Sky),
+        "bloom" => p.without(RenderCapability::Bloom),
+        "aerial" => p.without(RenderCapability::AerialPerspective),
+        "textures" => p.without(RenderCapability::Textures),
+        "hdr" => p.without(RenderCapability::HdrTargets),
+        "gbuffer" => p.without(RenderCapability::GBuffer),
+        "sdf" => p.without(RenderCapability::Sdf),
+        _ => p,
+    });
+    web_sys::console::log_1(&JsValue::from_str(&format!(
+        "axiom: nocaps={list:?} -> caps {:#010x} (was {:#010x})",
+        dropped.bits(),
+        profile.bits()
+    )));
+    dropped
+}
+
 fn classify(error: &wgpu::SurfaceError) -> SurfaceStatus {
     match error {
         wgpu::SurfaceError::Timeout => SurfaceStatus::Timeout,
@@ -410,7 +463,7 @@ impl LiveGpuBinding {
         // a screenshot.
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "axiom: hdr_targets = {hdr_targets} (render_attachment = {}, texture_binding = {}), \
-             caps = {:#010x}, tonemap_authored = {}",
+             caps_at_bind = {:#010x} (PRE-grant; the frame's own word is reported by \n             `scene_exposure` below), tonemap_authored = {}",
             hdr_usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
             hdr_usages.contains(wgpu::TextureUsages::TEXTURE_BINDING),
             profile.bits(),

@@ -356,6 +356,26 @@ fn sun_direction(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> [f32; 3] {
 /// to the identity, which yields a usable — if wrong — ray rather than a NaN
 /// that would poison every pixel of the frame. This is the same defensive
 /// posture `FrameSky::normalize_or` takes on the Rust side.
+/// Say once, on the browser console, what stop the scene pass is metering at.
+///
+/// Per-frame and therefore unreachable from the bind-time report, but the value
+/// is constant for a run, so once is the whole story. `wasm32` only: this is a
+/// diagnostic for the machine that has no console anyone can read.
+#[cfg(target_arch = "wasm32")]
+fn report_scene_exposure(scene_exposure: f32, caps: u32) {
+    static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    (!SAID.swap(true, std::sync::atomic::Ordering::Relaxed)).then(|| {
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+            "axiom: scene_exposure = {scene_exposure} (frame caps = {caps:#010x}, \n             hdr bit = {})",
+            caps & (axiom_host::RenderCapability::HdrTargets as u32) != 0
+        )));
+    });
+}
+
+/// Native builds have no console to say it on.
+#[cfg(not(target_arch = "wasm32"))]
+fn report_scene_exposure(_scene_exposure: f32, _caps: u32) {}
+
 fn pack_sky(
     sky: &axiom_host::FrameSky,
     camera_view_proj: [f32; 16],
@@ -1767,6 +1787,7 @@ impl SceneRenderer {
         // gates every other capability on.
         let scene_exposure =
             crate::hdr_target::ldr_scene_exposure(self.look.tonemap(), caps);
+        report_scene_exposure(scene_exposure, caps);
         queue.write_buffer(
             &self.lights_buffer,
             0,
