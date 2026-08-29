@@ -375,6 +375,49 @@ pub(crate) fn texel_snap(view_proj: Mat4, map_size: u32) -> (f32, f32) {
     )
 }
 
+/// Nail an **already-composed** light view-projection to the shadow map's
+/// whole-texel grid — [`texel_snap`]'s other caller, for the single-cascade path
+/// that `axiom-render-pipeline` fits.
+///
+/// # Why the single-cascade path needs this too
+///
+/// [`fit_one`] applies the snap because this module's header sets out why it is
+/// mandatory: *"the sphere fixes the grid's **size**, the snap fixes its
+/// **phase**"*, and **both are required** to stop a shadow swimming.
+/// `axiom_render_pipeline::shadow_view` does the first half — it fits the ortho
+/// box to the view frustum's bounding sphere, which is rotation-invariant, so
+/// the box stops changing size as the camera turns — and then does not do the
+/// second. Its volume is centred on the camera and moves continuously with it,
+/// so the texel grid slides under the world every frame.
+///
+/// What that looks like is not a shimmer at the shadow's edge. At the atlas
+/// sizes a device tier actually grants (1024 or 2048 over a ~116 m box, so 6-11
+/// cm texels filtered by a 5x5 PCF at a 1.25-texel spread) the penumbra is
+/// 35-70 cm wide and quantised into 25 discrete taps, so the edge is a visible
+/// staircase — and an unsnapped grid makes that whole staircase crawl across the
+/// ground as the player walks. Reported from the game as "a second projection of
+/// the world" on the road, visible when zoomed and moving.
+///
+/// # Why it can be applied after composition
+///
+/// [`fit_one`] snaps the *projection*, before the view multiply and the depth
+/// fix. Applying it to the composed `depth_fix * proj * view` is the same
+/// matrix. Writing `T` for the translation that adds `(dx, dy)` to the
+/// projection's last column, `D * (P + T) * V = D*P*V + D*T*V`; `T` is zero
+/// except `T[0][3] = dx`, `T[1][3] = dy`, and an affine view matrix has last row
+/// `(0, 0, 0, 1)`, so `T*V` is zero except the same two entries, and `D` (which
+/// touches only `z`) leaves them alone. So the product differs from the
+/// unsnapped one in exactly elements 12 and 13 — which is what this adds. The
+/// probe itself is unaffected by the depth fix for the same reason: it reads
+/// only `x` and `y` of the projected origin.
+pub(crate) fn snap_view_proj(view_proj: [f32; 16], map_size: u32) -> [f32; 16] {
+    let (dx, dy) = texel_snap(Mat4::from_cols_array(view_proj), map_size.max(1));
+    let mut snapped = view_proj;
+    snapped[12] += dx;
+    snapped[13] += dy;
+    snapped
+}
+
 /// Fit `count` cascades to `camera` for a sun at `sun_dir` (pointing **from the
 /// scene toward the sun**, the source's convention — the negation of the
 /// travel direction `axiom-render-pipeline`'s single-cascade fit takes).
@@ -481,6 +524,90 @@ mod shading;
 mod tests {
     use super::shading::project;
     use super::*;
+
+    /// A light view-projection of the shape `axiom_render_pipeline::shadow_view`
+    /// builds: an ortho box of `radius` fitted around a centre that follows the
+    /// camera, looking down-sun, depth-fixed to wgpu clip.
+    fn single_cascade_vp(centre: Vec3, radius: f32) -> [f32; 16] {
+        let sun = Vec3::new(0.35, 0.82, 0.45).normalize().expect("a real sun");
+        let eye = centre.add(sun.mul_scalar(radius + BACK_DISTANCE));
+        let view = Mat4::look_at(eye, centre, Vec3::new(0.0, 1.0, 0.0)).expect("a real basis");
+        let proj = Mat4::orthographic(-radius, radius, -radius, radius, NEAR, 2.0 * radius + BACK_DISTANCE)
+            .expect("a real box");
+        Mat4::from_cols_array(GL_TO_WGPU_DEPTH)
+            .multiply(proj)
+            .multiply(view)
+            .as_cols_array()
+    }
+
+    /// The snap's definition: after it, the world origin sits **on** a whole
+    /// texel, so re-probing finds nothing left to move.
+    #[test]
+    fn snapping_leaves_the_origin_on_a_whole_texel() {
+        let vp = single_cascade_vp(Vec3::new(3.7, 0.0, -11.3), 58.0);
+        let snapped = snap_view_proj(vp, 2048);
+        let (dx, dy) = texel_snap(Mat4::from_cols_array(snapped), 2048);
+        // Half a texel in NDC is `1 / map_size`; a residual this far under it is
+        // float noise, not a grid the probe would move again.
+        assert!(dx.abs() < 1.0e-6, "x residual {dx}");
+        assert!(dy.abs() < 1.0e-6, "y residual {dy}");
+    }
+
+    /// It is a translation in clip x/y and nothing else — the argument in
+    /// `snap_view_proj`'s doc, checked rather than asserted in prose.
+    #[test]
+    fn snapping_touches_only_the_two_translation_lanes() {
+        let vp = single_cascade_vp(Vec3::new(-2.0, 1.0, 4.0), 40.0);
+        let snapped = snap_view_proj(vp, 1024);
+        (0..16)
+            .filter(|i| *i != 12 && *i != 13)
+            .for_each(|i| assert_eq!(vp[i], snapped[i], "lane {i} moved"));
+        assert!(
+            (vp[12] != snapped[12]) | (vp[13] != snapped[13]),
+            "the probe found nothing to snap on a volume that is not already aligned"
+        );
+    }
+
+    /// **The defect this exists to remove.** Two camera positions a few
+    /// centimetres apart — one walking pace at 60 Hz — must land on the *same*
+    /// texel grid, or the whole quantised penumbra crawls across the ground.
+    ///
+    /// Measured on the unsnapped matrices for contrast: the grid moves by a
+    /// fraction of a texel every frame, which is exactly the swim.
+    #[test]
+    fn a_walking_camera_keeps_one_texel_grid() {
+        let radius = 58.0;
+        let a = single_cascade_vp(Vec3::new(0.0, 0.0, 0.0), radius);
+        let b = single_cascade_vp(Vec3::new(0.05, 0.0, 0.03), radius);
+        // The grid's phase is where the origin lands, in texels.
+        let phase = |m: [f32; 16]| {
+            let o = Mat4::from_cols_array(m).transform_vec4(Vec4::new(0.0, 0.0, 0.0, 1.0));
+            let half = 2048.0_f32 * 0.5;
+            (o.x * half, o.y * half)
+        };
+        let (ux, uy) = phase(a);
+        let (vx, vy) = phase(b);
+        assert!(
+            ((ux - vx).abs() > 1.0e-4) | ((uy - vy).abs() > 1.0e-4),
+            "the unsnapped grids already agreed, so this test proves nothing"
+        );
+        let (sx, sy) = phase(snap_view_proj(a, 2048));
+        let (tx, ty) = phase(snap_view_proj(b, 2048));
+        // Both land on a whole texel, so both round to the same integer phase.
+        assert!((sx - sx.round()).abs() < 1.0e-3, "a is off-grid: {sx}");
+        assert!((tx - tx.round()).abs() < 1.0e-3, "b is off-grid: {tx}");
+        assert!((sy - sy.round()).abs() < 1.0e-3, "a is off-grid: {sy}");
+        assert!((ty - ty.round()).abs() < 1.0e-3, "b is off-grid: {ty}");
+    }
+
+    /// A zero map size is clamped rather than dividing by zero — the same
+    /// posture `fit` takes for its own `map_size`.
+    #[test]
+    fn a_zero_map_size_is_clamped_and_finite() {
+        let vp = single_cascade_vp(Vec3::new(1.0, 0.0, 2.0), 12.0);
+        let snapped = snap_view_proj(vp, 0);
+        assert!(snapped.iter().all(|v| v.is_finite()));
+    }
 
     /// The source's shipped configuration: `4 x 2048`, 140 m, lambda 0.86.
     fn street_camera() -> CascadeCamera {
@@ -784,16 +911,27 @@ mod tests {
 
 
 
-    /// **A one-cascade configuration renders byte-identical to today, by
-    /// construction rather than by assertion.** Four cascades is an extension:
-    /// the shipped shadow path is `axiom-render-pipeline`'s single
-    /// bounding-sphere fit and `scene_wgsl.rs`'s 5x5 comparison PCF, and this
-    /// module is not reachable from either. A source scan rather than a claim —
-    /// if a future change wires the cascades in, this test fails and the wiring
-    /// (and the one-cascade byte-identity argument that has to come with it) is
-    /// forced to be deliberate.
+    /// **The shadow path takes the snap from this module and nothing else yet.**
+    ///
+    /// This replaces `nothing_in_the_shadow_path_compiles_this_yet`, which
+    /// asserted the whole module was unreachable from the shipped shadow path
+    /// and fired — correctly — the moment [`snap_view_proj`] was wired into
+    /// `scene_renderer`. Its demand was that any wiring come with an argument
+    /// about what the one-cascade configuration now renders, so here it is.
+    ///
+    /// **It is deliberately NOT byte-identical.** The snap translates the light
+    /// matrix by up to half a texel, so every shadowed pixel may move by that
+    /// much — which is the entire point: an unsnapped grid slides under the
+    /// world continuously as the camera moves, and half a texel *once* is the
+    /// price of it never sliding again. The map is still one cascade, still fit
+    /// by `axiom_render_pipeline::shadow_view`, still filtered by
+    /// `scene_wgsl.rs`'s 5x5 comparison PCF.
+    ///
+    /// So the guard is narrowed rather than dropped: the shadow path may name
+    /// the snap, and naming anything that *selects* a cascade means the pass has
+    /// genuinely become cascaded and this test has to be replaced again.
     #[test]
-    fn nothing_in_the_shadow_path_compiles_this_yet() {
+    fn the_shadow_path_takes_the_snap_and_no_cascade_selection() {
         [
             ("scene_wgsl.rs", include_str!("scene_wgsl.rs")),
             ("scene_renderer.rs", include_str!("scene_renderer.rs")),
@@ -801,12 +939,23 @@ mod tests {
         ]
         .iter()
         .for_each(|(name, source)| {
-            assert!(
-                !source.contains("cascade::") & !source.contains("CascadeSet"),
-                "{name} now references the cascades; the shadow pass is no longer \
-                 one cascade, and this test must be replaced by one proving the \
-                 one-cascade configuration still renders what it renders today"
-            );
+            ["CascadeSet", "cascade_shadow", "select_cascade", "cascade::fit"]
+                .iter()
+                .for_each(|symbol| {
+                    assert!(
+                        !source.contains(symbol),
+                        "{name} references `{symbol}`: the shadow pass is now \
+                         cascaded, so this test must be replaced by one proving \
+                         what the multi-cascade configuration renders"
+                    );
+                });
+            // Every `cascade::` the shadow path names must be the snap.
+            source.match_indices("cascade::").for_each(|(at, _)| {
+                assert!(
+                    source[at..].starts_with("cascade::snap_view_proj"),
+                    "{name} names a cascade item other than the snap at byte {at}"
+                );
+            });
         });
     }
 
