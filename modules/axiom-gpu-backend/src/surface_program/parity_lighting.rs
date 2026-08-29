@@ -137,7 +137,16 @@ impl Rig {
     /// The lighting uniform's 608 bytes, laid out exactly as
     /// `crate::scene_renderer` packs them and as the WGSL `Lights` declares them.
     fn ubo(&self) -> Vec<u8> {
-        let header: Vec<u8> = [self.lights.len() as u32, self.caps, 0, 0]
+        // The third header word is the frame's SCENE-LINEAR EXPOSURE, read as an
+        // `f32` — the lane that used to be `_pad1`. A rig writing the old zero
+        // there does not render an unmetered frame, it renders a BLACK one, so
+        // the identity is spelled out rather than left as a pad.
+        let header: Vec<u8> = [
+            self.lights.len() as u32,
+            self.caps,
+            1.0_f32.to_bits(),
+            0,
+        ]
             .iter()
             .flat_map(|word| word.to_le_bytes())
             .chain(

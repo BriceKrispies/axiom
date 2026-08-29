@@ -58,7 +58,11 @@ struct SkyU {
     body: vec4<f32>,
     // rgb = the body's colour; w = the halo's cosine exponent.
     body_color: vec4<f32>,
-    // x = halo strength; yzw unused.
+    // x = halo strength; y = the frame's SCENE-LINEAR EXPOSURE (the mesh pass's
+    // `lights.scene_exposure`, carried here because this pass binds its own
+    // uniform and writes into the same colour target — a sky metered at a
+    // different stop from the world it sits behind is the seam this avoids);
+    // zw unused.
     halo: vec4<f32>,
     // x = cloud coverage (0 = clear sky); y = the cloud field's scale; zw unused.
     cloud: vec4<f32>,
@@ -170,7 +174,7 @@ fn fs(in: SkyOut) -> @location(0) vec4<f32> {
     let sunlit = pow(max(cos_angle, 0.0), 6.0) * 0.35;
     let cloud = gradient * 1.6 + sky.body_color.rgb * sunlit;
 
-    return vec4<f32>(mix(behind, cloud, density), 1.0);
+    return vec4<f32>(mix(behind, cloud, density) * sky.halo.y, 1.0);
 }
 "#;
 
@@ -352,7 +356,14 @@ fn sun_direction(lights: &[(u32, [f32; 3], [f32; 3], f32)]) -> [f32; 3] {
 /// to the identity, which yields a usable — if wrong — ray rather than a NaN
 /// that would poison every pixel of the frame. This is the same defensive
 /// posture `FrameSky::normalize_or` takes on the Rust side.
-fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> {
+fn pack_sky(
+    sky: &axiom_host::FrameSky,
+    camera_view_proj: [f32; 16],
+    // The frame's scene-linear exposure, into the `halo` vec4's second lane. An
+    // unmetered frame passes `1.0`, which is the exact identity the lane held
+    // when it was an unused pad.
+    scene_exposure: f32,
+) -> Vec<u8> {
     let inv = axiom_math::Mat4::from_cols_array(camera_view_proj)
         .inverse()
         .unwrap_or(axiom_math::Mat4::IDENTITY)
@@ -380,7 +391,7 @@ fn pack_sky(sky: &axiom_host::FrameSky, camera_view_proj: [f32; 16]) -> Vec<u8> 
                 color[2],
                 sky.halo_falloff().get(),
                 sky.halo_strength().get(),
-                0.0,
+                scene_exposure,
                 0.0,
                 0.0,
                 sky.cloud_coverage().get(),
@@ -440,7 +451,10 @@ struct Lights {
     // The frame's backend capability mask, the same lane the mesh pass reads as
     // `caps` (it was `_pad0` here while nothing in this pass needed it).
     caps: u32,
-    _pad1: u32,
+    // The frame's scene-linear exposure — layout parity with the mesh pass, and
+    // read here for the same reason: a raymarched surface and a triangle at the
+    // same place must be metered by the same stop.
+    scene_exposure: f32,
     _pad2: u32,
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
     sky: vec4<f32>,
@@ -596,7 +610,7 @@ fn shade(surface: vec4<f32>, n: vec3<f32>, hit: vec3<f32>) -> vec4<f32> {
         lit = lit + light_diffuse(lights.items[i], n, hit);
     }
     lit = min(lit, 1.0);
-    return vec4<f32>(surface.rgb * lit, surface.a);
+    return vec4<f32>(surface.rgb * lit * lights.scene_exposure, surface.a);
 }
 
 struct FsOut {
@@ -1745,6 +1759,14 @@ impl SceneRenderer {
         // Gate the SDF raymarch pass on the frame's Sdf capability bit; a profile that
         // drops SDF renders meshes only (the same policy the Canvas 2D backend applies).
         let sdf = sdf.filter(|_| (caps & (axiom_host::RenderCapability::Sdf as u32)) != 0);
+        // The stop this frame is metered at, for the arms that have to apply it
+        // themselves. `1.0` — an exact identity — on every frame that either
+        // authored no tone map or kept one; the authored exposure only on a
+        // device that could not give the float attachment and therefore has no
+        // composite to apply it in. Decided from the same `caps` word the pass
+        // gates every other capability on.
+        let scene_exposure =
+            crate::hdr_target::ldr_scene_exposure(self.look.tonemap(), caps);
         queue.write_buffer(
             &self.lights_buffer,
             0,
@@ -1757,6 +1779,7 @@ impl SceneRenderer {
                     .depth_fog()
                     .unwrap_or_else(axiom_host::FrameDepthFog::none),
                 caps,
+                scene_exposure,
                 // An unauthored fill is every-lane zero, an exact no-op — so a
                 // look with none renders as one from before the fill existed.
                 self.look
@@ -1805,7 +1828,11 @@ impl SceneRenderer {
         // Rewritten each frame: the sky's own parameters are fixed at bind, but
         // the camera moves, so the ray reconstruction does not.
         sky.into_iter().for_each(|s| {
-            queue.write_buffer(&s.uniform, 0, &pack_sky(&s.sky, camera.view_proj()));
+            queue.write_buffer(
+                &s.uniform,
+                0,
+                &pack_sky(&s.sky, camera.view_proj(), scene_exposure),
+            );
         });
         // Upload the SDF uniform on frames that carry a scene (zero-or-one, via the
         // Option iterator — no `if`).
@@ -2919,6 +2946,10 @@ fn pack_lights(
     ambient: axiom_host::FrameAmbient,
     depth_fog: axiom_host::FrameDepthFog,
     caps: u32,
+    // The frame's scene-linear exposure, into the header lane after `caps`. An
+    // unmetered frame passes `1.0` — the exact identity the lane held while it
+    // was `_pad1`, so such a frame's uniform is byte-identical to before.
+    scene_exposure: f32,
     // The frame's two-band indirect fill. Every lane zero is the identity.
     indirect: axiom_host::FrameIndirect,
     camera_view_proj: [f32; 16],
@@ -2930,10 +2961,11 @@ fn pack_lights(
     let count = lights.len().min(MAX_LIGHTS);
     let mut bytes = Vec::with_capacity(LIGHTS_UBO_BYTES as usize);
     bytes.extend_from_slice(&(count as u32).to_le_bytes());
-    // The capability mask occupies the first header pad slot (the WGSL `caps` field);
-    // the remaining two u32 pads stay zero.
+    // The capability mask occupies the first header pad slot (the WGSL `caps`
+    // field) and the exposure the second; the last u32 pad stays zero.
     bytes.extend_from_slice(&caps.to_le_bytes());
-    bytes.extend_from_slice(&[0u8; 8]);
+    bytes.extend_from_slice(&scene_exposure.to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 4]);
     let (sky, ground) = (ambient.sky(), ambient.ground());
     let fog = depth_fog.color();
     let eye = camera_eye(camera_view_proj);
@@ -3282,6 +3314,89 @@ mod map_tests {
             super::map_or_neutral(Some(&authored), &neutral),
             (2, 1, [1, 2, 3, 4, 5, 6, 7, 8].as_slice()),
             "an authored map binds its own extent and texels"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **The metering lane, at the byte.**
+    ///
+    /// A [`axiom_host::FrameTonemap`] carries a curve AND a scene-linear
+    /// exposure. A backend without
+    /// [`axiom_host::RenderCapability::HdrTargets`] must drop the first and keep
+    /// the second - the curve needs headroom, a multiply does not - so the
+    /// exposure travels to the shader in the header lane that used to be
+    /// `_pad1`. `crate::hdr_target::ldr_scene_exposure` decides the value; this
+    /// pins where it lands, which is the half a wrong offset would silently
+    /// break (the lane beside it is `caps`, a bitmask that would read as a
+    /// nonsense exposure and vice versa).
+    #[test]
+    fn the_lights_header_carries_the_scene_exposure_in_the_lane_after_caps() {
+        let packed = |exposure: f32| {
+            pack_lights(
+                &[],
+                axiom_host::FrameAmbient::default_hemisphere(),
+                axiom_host::FrameDepthFog::none(),
+                0xABCD_1234,
+                exposure,
+                axiom_host::FrameIndirect::none(),
+                [0.0; 16],
+                0.0,
+            )
+        };
+        let bytes = packed(4.0);
+        // count, then caps, then the exposure: the WGSL `Lights` header, in order.
+        assert_eq!(&bytes[0..4], &0_u32.to_le_bytes());
+        assert_eq!(&bytes[4..8], &0xABCD_1234_u32.to_le_bytes());
+        assert_eq!(&bytes[8..12], &4.0_f32.to_le_bytes());
+        // The last header lane is still a pad, and still zero.
+        assert_eq!(&bytes[12..16], &[0_u8; 4]);
+
+        // An unmetered frame writes the exact identity. This is the byte-identity
+        // guarantee for every app that authors no tone map: a `1.0` here is a
+        // multiply the shader cannot observe, not a nearly-one.
+        assert_eq!(&packed(1.0)[8..12], &1.0_f32.to_le_bytes());
+    }
+
+    /// The sky pass binds its OWN uniform and writes into the SAME colour
+    /// target, so it has to be metered by the same stop or the sky and the world
+    /// in front of it are graded differently - a seam at the horizon. Its lane is
+    /// the `halo` vec4's second component: 64 bytes of matrix, then four `vec4`s,
+    /// then `halo.x`.
+    #[test]
+    fn the_sky_uniform_carries_the_same_exposure_as_the_world() {
+        let bytes = pack_sky(&axiom_host::FrameSky::gradient([0.2, 0.4, 0.9], [0.7, 0.8, 0.9]), [0.0; 16], 4.0);
+        const HALO_Y: usize = 64 + 4 * 16 + 4;
+        assert_eq!(&bytes[HALO_Y..HALO_Y + 4], &4.0_f32.to_le_bytes());
+        assert_eq!(
+            &pack_sky(&axiom_host::FrameSky::gradient([0.2, 0.4, 0.9], [0.7, 0.8, 0.9]), [0.0; 16], 1.0)[HALO_Y..HALO_Y + 4],
+            &1.0_f32.to_le_bytes()
+        );
+    }
+
+    /// Both passes must actually READ their lane. The values above are inert if
+    /// the shader ignores them, and a shader is text here - so this is assertable
+    /// without a device, the same way `post_chain` pins its composite source.
+    #[test]
+    fn both_colour_passes_apply_the_scene_exposure_they_are_handed() {
+        assert!(
+            crate::scene_wgsl::SCENE_WGSL_PREFIX.contains("scene_exposure: f32"),
+            "the mesh pass stopped declaring the metering lane"
+        );
+        assert!(
+            crate::scene_wgsl::SCENE_WGSL_SUFFIX.contains("lights.scene_exposure"),
+            "the mesh pass stopped applying the metering it is handed"
+        );
+        assert!(
+            SKY_WGSL.contains("sky.halo.y"),
+            "the sky pass stopped applying the metering it is handed"
+        );
+        assert!(
+            SDF_WGSL.contains("lights.scene_exposure"),
+            "the raymarch pass stopped applying the metering it is handed"
         );
     }
 }

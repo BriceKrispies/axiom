@@ -698,7 +698,7 @@ mod tests {
         );
     }
 
-    /// The retro 32-bit look wins over a tone map, and it does so *exactly*: the
+    /// The retro 32-bit look wins over a tone map, and it does so *exactly*: the    /// The retro 32-bit look wins over a tone map, and it does so *exactly*: the
     /// capture is the one that look has always produced. The two are incoherent
     /// (see the refusal in `render_to_rgba`), so this pins which one gives way.
     #[test]

@@ -62,7 +62,16 @@ struct Lights {
     // fragment shader gates its per-fragment features on these bits so the GPU
     // backend consults the same capability profile the Canvas 2D backend does.
     caps: u32,
-    _pad1: u32,
+    // The frame's SCENE-LINEAR EXPOSURE — the stop it is metered at, applied to
+    // this pass's final colour. `1.0` on every frame that either authored no
+    // tone map or kept one: an HDR present applies its own exposure in the
+    // composite, so this lane is the identity there and the two never stack.
+    //
+    // It is only ever other than 1.0 on a device that could not give the float
+    // attachment. The curve is dropped there (nothing above display white has
+    // anywhere to go), but the metering is not the curve, and a frame that loses
+    // it is not softer — it is black. See `crate::hdr_target::ldr_scene_exposure`.
+    scene_exposure: f32,
     _pad2: u32,
     // Hemisphere ambient (rgb; w unused), strength folded in — a plain mix, no scale.
     sky: vec4<f32>,
@@ -1115,6 +1124,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // from the air authors a frame with no fog in it.
     let air_metres = length(in.world_pos - lights.camera.xyz);
     let fogged = mix(emitted, lights.fog_color.rgb, fog_factor(in.clip.z, air_metres));
-    return vec4<f32>(fogged, base.a);
+    // The frame's metering, applied LAST and to everything — surface, emission
+    // and the air in front of it alike. That is the same place and the same
+    // order the HDR composite applies its own exposure, which is what makes the
+    // two arms one image at two precisions rather than two different grades.
+    return vec4<f32>(fogged * lights.scene_exposure, base.a);
 }
 "#;

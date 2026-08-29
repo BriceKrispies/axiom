@@ -107,9 +107,81 @@ pub(crate) fn hdr_scene_tonemap(
     authored.filter(|_| profile.supports_attachment(HostAttachmentFormat::Rgba16Float))
 }
 
+/// **The other half of that degradation**: the scene-linear scale the 8-bit
+/// chain must still apply when [`hdr_scene_tonemap`] declined the float target.
+///
+/// A [`FrameTonemap`] bundles two quantities that are not the same kind of
+/// thing. The CURVE needs headroom - it exists to decide where a value above
+/// display white lands, so without a float attachment there is nothing for it to
+/// do and dropping it is honest. The EXPOSURE does not: it is a plain
+/// scene-linear multiply, the stop the frame is metered at, and every backend
+/// can apply a multiply. Dropping both because they arrived in one struct does
+/// not degrade the picture, it MIS-EXPOSES it.
+///
+/// That is not hypothetical. An app cannot fold its own metering into its
+/// authored values, because the engine types a light's intensity as a
+/// [`axiom_kernel::Ratio`] - it cannot express a sun brighter than one, so it
+/// normalizes and hands the scale here instead. Measured on `axiom-shmup`, whose
+/// exposure is 9.5: the frame rendered on a profile without
+/// [`axiom_host::RenderCapability::HdrTargets`] came out at a median luminance
+/// of 70/255 against 161 on the same frame with it - not a softer picture, a
+/// black one.
+///
+/// Returns `1.0` - an exact identity - whenever the tone map SURVIVED (the HDR
+/// composite applies the exposure itself, and applying it twice would be as
+/// wrong as not at all) and whenever the app authored none.
+///
+/// # Why the caller applies this in the scene pass, not the composite
+///
+/// Because the 8-bit target clamps at the STORE. By the time a composite sees
+/// the frame, everything above display white has already been crushed to white
+/// and the bottom of the range has been quantized to a handful of levels;
+/// stretching that by 9.5 recovers no highlight and bands everything else.
+/// Applied to the fragment's own radiance the scale lands before the clamp, so
+/// the frame uses the full 8-bit range and only genuine highlights clip - which
+/// is exactly the 8-bit chain's declared substitute.
+pub(crate) fn ldr_scene_exposure(authored: Option<FrameTonemap>, caps: u32) -> f32 {
+    authored
+        .filter(|_| caps & (axiom_host::RenderCapability::HdrTargets as u32) == 0)
+        .map_or(1.0, |t| t.exposure().get())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two halves of the degradation are keyed on the SAME question, and
+    /// this pins them to it: the scene pass applies an exposure exactly when the
+    /// present pass declined the curve. A drift either way is a visible bug -
+    /// both applying it is a doubly-exposed frame, neither is a black one.
+    #[test]
+    fn the_scene_exposure_survives_exactly_when_the_tone_map_does_not() {
+        let capable = BackendCapabilityProfile::all();
+        let incapable = capable.without(RenderCapability::HdrTargets);
+        let authored = FrameTonemap::blended(
+            axiom_kernel::Ratio::new(1.0).expect("finite"),
+            axiom_kernel::Ratio::new(9.5).expect("finite"),
+        );
+
+        // Curve kept -> the composite meters, so the scene pass must not.
+        assert!(hdr_scene_tonemap(Some(authored), capable).is_some());
+        assert_eq!(ldr_scene_exposure(Some(authored), capable.bits()), 1.0);
+
+        // Curve dropped -> the scene pass is the only place left to meter.
+        assert!(hdr_scene_tonemap(Some(authored), incapable).is_none());
+        assert_eq!(ldr_scene_exposure(Some(authored), incapable.bits()), 9.5);
+    }
+
+    /// A frame that authored no tone map is untouched on every profile. This is
+    /// the byte-identity guarantee every app written before the HDR path existed
+    /// relies on: an identity multiply, not a nearly-identity one.
+    #[test]
+    fn a_frame_with_no_tone_map_is_never_re_exposed() {
+        let capable = BackendCapabilityProfile::all();
+        let incapable = capable.without(RenderCapability::HdrTargets);
+        assert_eq!(ldr_scene_exposure(None, capable.bits()), 1.0);
+        assert_eq!(ldr_scene_exposure(None, incapable.bits()), 1.0);
+    }
 
     /// Both usages are required, and the truth table says so in full — the
     /// render-attachment-only case is the one that would compile, bind, and then
