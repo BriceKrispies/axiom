@@ -317,6 +317,9 @@ struct ShadowU {
     // beside the matrix that answers "where does the sun see from". The frame's
     // FIRST directional light is the one packed; see `crate::scene_renderer`.
     sun: vec4<f32>,
+    // `zw` = the frame's viewport in pixels, read only by the probe atlas to
+    // divide the screen into cells.
+    //
     // `y` = the COMPOSITE's tone-map exposure, carried here so a debug probe can
     // cancel it. Without that every probe is multiplied by it and run through
     // AgX before anyone sees it, so any value above roughly a tenth saturates to
@@ -1276,6 +1279,55 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // lighting inputs. If a device renders it dark, nothing upstream matters and
     // the search moves entirely downstream.
     probe = select(probe, vec3<f32>(0.5), dbg == 16u);
+
+    // **The probe atlas: every term at once, in one screenshot.**
+    //
+    // One probe per page load is a linear search, and each step costs a human a
+    // round trip. That is the wrong shape for diagnosing a device you cannot
+    // attach a debugger to: by the time an answer arrives the question has often
+    // been overtaken. This tiles the frame into a 4x4 grid and paints a
+    // DIFFERENT term in each cell, so a single screenshot carries sixteen
+    // measurements and the search becomes parallel instead of sequential.
+    //
+    // Reading order is left-to-right, top-to-bottom:
+    //
+    //    0 constant .5   1 albedo        2 shading N     3 geometric N
+    //    4 ambient       5 ao            6 contact       7 shade (shadow)
+    //    8 direct        9 light count  10 sun colour   11 sun intensity
+    //   12 shadow uv    13 shadow ref   14 light matrix 15 final
+    //
+    // Cell 0 is the control: a literal constant that depends on nothing. If it
+    // is not mid-grey the whole atlas is meaningless and nothing else in the
+    // frame should be read.
+    let vp = max(shadow.atlas.zw, vec2<f32>(1.0, 1.0));
+    let cell = clamp(floor(in.clip.xy / (vp * 0.25)), vec2<f32>(0.0), vec2<f32>(3.0));
+    let idx = u32(cell.y) * 4u + u32(cell.x);
+    let sun = lights.items[0];
+    var tile = vec3<f32>(0.5);
+    tile = select(tile, base.rgb, idx == 1u);
+    tile = select(tile, N * 0.5 + 0.5, idx == 2u);
+    tile = select(tile, geo_n * 0.5 + 0.5, idx == 3u);
+    tile = select(tile, hemi, idx == 4u);
+    tile = select(tile, vec3<f32>(ao), idx == 5u);
+    tile = select(tile, vec3<f32>(contact), idx == 6u);
+    tile = select(tile, vec3<f32>(shade), idx == 7u);
+    tile = select(tile, lit - ambient_lit, idx == 8u);
+    tile = select(tile, vec3<f32>(f32(lights.count) / 16.0), idx == 9u);
+    tile = select(tile, sun.col.rgb, idx == 10u);
+    tile = select(tile, vec3<f32>(sun.col.w), idx == 11u);
+    tile = select(tile, vec3<f32>(shadow_uv(in.world_pos), 0.0), idx == 12u);
+    tile = select(tile, vec3<f32>(shadow_ref(in.world_pos)), idx == 13u);
+    tile = select(
+        tile,
+        vec3<f32>(
+            f32(shadow.light_vp[0][0] != 0.0),
+            f32(shadow.light_vp[1][1] != 0.0),
+            f32(shadow_clip_w(in.world_pos) != 0.0),
+        ),
+        idx == 14u,
+    );
+    tile = select(tile, shaded * shadow.atlas.y, idx == 15u);
+    probe = select(probe, tile, dbg == 17u);
     // The driver's own answer for the shadow atlas size, against the size the
     // renderer allocated. White means the two agree and `textureDimensions` was
     // telling the truth here; anything else means the PCF kernel was stepping by

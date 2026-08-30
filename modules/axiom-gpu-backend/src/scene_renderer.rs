@@ -398,6 +398,7 @@ fn debug_probe() -> u32 {
         "direct" => 14,
         "lightcount" => 15,
         "constant" => 16,
+        "atlas" => 17,
         _ => 0,
     }
 }
@@ -1983,6 +1984,10 @@ impl SceneRenderer {
             .look
             .tonemap()
             .map_or(1.0, |tonemap| tonemap.exposure().get());
+        // The frame's viewport, so the probe atlas can work out which of its
+        // sixteen cells a fragment belongs to. Only the atlas reads these.
+        shadow_uniform[22] = viewport.0 as f32;
+        shadow_uniform[23] = viewport.1 as f32;
         queue.write_buffer(
             &self.light_vp_buffer,
             0,
