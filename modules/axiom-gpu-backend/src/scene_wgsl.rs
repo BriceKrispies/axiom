@@ -633,6 +633,19 @@ fn shadow_ref(world_pos: vec3<f32>) -> f32 {
     return clip.z / clip.w;
 }
 
+/// One row of the PCF kernel: five taps at a fixed `dy`, written out.
+///
+/// Exists so `shadow_factor` can be loop-free without becoming twenty-five
+/// unreadable lines. See the comment at its call site for why the loop had to
+/// go.
+fn shadow_row(uv: vec2<f32>, step: vec2<f32>, reference: f32, dy: f32) -> f32 {
+    return textureSampleCompare(shadow_map, shadow_samp, uv + vec2<f32>(-2.0, dy) * step, reference)
+        + textureSampleCompare(shadow_map, shadow_samp, uv + vec2<f32>(-1.0, dy) * step, reference)
+        + textureSampleCompare(shadow_map, shadow_samp, uv + vec2<f32>(0.0, dy) * step, reference)
+        + textureSampleCompare(shadow_map, shadow_samp, uv + vec2<f32>(1.0, dy) * step, reference)
+        + textureSampleCompare(shadow_map, shadow_samp, uv + vec2<f32>(2.0, dy) * step, reference);
+}
+
 fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let clip = shadow.light_vp * vec4<f32>(world_pos, 1.0);
     let ndc = clip.xyz / clip.w;
@@ -643,13 +656,31 @@ fn shadow_factor(world_pos: vec3<f32>) -> f32 {
     let bias = 0.0015;
     // 5x5 PCF with a slight kernel spread for a softer penumbra than a 3x3 tap.
     let spread = 1.25;
+    // **Unrolled, and it has to be unrolled.**
+    //
+    // This was a nested `for` with `textureSampleCompare` inside it and a
+    // computed offset. That is the single construct with the longest history of
+    // being miscompiled on Adreno, and this frame renders correctly on a desktop
+    // ANGLE/D3D11 stack and wrongly on an Adreno 650 with an IDENTICAL
+    // capability word, identical float extensions and a `DEPTH_COMPONENT32F`
+    // framebuffer that reports COMPLETE. When every declared capability matches
+    // and the picture does not, what is left is the shader compiler.
+    //
+    // The bounds were compile-time constant already, so a conforming compiler
+    // unrolls this itself and the emitted GLSL is the same either way: on every
+    // stack that was already correct this is not a change, it is the same 25
+    // taps written out. On one that mishandles the loop it is the difference
+    // between a lit world and a fully shadowed one.
+    //
+    // Kept as a helper plus five rows rather than 25 loose lines so the kernel's
+    // shape stays legible — a reader can still see a 5x5 with a `spread`.
+    let s = vec2<f32>(texel * spread, texel * spread);
     var sum = 0.0;
-    for (var dy = -2; dy <= 2; dy = dy + 1) {
-        for (var dx = -2; dx <= 2; dx = dx + 1) {
-            let off = vec2<f32>(f32(dx), f32(dy)) * texel * spread;
-            sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, ndc.z - bias);
-        }
-    }
+    sum = sum + shadow_row(uv, s, ndc.z - bias, -2.0);
+    sum = sum + shadow_row(uv, s, ndc.z - bias, -1.0);
+    sum = sum + shadow_row(uv, s, ndc.z - bias, 0.0);
+    sum = sum + shadow_row(uv, s, ndc.z - bias, 1.0);
+    sum = sum + shadow_row(uv, s, ndc.z - bias, 2.0);
     let outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0;
     return select(sum / 25.0, 1.0, outside);
 }
