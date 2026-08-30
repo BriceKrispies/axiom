@@ -1252,6 +1252,30 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // normal published in the wrong space does — and the tilt's DIRECTION comes
     // from screen-space derivatives, so it can differ between drivers.
     probe = select(probe, vec3<f32>(clamp(dot(N, geo_n), 0.0, 1.0)), dbg == 8u);
+    // **The direct light, alone.** Everything the light loop contributed, with
+    // the ambient base subtracted off.
+    //
+    // The gap in the probe set, and the one that matters most: `ambient` says
+    // the hemisphere term is healthy and `shadow`/`ao`/`contact` say the
+    // multipliers are, but none of them says whether the LOOP that applies the
+    // sun ever ran. Black here with a healthy `ambient` is a world lit by
+    // nothing but its ambient floor, which is a dark world under a correct sky.
+    probe = select(probe, lit - ambient_lit, dbg == 14u);
+    // How many lights that loop believes it has. `lights.count` is a uniform and
+    // it bounds the loop; if a driver reads it as zero the loop body never
+    // executes and no amount of correct light data matters. Full white is 16.
+    probe = select(probe, vec3<f32>(f32(lights.count) / 16.0), dbg == 15u);
+    // **A literal constant, computed from nothing.**
+    //
+    // The bisection this probe set was missing. Every other mode reports a value
+    // the lighting produced, so a black frame is ambiguous: it can mean the term
+    // is zero, or that everything AFTER the fragment shader is broken. This one
+    // depends on no uniform, no texture, no light and no matrix. If a device
+    // renders it mid-grey, the whole path from fragment output through the
+    // composite, tone map and present is intact and the fault is upstream in the
+    // lighting inputs. If a device renders it dark, nothing upstream matters and
+    // the search moves entirely downstream.
+    probe = select(probe, vec3<f32>(0.5), dbg == 16u);
     // The driver's own answer for the shadow atlas size, against the size the
     // renderer allocated. White means the two agree and `textureDimensions` was
     // telling the truth here; anything else means the PCF kernel was stepping by

@@ -395,6 +395,9 @@ fn debug_probe() -> u32 {
         "shadowuv" => 11,
         "shadowref" => 12,
         "lightvp" => 13,
+        "direct" => 14,
+        "lightcount" => 15,
+        "constant" => 16,
         _ => 0,
     }
 }
