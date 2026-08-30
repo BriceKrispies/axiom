@@ -145,6 +145,41 @@
     addEventListener("load", () => setTimeout(send, 12000));
   }
 </script>
+<!-- `?cam=x,y,z,yaw,pitch[,fov]` — pin the camera from the URL.
+
+     The control that every phone-vs-desktop comparison so far was missing. A
+     probe screenshot is only evidence if the two machines are looking at the
+     SAME thing, and a person holding a phone is walking around while the
+     desktop sits at spawn. "Your shadow probe is black and mine is white" then
+     says nothing at all: in an alley between tall buildings most surfaces
+     really are shadowed, and the probe is telling the truth on both.
+
+     `cam` already exists as a dev-console command; this only makes it reachable
+     without a keyboard, which is the whole difficulty on a phone. Retried for a
+     few seconds because `__ax_console` is installed before the GPU binds and a
+     pose set too early is overwritten by the first frame's rig. -->
+<script>
+  {
+    const cam = new URLSearchParams(location.search).get("cam");
+    if (cam) {
+      const args = cam.split(",").map((s) => s.trim()).join(" ");
+      let tries = 0;
+      const pin = () => {
+        tries += 1;
+        try {
+          const reply = window.__ax_console && window.__ax_console("cam " + args);
+          if (String(reply).startsWith("cam eye=")) {
+            document.title = "cam pinned";
+            return;
+          }
+        } catch (e) { /* console not installed yet */ }
+        if (tries < 40) setTimeout(pin, 500);
+        else document.title = "cam pin FAILED";
+      };
+      addEventListener("load", () => setTimeout(pin, 1500));
+    }
+  }
+</script>
 <script type="module">
   import init, { shmup_start } from "./pkg/axiom_shmup.js";
   await init();
