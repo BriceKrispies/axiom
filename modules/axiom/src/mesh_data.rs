@@ -15,7 +15,7 @@
 //! path. A malformed value is rejected with a [`MeshDataError`] before anything
 //! is registered.
 
-use axiom_math::{Vec2, Vec3};
+use axiom_math::{Vec2, Vec3, Vec4};
 
 /// Why a [`MeshData`] is not valid renderable geometry. Returned by
 /// [`crate::prelude::RunningApp::add_mesh_data`]; the first failing check, in the
@@ -41,6 +41,11 @@ pub enum MeshDataError {
     SkinCountMismatch,
     /// A skin weight was NaN or infinite.
     SkinWeightsNonFinite,
+    /// Per-vertex colours were supplied but their count does not match the
+    /// position count (one colour per vertex).
+    ColorCountMismatch,
+    /// A per-vertex colour channel was NaN or infinite.
+    ColorsNonFinite,
 }
 
 /// Author-supplied mesh geometry: per-vertex `positions` and `normals`, optional
@@ -62,6 +67,12 @@ pub struct MeshData {
     /// skinned mesh built with [`MeshData::new_skinned`].
     joints: Vec<[u16; 4]>,
     weights: Vec<[f32; 4]>,
+    /// Optional per-vertex colour — the vertex stream the GPU's twelve-float
+    /// layout has always reserved four lanes for and which no author could
+    /// reach. Empty means "opaque white for every vertex", which is exactly what
+    /// the backend substituted before this existed, so a mesh that names no
+    /// colour uploads the bytes it always did. See [`MeshData::with_colors`].
+    colors: Vec<Vec4>,
 }
 
 impl MeshData {
@@ -82,7 +93,38 @@ impl MeshData {
             indices,
             joints: Vec::new(),
             weights: Vec::new(),
+            colors: Vec::new(),
         }
+    }
+
+    /// The same geometry carrying **one colour per vertex**.
+    ///
+    /// # What this is for
+    ///
+    /// The GPU vertex layout is `position(3) + normal(3) + uv(2) + colour(4)`
+    /// and the colour lane was written as a literal `1.0, 1.0, 1.0, 1.0` for
+    /// every vertex of every author mesh, because this type had nowhere to put
+    /// one. That is not a cosmetic gap: a shader layer keyed on vertex colour —
+    /// a per-vertex wear/grime/occlusion mask baked by the geometry that knows
+    /// where its own contact lines and edges are — reads a constant instead of
+    /// the mask, so it applies uniformly everywhere or nowhere. A ported FPS in
+    /// this repo paints exactly such a mask, and every surface in its level was
+    /// shaded as though the mask were at full strength across the whole polygon.
+    ///
+    /// # The contract
+    ///
+    /// Either supply one colour per vertex or none at all. An empty stream means
+    /// opaque white — the value the backend already substituted — so the choice
+    /// costs nothing to a mesh that does not want it. A mismatched count is
+    /// [`MeshDataError::ColorCountMismatch`] and a non-finite channel is
+    /// [`MeshDataError::ColorsNonFinite`], both reported at registration like
+    /// every other stream's, rather than reaching the GPU.
+    ///
+    /// Colours are **linear** and are the same four lanes for a skinned mesh, so
+    /// this composes with [`MeshData::new_skinned`] rather than duplicating it.
+    pub fn with_colors(mut self, colors: Vec<Vec4>) -> Self {
+        self.colors = colors;
+        self
     }
 
     /// Build **skinned** author geometry: the static streams plus one `joints`
@@ -106,6 +148,7 @@ impl MeshData {
             indices,
             joints,
             weights,
+            colors: Vec::new(),
         }
     }
 
@@ -127,6 +170,11 @@ impl MeshData {
     /// The triangle-list indices into the vertices.
     pub fn indices(&self) -> &[u32] {
         &self.indices
+    }
+
+    /// The per-vertex colours (empty ⇒ every vertex is opaque white).
+    pub fn colors(&self) -> &[Vec4] {
+        &self.colors
     }
 
     /// The per-vertex bone indices (four per vertex); empty on a static mesh.

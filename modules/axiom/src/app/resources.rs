@@ -116,19 +116,35 @@ impl RunningApp {
     }
 }
 
+/// Opaque white — the colour a vertex takes when its mesh authored none. This
+/// was a literal inside the two interleaves below, which is why an author who
+/// *did* have a per-vertex colour had no way to make it survive: the lane was
+/// always overwritten with this.
+const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+/// One vertex's colour: the author's if the mesh carries one, otherwise
+/// [`WHITE`]. An empty `colors` stream is the sentinel for "no colour", so a
+/// mesh that names none is byte-identical to what it uploaded before authors
+/// could name one.
+fn vertex_color(geom: &MeshGeometry, index: usize) -> [f32; 4] {
+    geom.colors.get(index).copied().unwrap_or(WHITE)
+}
+
 /// Interleave one mesh's resolved geometry into the live backend's 12-float
-/// vertex stream: position(3) + normal(3) + uv(2) + opaque-white colour(4) per
-/// vertex. Shared by [`RunningApp::mesh_vertex_stream`] and
-/// [`RunningApp::mesh_set`].
+/// vertex stream: position(3) + normal(3) + uv(2) + colour(4) per vertex.
+/// Shared by [`RunningApp::mesh_vertex_stream`] and [`RunningApp::mesh_set`].
 fn interleave_vertices(geom: &MeshGeometry) -> Vec<f32> {
     let mut vertices = Vec::with_capacity(geom.positions.len() * 12);
     geom.positions
         .iter()
         .zip(geom.normals.iter())
         .zip(geom.uvs.iter())
-        .for_each(|((p, n), uv)| {
-            vertices
-                .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0])
+        .enumerate()
+        .for_each(|(i, ((p, n), uv))| {
+            let c = vertex_color(geom, i);
+            vertices.extend_from_slice(&[
+                p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, c[0], c[1], c[2], c[3],
+            ])
         });
     vertices
 }
@@ -144,9 +160,12 @@ fn interleave_skinned_vertices(geom: &MeshGeometry) -> Vec<f32> {
         .zip(geom.uvs.iter())
         .zip(geom.joints.iter())
         .zip(geom.weights.iter())
-        .for_each(|((((p, n), uv), j), w)| {
-            vertices
-                .extend_from_slice(&[p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, 1.0, 1.0, 1.0, 1.0]);
+        .enumerate()
+        .for_each(|(i, ((((p, n), uv), j), w))| {
+            let c = vertex_color(geom, i);
+            vertices.extend_from_slice(&[
+                p.x, p.y, p.z, n.x, n.y, n.z, uv.x, uv.y, c[0], c[1], c[2], c[3],
+            ]);
             vertices.extend_from_slice(&[j[0] as f32, j[1] as f32, j[2] as f32, j[3] as f32]);
             vertices.extend_from_slice(&w[..]);
         });
@@ -155,6 +174,45 @@ fn interleave_skinned_vertices(geom: &MeshGeometry) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+    use super::{interleave_vertices, vertex_color, WHITE};
+    use crate::mesh_geometry::MeshGeometry;
+    use axiom_math::{Vec2, Vec3};
+
+    /// One vertex, with whatever colour stream the caller wants to test.
+    fn one_vertex(colors: Vec<[f32; 4]>) -> MeshGeometry {
+        MeshGeometry {
+            positions: vec![Vec3::ZERO],
+            normals: vec![Vec3::UNIT_Z],
+            uvs: vec![Vec2::ZERO],
+            indices: vec![0, 0, 0],
+            joints: Vec::new(),
+            weights: Vec::new(),
+            colors,
+        }
+    }
+
+    /// **The lane an author can now reach.** The colour has to land in floats
+    /// 8..12 of the stride, which is where the backend's vertex layout reads it.
+    #[test]
+    fn an_authored_colour_reaches_the_vertex_stream() {
+        let stream = interleave_vertices(&one_vertex(vec![[0.2, 0.4, 0.6, 0.8]]));
+        assert_eq!(stream.len(), 12, "one vertex is one 12-float stride");
+        assert_eq!(&stream[8..12], &[0.2, 0.4, 0.6, 0.8]);
+    }
+
+    /// And a mesh that names none is byte-identical to what it always uploaded:
+    /// opaque white. This is what makes the stream additive rather than a change
+    /// to every existing mesh in the engine.
+    #[test]
+    fn a_colourless_mesh_still_uploads_opaque_white() {
+        let stream = interleave_vertices(&one_vertex(Vec::new()));
+        assert_eq!(&stream[8..12], &WHITE);
+        assert_eq!(vertex_color(&one_vertex(Vec::new()), 0), WHITE);
+        // Past the end of a short stream is white too — the count is validated
+        // at registration, so this is the belt to that braces.
+        assert_eq!(vertex_color(&one_vertex(vec![[0.0; 4]]), 7), WHITE);
+    }
+
     use crate::app::App;
     use crate::color::Color;
     use crate::default_plugins::DefaultPlugins;

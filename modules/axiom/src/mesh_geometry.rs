@@ -7,7 +7,7 @@
 //! read-back is repeated per primitive (kept as inferred locals) rather than
 //! factored into a shared helper.
 
-use axiom_math::{Vec2, Vec3};
+use axiom_math::{Vec2, Vec3, Vec4};
 use axiom_resources::ResourcesApi;
 
 use crate::mesh::Mesh;
@@ -24,6 +24,11 @@ pub(crate) struct MeshGeometry {
     pub(crate) indices: Vec<u32>,
     pub(crate) joints: Vec<[u16; 4]>,
     pub(crate) weights: Vec<[f32; 4]>,
+    /// Per-vertex colour. **Empty means opaque white for every vertex** — the
+    /// value the interleave substituted before authors could supply one — so a
+    /// primitive or an author mesh that names no colour uploads exactly the
+    /// bytes it always did.
+    pub(crate) colors: Vec<[f32; 4]>,
 }
 
 /// Resolve a mesh description into renderable geometry by its kind.
@@ -78,6 +83,7 @@ fn cube_geometry() -> MeshGeometry {
         indices,
         joints: Vec::new(),
         weights: Vec::new(),
+        colors: Vec::new(),
     }
 }
 
@@ -120,6 +126,7 @@ fn plane_geometry() -> MeshGeometry {
         indices,
         joints: Vec::new(),
         weights: Vec::new(),
+        colors: Vec::new(),
     }
 }
 
@@ -160,6 +167,7 @@ fn sphere_geometry() -> MeshGeometry {
         indices,
         joints: Vec::new(),
         weights: Vec::new(),
+        colors: Vec::new(),
     }
 }
 
@@ -200,6 +208,7 @@ fn cylinder_geometry() -> MeshGeometry {
         indices,
         joints: Vec::new(),
         weights: Vec::new(),
+        colors: Vec::new(),
     }
 }
 
@@ -236,6 +245,7 @@ fn skinned_author_geometry(data: &MeshData) -> MeshGeometry {
         indices: data.indices().to_vec(),
         joints: data.joints().to_vec(),
         weights: data.weights().to_vec(),
+        colors: author_colors(data),
     }
 }
 
@@ -272,6 +282,17 @@ fn validate(data: &MeshData) -> Option<MeshDataError> {
         .flatten()
         .any(|w| !w.is_finite())
         .then_some(MeshDataError::SkinWeightsNonFinite);
+    // Colours: present or absent, never partial. Absent is the opaque-white
+    // sentinel; a partial stream would silently white out whichever vertices ran
+    // past the end of it, which is the failure this rejects rather than pads.
+    let color_mismatch = ((!data.colors().is_empty())
+        & (data.colors().len() != positions.len()))
+    .then_some(MeshDataError::ColorCountMismatch);
+    let color_non_finite = data
+        .colors()
+        .iter()
+        .any(|c| !(c.x.is_finite() & c.y.is_finite() & c.z.is_finite() & c.w.is_finite()))
+        .then_some(MeshDataError::ColorsNonFinite);
     empty
         .or(non_finite)
         .or(normal_mismatch)
@@ -281,6 +302,17 @@ fn validate(data: &MeshData) -> Option<MeshDataError> {
         .or(out_of_range)
         .or(skin_mismatch)
         .or(skin_non_finite)
+        .or(color_mismatch)
+        .or(color_non_finite)
+}
+
+/// The author's per-vertex colours as the interleave's lane shape. Empty stays
+/// empty — that is the "opaque white" sentinel, not a missing value to fill in.
+fn author_colors(data: &MeshData) -> Vec<[f32; 4]> {
+    data.colors()
+        .iter()
+        .map(|c| [c.x, c.y, c.z, c.w])
+        .collect()
 }
 
 /// Whether every position / normal / UV coordinate is finite (no NaN, no ∞).
@@ -350,12 +382,132 @@ fn resolve_author_geometry(data: &MeshData) -> MeshGeometry {
         indices,
         joints: Vec::new(),
         weights: Vec::new(),
+        // Straight off the author, NOT through the `axiom-resources` round-trip
+        // above: that trip carries position/normal/uv only, so a colour put into
+        // it would come back white. The same reason `skinned_author_geometry`
+        // bypasses it for the skin streams.
+        colors: author_colors(data),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    /// A tri with one colour per vertex — the shape a geometry-baked mask has.
+    fn colored_tri(colors: Vec<Vec4>) -> MeshData {
+        MeshData::new(
+            vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
+            vec![Vec3::UNIT_Z; 3],
+            vec![],
+            vec![0, 1, 2],
+        )
+        .with_colors(colors)
+    }
+
+    /// **The defect this stream exists to remove.** An author's per-vertex
+    /// colour has to survive registration and reach the resolved geometry; it
+    /// used to be overwritten with opaque white on the way through, so a
+    /// geometry-baked wear/grime mask arrived at the shader as a constant.
+    #[test]
+    fn author_colors_survive_into_the_resolved_geometry() {
+        let authored = vec![
+            Vec4::new(0.1, 0.2, 0.3, 1.0),
+            Vec4::new(0.4, 0.5, 0.6, 1.0),
+            Vec4::new(0.7, 0.8, 0.9, 1.0),
+        ];
+        let geom = mesh_data_geometry(&colored_tri(authored.clone())).expect("well-formed");
+        assert_eq!(
+            geom.colors,
+            authored
+                .iter()
+                .map(|c| [c.x, c.y, c.z, c.w])
+                .collect::<Vec<_>>(),
+            "the round-trip whitened the mask again"
+        );
+    }
+
+    /// The sentinel: no colours means an EMPTY stream, never a filled-in white
+    /// one. The interleave reads the emptiness, so padding here would cost every
+    /// mesh in the engine four floats a vertex to say nothing.
+    #[test]
+    fn a_mesh_that_names_no_colour_resolves_an_empty_stream() {
+        let geom = mesh_data_geometry(&colored_tri(vec![])).expect("well-formed");
+        assert!(geom.colors.is_empty());
+        // And a primitive is the same — the generators name no colour either.
+        assert!(mesh_geometry(&Mesh::Cube).colors.is_empty());
+    }
+
+    /// Present or absent, never partial: two colours for three vertices would
+    /// leave the third silently white.
+    #[test]
+    fn a_partial_colour_stream_is_rejected() {
+        let short = colored_tri(vec![Vec4::new(1.0, 0.0, 0.0, 1.0); 2]);
+        assert_eq!(
+            mesh_data_geometry(&short).unwrap_err(),
+            MeshDataError::ColorCountMismatch
+        );
+    }
+
+    /// A non-finite channel is caught here rather than reaching the GPU, exactly
+    /// as a non-finite skin weight is.
+    #[test]
+    fn a_non_finite_colour_is_rejected() {
+        let bad = colored_tri(vec![
+            Vec4::new(f32::NAN, 0.0, 0.0, 1.0),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+        ]);
+        assert_eq!(
+            mesh_data_geometry(&bad).unwrap_err(),
+            MeshDataError::ColorsNonFinite
+        );
+        let inf = colored_tri(vec![
+            Vec4::new(0.0, 0.0, 0.0, f32::INFINITY),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+        ]);
+        assert_eq!(
+            mesh_data_geometry(&inf).unwrap_err(),
+            MeshDataError::ColorsNonFinite
+        );
+    }
+
+    /// Colours compose with the skin streams rather than excluding them: a
+    /// skinned mesh takes the same builder, and `skinned_author_geometry` is a
+    /// different code path from the static one.
+    #[test]
+    fn a_skinned_mesh_carries_colours_too() {
+        let colors = vec![Vec4::new(0.25, 0.5, 0.75, 1.0); 3];
+        let data = MeshData::new_skinned(
+            vec![Vec3::ZERO, Vec3::UNIT_X, Vec3::UNIT_Y],
+            vec![Vec3::UNIT_Z; 3],
+            vec![],
+            vec![[0, 0, 0, 0]; 3],
+            vec![[1.0, 0.0, 0.0, 0.0]; 3],
+            vec![0, 1, 2],
+        )
+        .with_colors(colors);
+        let geom = mesh_data_geometry(&data).expect("well-formed");
+        assert_eq!(geom.colors, vec![[0.25, 0.5, 0.75, 1.0]; 3]);
+        assert_eq!(geom.joints.len(), 3, "the skin streams still arrive");
+    }
+
+    /// The accessor is part of the public surface, and the two new error
+    /// variants carry the derives the rest of the enum does.
+    #[test]
+    fn the_colour_accessor_and_error_variants_are_reachable() {
+        let c = Vec4::new(1.0, 1.0, 1.0, 1.0);
+        assert_eq!(colored_tri(vec![c; 3]).colors().len(), 3);
+        assert!(colored_tri(vec![]).colors().is_empty());
+        assert!(format!("{:?}", MeshDataError::ColorCountMismatch).contains("ColorCount"));
+        assert_ne!(
+            MeshDataError::ColorsNonFinite,
+            MeshDataError::ColorCountMismatch
+        );
+    }
+
 
     #[test]
     fn mesh_geometry_resolves_every_primitive() {
