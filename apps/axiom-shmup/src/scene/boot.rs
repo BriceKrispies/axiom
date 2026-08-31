@@ -171,6 +171,27 @@ pub fn shmup_start() {
     // safe; quality climbs back on evidence.
     let mut render_scale = axiom_host::RenderScaleController::holding_floor(FRAME_BUDGET_NANOS);
     let set_render_scale = windowing.render_scale_control();
+    // **`?scale=1` — take the adaptive scaler out of the loop.**
+    //
+    // The controller above is a closed loop on measured frame time, and it
+    // starts at the COARSEST rung (`holding_floor`) and climbs back only on
+    // evidence. That makes the app's own image a function of how loaded the
+    // machine is: the same URL, the same pinned camera and the same seed render
+    // at 640x360-upscaled on a busy box and at 1280x720 on a quiet one, and the
+    // rung moves *while the player looks around* because camera motion is what
+    // moves the frame cost. Both were observed here — two consecutive captures
+    // of one URL differed by 1.7 stops on a sunlit facade.
+    //
+    // That is a legitimate trade for frame rate and it is documented above. It
+    // is NOT a legitimate thing to have no switch for, because it makes every
+    // visual measurement of this app unrepeatable and every visual report
+    // ambiguous — "the ground looks wrong" and "the ground is at half
+    // resolution right now" are different bugs and looked identical from
+    // outside. `?scale=1` pins full resolution so a screenshot means one thing,
+    // and the difference between the two loads is then the bug.
+    let pinned_full_scale = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .is_some_and(|search| search.contains("scale=1"));
     windowing.set_ambient(scene.app.ambient());
     scene
         .app
@@ -367,7 +388,13 @@ pub fn shmup_start() {
         // view. Resolution is therefore the only lever that moves this frame,
         // and quality presets demonstrably were not one: low measured 29.2 ms
         // against ultra's 29.4 ms.
-        set_render_scale(render_scale.observe((dt * 1.0e9) as u64));
+        // Observed either way, so `stats` can report the rung the controller
+        // WANTS even while the pin overrides what is applied — "pinned, and it
+        // would have chosen 0.5" is the reading that tells you the pin is doing
+        // work rather than agreeing with the loop.
+        let wanted = render_scale.observe((dt * 1.0e9) as u64);
+        let applied = [wanted, axiom_host::RenderScale::FULL][usize::from(pinned_full_scale)];
+        set_render_scale(applied);
         last = now;
 
         // Touch first, then a real gamepad. They cannot both be live in
@@ -425,14 +452,24 @@ pub fn shmup_start() {
                 || "none".to_owned(),
                 |a| format!("{:.3},{:.3},{:.3},{:.3}", a[0], a[1], a[2], a[3]),
             );
+            // The render scale rides the status line because it is the single
+            // most confusing thing about a screenshot of this app: at rung 0.5
+            // the frame is a 640x360 image upscaled to the surface, and every
+            // report of "blurry", "shimmering" or "an extra texture while I look
+            // around" is indistinguishable from a shading bug until you know
+            // which rung produced the picture. Now `stats` says.
             scene.console.borrow_mut().set_status(format!(
                 "pointer_locked={} enabled={} frozen={} pointerLockElement={} lock_error={} \
-                 pad={pad_text} move={mvx:.3},{mvy:.3}",
+                 pad={pad_text} move={mvx:.3},{mvy:.3} \
+                 render_scale={:.3}{} controller_wants={:.3}",
                 inp.pointer_locked,
                 inp.enabled,
                 inp.frozen,
                 element,
-                inp.lock_error.as_deref().unwrap_or("none")
+                inp.lock_error.as_deref().unwrap_or("none"),
+                applied.ratio().get(),
+                ["", " (PINNED by ?scale=1)"][usize::from(pinned_full_scale)],
+                wanted.ratio().get(),
             ));
         }
         scene.fx_draw.frame(
