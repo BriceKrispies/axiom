@@ -102,3 +102,13 @@ tools/axiom-sound/.axiom-cache/
 # axiom-atlas ledger: the append-only NDJSON record of every ax query and edit,
 # plus its compacted Parquet. Local telemetry, never committed.
 .axiom-atlas/
+
+# Campaign screenshots + capture JSON from the shmup/gpu-backend debugging runs
+# (axiom-shot, the Playwright controller, the perf/quality probes). Local
+# evidence, regenerated on demand, ~100 MB and growing. The one committed
+# reference frame is un-ignored below.
+/shots/
+!/shots/quality-baseline/
+
+# Self-profiling reports POSTed by a phone under test to scripts/phone_sink.py.
+scripts/.phone-reports/
