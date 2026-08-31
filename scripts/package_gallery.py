@@ -20,12 +20,21 @@ shape::
       "blurb": "One line for the card.",
       "description": "The long-form paragraph.",
       "kind": "ts-web-engine",          // or "rust-wasm", or "self-built"
-      "tags": ["game", "arcade"]
+      "tags": ["game", "arcade"],
+      "id": "axiom-arcade"              // OPTIONAL — overrides the derived id
     }
 
 Everything else is derived here: the id (directory name, minus any ``axiom-``
 prefix), the entry page, the engine version, and the build timestamp. Those land in
 ``dist/manifest.json``, which the landing grid fetches at runtime.
+
+Stripping the ``axiom-`` prefix means ``apps/axiom-<x>`` and ``apps/<x>`` derive the
+SAME id, and two apps claiming one id is a hard error — the gallery does not build
+at all until it is resolved, because a silent winner would publish one app at the
+other's URL. That is what the optional ``"id"`` is for: it pins an app's id (and so
+its URL) explicitly, independent of what its directory is called. ``apps/shmup``
+(the self-built three.js original) and ``apps/axiom-shmup`` (the Rust port measured
+against it) are the live instance of this — the port carries ``"id"``.
 
 **Self-built apps.** A ``self-built`` app runs its own bundler and hands over a
 directory. It declares how in ``app.json``::
@@ -200,7 +209,19 @@ def discover_apps() -> list[AppSpec]:
 
     duplicates = {s.id for s in specs if [t.id for t in specs].count(s.id) > 1}
     if duplicates:
-        sys.exit(f"error: duplicate gallery id(s): {', '.join(sorted(duplicates))}")
+        # Name the directories, not just the id. The id is derived, so "duplicate
+        # gallery id(s): shmup" does not say WHICH two apps produced it, and the
+        # answer (apps/shmup and apps/axiom-shmup, via the stripped prefix) is not
+        # guessable from the id alone.
+        collisions = "; ".join(
+            f"{dup} <- " + ", ".join(sorted(f"apps/{s.dir.name}" for s in specs if s.id == dup))
+            for dup in sorted(duplicates)
+        )
+        sys.exit(
+            f"error: duplicate gallery id(s): {collisions}. The id is the directory name with "
+            "any axiom- prefix stripped, so apps/axiom-<x> and apps/<x> collide. Give one of "
+            "them an explicit id field in its app.json."
+        )
     return sorted(specs, key=lambda s: s.title.lower())
 
 
