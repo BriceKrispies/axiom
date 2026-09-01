@@ -279,8 +279,8 @@ No step is finished until all of it holds:
 | 0. the precision floor — kernel `f64` binary/reflect, math `DVec3`, the amended scalar policy | **done** |
 | 0b. `jsmath.rs` → `axiom-math` (hypot / rounding / sign / divisor guard) | **done** |
 | 1a. `world/noise.rs` → `axiom-noise` (positional value basis) | **done** |
-| 1b. `fx/noise.rs` → `axiom-noise` (Perlin permutation + Worley) | not started — needs `DVec2` and a seeding seam, see below |
-| 1c. `sky/noise.rs` → `axiom-noise` | not started — needs `DVec2` |
+| 1b. `fx/noise.rs` → `axiom-noise` (Perlin permutation + Worley) | **done** |
+| 1c. `sky/noise.rs` → `axiom-noise` | **blocked** — `atmosphere::Vec3` ripples across 7 sky files; lands with step 7 |
 | 1d. `materials/noise.rs` → `axiom-noise` | **blocked** — another session holds live WIP in `materials/wgsl/`; lands with step 11 |
 | 0c. `physics/math.rs` → `axiom-math` (`DAabb`/`DTriangle`/`DSegment`/`DClosestPair`) | **done** |
 | 2. mesh collider → `axiom-physics` | not started |

@@ -49,6 +49,7 @@ mod vec4;
 
 /// The double-precision vector family. See [`Scalar`] for when to reach for it
 /// and, more importantly, when not to.
+mod dvec2;
 mod dvec3;
 mod daabb;
 mod dclosest_pair;
@@ -115,6 +116,7 @@ pub use vec2::Vec2;
 pub use vec3::Vec3;
 pub use vec4::Vec4;
 
+pub use dvec2::DVec2;
 pub use dvec3::DVec3;
 pub use daabb::DAabb;
 pub use dclosest_pair::DClosestPair;

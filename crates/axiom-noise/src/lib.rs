@@ -79,7 +79,11 @@ mod warp_strength;
 
 // The positional value-noise family: a second basis, at double precision. See
 // the "Two bases" section above for why it is a peer rather than a variant.
+mod cellular_2d;
 mod hash_01;
+mod perlin_2d;
+mod permutation_lattice;
+mod signed_noise;
 mod unit_noise;
 mod value_fbm_01;
 mod value_noise_01;
@@ -93,6 +97,10 @@ pub use noise_value::NoiseValue;
 pub use warp_strength::WarpStrength;
 
 pub use hash_01::hash_01;
+pub use cellular_2d::{worley_edge, worley_f1};
+pub use perlin_2d::{perlin_2d, perlin_fbm_2d, perlin_ridged_2d, perlin_warped_2d};
+pub use permutation_lattice::PermutationLattice;
+pub use signed_noise::SignedNoise;
 pub use unit_noise::UnitNoise;
 pub use value_fbm_01::value_fbm_01;
 pub use value_noise_01::value_noise_01;
