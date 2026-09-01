@@ -1,31 +1,8 @@
 //! The integer-hash lattice basis: a position folded to an unsigned unit sample.
 
-use axiom_math::DVec3;
+use axiom_math::{round_ties_up, DVec3};
 
 use crate::unit_noise::UnitNoise;
-
-/// Round half-way values **up** — toward `+∞`, not away from zero.
-///
-/// `round_ties_up(-1.5) == -1.0`, where Rust's `f64::round` gives `-2.0`. Both
-/// are legitimate tie-breaking rules and neither is IEEE's default
-/// (`roundTiesToEven`); this one is the convention JavaScript's `Math.round`
-/// uses, which is why a lattice basis transcribed from a browser reference must
-/// state which it means rather than inherit the host language's.
-///
-/// The rule matters here specifically because it decides which lattice cell a
-/// coordinate exactly on a half-boundary hashes into. Getting it wrong shifts a
-/// measure-zero set of positions to a *completely unrelated* hash — a
-/// discontinuity, not a rounding error.
-///
-/// Private, and staying that way until something outside this file needs it. It
-/// was briefly public on the argument that a caller reproducing the basis in a
-/// shader would have to round identically — true, and not yet a caller. A public
-/// `fn(f64) -> f64` is also exactly the unitless-float surface the rulebook
-/// bans, and the rulebook was right: "someone might need it" is how a layer
-/// grows an API nothing calls.
-fn round_ties_up(v: f64) -> f64 {
-    (v + 0.5).floor()
-}
 
 /// [`round_ties_up`], narrowed to the 32-bit word the hash mixes in.
 ///
@@ -82,31 +59,8 @@ pub fn hash_01(p: DVec3) -> UnitNoise {
 mod tests {
     use super::*;
 
-    #[test]
-    fn round_ties_up_breaks_ties_toward_positive_infinity() {
-        assert_eq!(round_ties_up(1.5), 2.0);
-        assert_eq!(round_ties_up(0.5), 1.0);
-        assert_eq!(round_ties_up(-0.5), 0.0);
-        assert_eq!(round_ties_up(-1.5), -1.0);
-        assert_eq!(round_ties_up(-2.5), -2.0);
-    }
 
-    /// The rule this function exists to *not* be. Rust rounds ties away from
-    /// zero; if the basis used that, negative half-boundary coordinates would
-    /// land in a different lattice cell entirely.
-    #[test]
-    fn round_ties_up_differs_from_rusts_round_on_negative_ties() {
-        assert_eq!((-1.5_f64).round(), -2.0);
-        assert_eq!(round_ties_up(-1.5), -1.0);
-    }
 
-    #[test]
-    fn round_ties_up_leaves_non_ties_alone() {
-        assert_eq!(round_ties_up(1.4), 1.0);
-        assert_eq!(round_ties_up(1.6), 2.0);
-        assert_eq!(round_ties_up(-1.4), -1.0);
-        assert_eq!(round_ties_up(-1.6), -2.0);
-    }
 
     #[test]
     fn hash_is_in_the_unit_interval() {

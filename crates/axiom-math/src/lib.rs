@@ -51,6 +51,15 @@ mod vec4;
 /// and, more importantly, when not to.
 mod dvec3;
 
+// Scalar numerics whose edge cases are load-bearing: an accurate norm, a
+// rounding mode, a three-valued sign, a degenerate-divisor guard. Free
+// functions rather than methods, like `geo`'s, because their subject is a bare
+// scalar and there is no type for them to hang off.
+mod hypot;
+mod nonzero_or;
+mod round_ties_up;
+mod signum_with_zero;
+
 mod quat;
 
 mod mat3;
@@ -103,6 +112,11 @@ pub use vec3::Vec3;
 pub use vec4::Vec4;
 
 pub use dvec3::DVec3;
+
+pub use hypot::{hypot, hypot2, hypot3, hypot4};
+pub use nonzero_or::{nonzero_or, nonzero_or_one};
+pub use round_ties_up::round_ties_up;
+pub use signum_with_zero::signum_with_zero;
 
 pub use aabb::Aabb;
 pub use frustum::Frustum;
