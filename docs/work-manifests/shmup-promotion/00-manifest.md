@@ -295,3 +295,112 @@ No step is finished until all of it holds:
 | 11. materials forge | not started |
 | 12. `axiom-interface` HUD | not started |
 | 13. `axiom-input` | not started |
+
+## Where to pick this up
+
+Everything below the "Progress" table is the state a fresh session needs.
+
+### Verify like this, or you will verify nothing
+
+```sh
+# The app CANNOT LINK on the default gnu toolchain. Every command touching it
+# needs the MSVC one, or the port's 205 goldens simply do not run.
+RUSTUP_TOOLCHAIN=nightly-x86_64-pc-windows-msvc cargo test -p axiom-shmup --lib
+RUSTUP_TOOLCHAIN=nightly-x86_64-pc-windows-msvc cargo test -p axiom-shmup --test core_port
+# ... and physics_port, player_port, weapons_port, weapons_geometry_port,
+#     weapons_clips_port, weapons_mathx_port, materials_noise_port,
+#     render_probe_port, player_feel
+
+# Per-crate coverage, which is what a promotion must hit. The WORKSPACE gate
+# cannot run — see the blockers below — so measure the crate you touched.
+RUSTUP_TOOLCHAIN=nightly-x86_64-pc-windows-msvc cargo llvm-cov clean --workspace
+RUSTUP_TOOLCHAIN=nightly-x86_64-pc-windows-msvc cargo llvm-cov --no-cfg-coverage \
+    -p axiom-noise -p axiom-math --summary-only
+
+cargo xtask check-architecture
+cargo dylint --all -- --all-targets      # count findings; must not rise
+```
+
+**`cargo llvm-cov clean --workspace` before every coverage run.** Stale profile
+data from deleted tests reports a file at 80% that is actually at 100%, and the
+mistake looks exactly like a real coverage hole.
+
+### Blockers, none of them this program's to fix
+
+- **The workspace coverage gate cannot complete.** `scripts/coverage.sh` runs
+  every test in the workspace to collect instrumentation, and two crates are red
+  on a pristine tree: `axiom-gpu-backend` (~60 failures, all one cause —
+  `Binding size 80 of Buffer ... is less than minimum 96`, a uniform-layout
+  mismatch from another session's in-flight WGSL work) and `axiom-end-zone`
+  (6 harnesses: attempt_loop, chalk, controls, determinism, runback, targeting).
+  Until those are green, per-crate `cargo llvm-cov -p <crate>` is the honest
+  substitute — it measures exactly the same thing for the crate being promoted.
+- **`apps/axiom-shmup` does not link on gnu.** `ld.exe: error: export ordinal
+  too large` — the cdylib exceeds the 65535 export-ordinal limit by ~37%.
+- **One app test is red on a pristine tree.**
+  `scene::wiring::weapons::tests::holding_the_trigger_drains_the_magazine_and_kicks_the_camera`.
+
+### The next step, and what it costs
+
+**Step 2, the triangle-mesh collider, is the flagship gap and the largest single
+item in this manifest.** `axiom-physics` already offers `raycast`,
+`overlap_capsule` and `capsule_cast` against spheres, boxes, capsules, planes and
+heightfields — everything except a **mesh**, which is the one shape a level is
+made of. Its foundation is now built: `DAabb`, `DTriangle`, `DSegment` and
+`DClosestPair` are landed, and `physics/bvh.rs` needs exactly three operations
+from them (`ray_entry`, `ray_hit`, `closest_to_triangle`), all present.
+
+What remains is `apps/axiom-shmup/src/physics/bvh.rs` — 1,285 lines of
+binned-SAH construction and five queries — rewritten branchless at 100%
+coverage. Budget it as more work than every step landed so far, combined, and do
+not start it in a session that cannot finish it: the goldens pin exact tree
+shape, node indices and node bounds, so a half-converted builder is worth less
+than none. Specific shapes to plan for:
+
+- `build_nodes` drives an explicit LIFO stack (`while let Some(..) = stack.pop()`).
+  A `fold` over a worklist is the branchless form. **The push order (left child,
+  then right) is load-bearing** — it decides which node index a split's children
+  land at, and the goldens pin that.
+- The in-place Hoare partition (`while i <= j`) is the awkward one.
+- Recursion is *not* banned by the Branchless Law; `cond.then(|| ...)` is a legal
+  terminating guard, which is how a recursive builder stays branchless.
+- `Surface` (the game's 12-entry taxonomy) must become an opaque material index
+  at the engine boundary. `axiom-physics` already has `PhysicsMaterial`.
+- The facade narrows to `f32`: `PhysicsApi` speaks `Vec3`/`Meters`, the BVH
+  evaluates in `f64`, and `DVec3::to_single` is the named narrowing point.
+
+### Cheaper steps, if the appetite is for breadth
+
+- **Step 4, audio DSP** (`audio/{dsp,ir,graph,mixer,spatial}`, 2,842 lines). Pure
+  signal maths, no geometry, natively testable. One design question to settle
+  first: Module Law #8 gives `axiom-audio` a single facade, so the node-graph
+  *vocabulary* either becomes handles on `AudioApi` (the `axiom-physics` shape)
+  or moves to a layer both the app and the module can name (the precedent
+  `apps/axiom-shmup/app.toml` cites for `ProceduralBakeRequest`).
+- **Step 7, `crates/axiom-sky`.** A **layer**, not a module, and the argument is
+  forced: `modules/axiom-gpu-backend/src/env.rs` already cites
+  `apps/shmup/src/sky/atmosphere.rs` as the model it approximates, and a module
+  may not depend on another module. Blocked behind a real cost, though —
+  `atmosphere::Vec3` has 17 methods and 7 consumer files inside `sky/`, so the
+  promotion drags a rename across all of them. `DVec3` would need `splat`,
+  componentwise `div`/`max`/`exp`, `add_scalar` and `mix` first.
+- **Step 6, `axiom-navigation`** (`ai/nav.rs`, 883 lines) is smaller but more
+  entangled than it looks: it needs `DAabb` (landed), a physics-probe seam, and
+  the game's collision-layer masks.
+
+### Two lessons the landed steps paid for
+
+**The gate is a design reviewer, not an obstacle.** Three separate findings in
+this session were correct and led to better code: an export justified by a
+hypothetical caller, naked float parameters where typed knobs already existed,
+and a `&mut` generator threaded through an engine API where taking the finished
+data made the type pure. Read a finding as a question about the design before
+reaching for the baseline.
+
+**A golden suite hides latent defects it does not exercise.** `world/noise.rs`
+carried a `Math.round` written as `(v + 0.5).floor()`, documented as exact "for
+every finite v", which `jsmath` had already shown false at `0.49999999999999994`.
+Two implementations of one primitive, one correct, and the wrong one was the one
+first promoted into the engine. Its goldens never moved, because the pathological
+input never arose in them. When consolidating a duplicated primitive, diff the
+implementations against each other, not only against the goldens.
