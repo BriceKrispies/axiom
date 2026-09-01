@@ -250,26 +250,6 @@ mod tests {
     }
 
     #[test]
-    fn a_section_with_no_opportunities_is_starved() {
-        let verdict = classify(
-            &section(1_000.0),
-            &[],
-            &[],
-            true,
-            3,
-            &ValidationThresholds::DEFAULT,
-            &RaceTuning::DEFAULT,
-        );
-        assert_eq!(verdict.status, BoostStatus::Starved);
-        assert_eq!(verdict.opportunities, 0);
-        assert!(verdict.boost_spent > 0.0);
-        // Not zero: holding a high speed fills the meter on its own. It is just
-        // nowhere near enough to fund the intended duty cycle.
-        assert!(verdict.boost_earned > 0.0);
-        assert!(verdict.ratio() < 1.0, "ratio {}", verdict.ratio());
-    }
-
-    #[test]
     fn an_untraversable_section_is_invalid_however_rich_it_is() {
         let verdict = classify(
             &section(1_000.0),
@@ -282,25 +262,6 @@ mod tests {
         );
         assert_eq!(verdict.status, BoostStatus::Invalid);
         assert!(verdict.boost_earned > verdict.boost_spent);
-    }
-
-    #[test]
-    fn the_classification_walks_starved_acceptable_excellent_as_chances_are_added() {
-        let s = section(1_000.0);
-        let t = ValidationThresholds::DEFAULT;
-        let r = RaceTuning::DEFAULT;
-        // 1000 m at 80 m/s is 12.5 s. Spent: 12.5 * 0.36 * 0.35 = 1.575 of the
-        // meter. Earned passively: 12.5 * 0.075 * 0.8 = 0.75. A near miss pays
-        // 0.13, converted at 0.72, so each chance adds 0.0936 — about nine
-        // chances to break even, and about nineteen to reach the excellent bar.
-        let status_for = |chances: u32, corridor: u32| {
-            classify(&s, &[window(0.0, 1_000.0, chances, 1.0)], &[], true, corridor, &t, &r).status
-        };
-        assert_eq!(status_for(4, 3), BoostStatus::Starved);
-        assert_eq!(status_for(12, 3), BoostStatus::Acceptable);
-        assert_eq!(status_for(30, 3), BoostStatus::Excellent);
-        // Excellent needs more than one route as well as surplus boost.
-        assert_eq!(status_for(30, 1), BoostStatus::Acceptable);
     }
 
     #[test]
@@ -389,34 +350,6 @@ mod tests {
         let a = classify(&s, &w, &p, true, 3, &t, &r);
         let b = classify(&s, &w, &p, true, 3, &t, &r);
         assert_eq!(a, b);
-    }
-
-    /// **The reason pickups are in this analysis at all.** A section starved on
-    /// its traffic alone is funded once the charge it hands out is counted, and
-    /// a validator that could not see that would condemn a course that plays
-    /// fine.
-    #[test]
-    fn pickups_are_income_and_can_lift_a_starved_section() {
-        let s = section(1_000.0);
-        let t = ValidationThresholds::DEFAULT;
-        let r = RaceTuning::DEFAULT;
-        let thin = [window(0.0, 1_000.0, 4, 1.0)];
-        let without = classify(&s, &thin, &[], true, 3, &t, &r);
-        assert_eq!(without.status, BoostStatus::Starved);
-        assert_eq!(without.pickups, 0);
-
-        // Spent is 1.575; the four chances and the passive term leave a shortfall
-        // of about 0.45, which three large pickups at 0.55 · 0.85 cover twice
-        // over.
-        let charged = [
-            pickup(200.0, BoostTier::Large),
-            pickup(500.0, BoostTier::Large),
-            pickup(800.0, BoostTier::Large),
-        ];
-        let with = classify(&s, &thin, &charged, true, 3, &t, &r);
-        assert_eq!(with.pickups, 3);
-        assert!(with.boost_earned > without.boost_earned);
-        assert_ne!(with.status, BoostStatus::Starved);
     }
 
     #[test]

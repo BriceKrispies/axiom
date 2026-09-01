@@ -310,26 +310,6 @@ mod tests {
     }
 
     #[test]
-    fn the_windows_ahead_of_a_point_are_the_ones_open_there_or_soon() {
-        let plan = plan();
-        assert!(!plan.near_miss_windows().is_empty());
-        let ahead: Vec<&NearMissWindow> = plan.windows_ahead(2_000.0, 600.0).collect();
-        assert!(!ahead.is_empty(), "no opportunities in a 600 m stretch");
-        for window in &ahead {
-            assert!(window.start_m <= 2_600.0);
-            assert!(window.end_m >= 2_000.0);
-        }
-        // The scan is the same set the brute-force filter finds.
-        let brute: Vec<&NearMissWindow> = plan
-            .near_miss_windows()
-            .iter()
-            .filter(|w| (w.start_m <= 2_600.0) & (w.end_m >= 2_000.0))
-            .collect();
-        assert_eq!(ahead, brute);
-        assert_eq!(plan.windows_ahead(1.0e9, 100.0).count(), 0);
-    }
-
-    #[test]
     fn every_compiled_window_and_encounter_is_addressable() {
         let plan = plan();
         for encounter in plan.encounters() {

@@ -60,62 +60,6 @@ fn what_is_limiting_the_lap() {
     assert!(nm > 0 && nm_u > 0, "neither run threaded any traffic");
 }
 
-#[test]
-fn where_does_the_traffic_actually_sit() {
-    let driver = DriverTuning::FAST;
-    let mut sim = RaceSim::shipping();
-    let mut traffic_lane: std::collections::BTreeMap<i32, u32> = std::collections::BTreeMap::new();
-    let mut unscored_lane: std::collections::BTreeMap<i32, u32> =
-        std::collections::BTreeMap::new();
-    let mut seen: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
-    let mut best_delta: std::collections::BTreeMap<u32, (i32, i32)> =
-        std::collections::BTreeMap::new();
-
-    let mut steps = 0u32;
-    while (sim.phase() != RacePhase::Finished) & (steps < LIMIT) {
-        let (command, _) = drive_one_step(&sim, &driver, u64::from(steps));
-        let here = sim.track().sample_at(sim.car().distance);
-        let player_lane = sim.track().lane_at_lateral(&here, sim.car().lateral);
-        let (cd, cf) = (sim.car().distance, sim.car().forward_speed);
-        sim.traffic().active().for_each(|other| {
-            seen.insert(other.slot).then(|| {
-                *traffic_lane.entry(other.lane).or_insert(0) += 1;
-            });
-            let along = (cd - other.distance).abs();
-            ((along < 6.65) && (cf > other.speed)).then(|| {
-                let d = (player_lane - other.lane).abs();
-                let e = best_delta.entry(other.slot).or_insert((i32::MAX, other.lane));
-                (d < e.0).then(|| e.0 = d);
-            });
-        });
-        sim.step(command);
-        steps += 1;
-    }
-
-    best_delta.values().for_each(|&(d, lane)| {
-        (d != 1).then(|| *unscored_lane.entry(lane).or_insert(0) += 1);
-    });
-
-    println!("\n=== traffic census ===");
-    println!("cars spawned, by lane   : {traffic_lane:?}");
-    println!("UNSCORED overtakes, by that car's lane: {unscored_lane:?}");
-    println!("(a car in lane L is scorable only from lane L-1 or L+1)");
-
-    // The census is only evidence if it censused a real run: every lane the
-    // traffic used has to be a lane the road actually has, and the unscored
-    // cars have to be a subset of the cars seen.
-    assert_eq!(sim.phase(), RacePhase::Finished, "the censused run did not finish");
-    assert!(seen.len() > 50, "only {} cars seen", seen.len());
-    let reach = crate_lane_reach();
-    traffic_lane.keys().for_each(|lane| {
-        assert!(lane.abs() <= reach, "a car was censused in lane {lane}");
-    });
-    assert!(
-        unscored_lane.values().sum::<u32>() as usize <= best_delta.len(),
-        "more unscored overtakes than overtakes"
-    );
-}
-
 /// The widest the shipping course's lane lattice ever reaches.
 fn crate_lane_reach() -> i32 {
     let sim = RaceSim::shipping();

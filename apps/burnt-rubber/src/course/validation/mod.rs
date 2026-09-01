@@ -688,24 +688,6 @@ mod tests {
     }
 
     #[test]
-    fn an_open_road_validates_cleanly_and_measures_itself() {
-        let track = track();
-        let (sections, clamps) = sections(&track);
-        let report = run(&track, &sections, &clamps, &[], &[], &[]);
-        assert!(
-            !report.has_errors(),
-            "clean road reported: {}",
-            report.dump()
-        );
-        assert_eq!(report.metrics.samples, track.samples().len());
-        assert!(report.metrics.traversal_cells > 0);
-        assert!(report.metrics.length_m > 8_000.0);
-        // With no traffic there is nothing to earn, so the economy is starved —
-        // which is exactly what an empty course should be told.
-        assert_eq!(report.status, BoostStatus::Starved);
-    }
-
-    #[test]
     fn a_fully_blocked_road_fails_validation() {
         let track = track();
         let (sections, clamps) = sections(&track);

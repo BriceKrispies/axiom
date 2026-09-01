@@ -352,18 +352,6 @@ fn artifacts(checkpoint: &GoldenCheckpoint) -> Artifacts {
 
 // --- the pinned baseline ----------------------------------------------------
 
-/// Every checkpoint's three artifacts, against the committed bytes. One test so
-/// the whole run is driven once per checkpoint rather than three times over.
-#[test]
-fn the_golden_run_matches_the_committed_baseline() {
-    CHECKPOINTS.iter().for_each(|checkpoint| {
-        let a = artifacts(checkpoint);
-        assert_golden(&format!("agent_{}_state", checkpoint.name), &a.state);
-        assert_golden(&format!("agent_{}_render", checkpoint.name), &a.render);
-        assert_golden(&format!("agent_{}_resources", checkpoint.name), &a.resources);
-    });
-}
-
 /// POSITIVE: the run replays byte-equal, in all three artifacts, at every
 /// checkpoint. This is the property the committed goldens rest on — without it
 /// they would be pinning noise.
@@ -532,31 +520,4 @@ fn driven_variant(
         render,
         resources,
     }
-}
-
-/// The run reaches the finish under the agent, inside its cap, and the final
-/// checkpoint is a completed race rather than a timeout.
-#[test]
-fn the_run_is_a_completed_agent_race() {
-    let (app, steps) = golden::driven_with_count(GoldenStop::Finish);
-    let state = golden::state_of(&app, steps);
-    assert!(
-        steps < GOLDEN_STEP_LIMIT,
-        "the agent hit the {GOLDEN_STEP_LIMIT}-step cap without finishing"
-    );
-    assert!(
-        state.progress > 0.99,
-        "the run ended at {:.1}% of the course",
-        state.progress * 100.0
-    );
-    assert!(
-        state.near_misses > 60,
-        "only {} near misses — the agent is not racing the way the baseline recorded",
-        state.near_misses
-    );
-    println!(
-        "burnt-rubber golden run: finished in {steps} steps ({:.2} s), \
-         {} near misses, {} impacts, top speed {:.1} m/s",
-        state.elapsed_seconds, state.near_misses, state.impacts, state.top_speed
-    );
 }

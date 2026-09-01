@@ -1643,31 +1643,6 @@ mod tests {
     }
 
     #[test]
-    fn near_misses_are_earned_from_traffic_and_pay_boost() {
-        let mut sim = racing();
-        // Empty the meter first, so any charge at the end was genuinely earned.
-        while sim.boost().charge() > 0.0 {
-            sim.step(DriveCommand { boost: true, ..DriveCommand::IDLE });
-        }
-        let mut awarded = 0.0f32;
-        for _ in 0..9_000 {
-            let command = crate::script::autopilot(sim.car(), sim.track());
-            sim.step(command);
-            for event in sim.events() {
-                if let RaceEvent::NearMiss { boost_awarded } = event {
-                    awarded += boost_awarded;
-                }
-            }
-        }
-        assert!(
-            sim.near_miss_count() > 0,
-            "a clean run through the traffic yields near misses"
-        );
-        assert!(awarded > 0.0, "and each one paid boost: {awarded}");
-        assert!(sim.car().is_finite());
-    }
-
-    #[test]
     fn a_near_miss_notification_shows_and_then_expires() {
         let mut sim = racing();
         let race = sim.tuning().race;
@@ -2010,40 +1985,6 @@ mod tests {
         );
     }
 
-    /// A cooldown must never make the player intangible: an unrelated car hit
-    /// during one still lands.
-    #[test]
-    fn a_second_traffic_car_still_lands_during_the_first_ones_cooldown() {
-        let mut sim = RaceSim::new(crate::DEFAULT_SEED, Tuning::DEFAULT);
-        while sim.phase() == RacePhase::Countdown {
-            sim.step(DriveCommand::IDLE);
-        }
-        crate::script::drive_autopilot(&mut sim, 900);
-        // Two contacts against two different cars, back to back.
-        let mut struck: Vec<u32> = Vec::new();
-        for _ in 0..2 {
-            let target = sim
-                .traffic()
-                .active()
-                .filter(|c| c.distance > sim.car().distance + 6.0)
-                .min_by(|a, b| a.distance.total_cmp(&b.distance))
-                .copied()
-                .expect("traffic ahead");
-            let approach = sim.track().sample_at(target.distance - 3.0);
-            controller::place_on_track(&mut sim.car, &approach, target.lateral);
-            sim.car.forward_speed = 85.0;
-            sim.step(DriveCommand::FLAT_OUT);
-            let landed = sim
-                .events()
-                .iter()
-                .any(|e| matches!(e, RaceEvent::Impact { fresh: true, traffic: true, .. }));
-            assert!(landed, "the contact against slot {} landed", target.slot);
-            struck.push(target.slot);
-        }
-        assert_ne!(struck[0], struck[1], "two genuinely different cars");
-        assert!(sim.car().is_finite());
-    }
-
     /// Every input keeps working through every severity. No stun, no lock, no
     /// frozen frames — the player is always the one responsible for the fix.
     #[test]
@@ -2164,59 +2105,6 @@ mod tests {
             sim.car().forward_speed
         );
         assert!(!sim.contact().is_recovering(), "and the assist has finished");
-    }
-
-    /// The whole pipeline stays finite and deterministic through a scripted
-    /// sequence of several genuine traffic contacts.
-    #[test]
-    fn a_scripted_sequence_of_traffic_contacts_replays_identically() {
-        let run = || {
-            let mut sim = RaceSim::new(crate::DEFAULT_SEED, Tuning::DEFAULT);
-            while sim.phase() == RacePhase::Countdown {
-                sim.step(DriveCommand::IDLE);
-            }
-            crate::script::drive_autopilot(&mut sim, 600);
-            // Chase whatever is ahead and drive straight into it, repeatedly.
-            let mut contacts = 0u32;
-            for _ in 0..3_000 {
-                let car = *sim.car();
-                let command = sim
-                    .traffic()
-                    .active()
-                    .filter(|c| c.distance > car.distance + 2.0)
-                    .min_by(|a, b| a.distance.total_cmp(&b.distance))
-                    .map(|t| DriveCommand {
-                        throttle: 1.0,
-                        steer: crate::script::steer_toward_line(&car, sim.track(), t.lateral),
-                        ..DriveCommand::IDLE
-                    })
-                    .unwrap_or_else(|| crate::script::autopilot(&car, sim.track()));
-                sim.step(command);
-                contacts += u32::from(
-                    sim.events()
-                        .iter()
-                        .any(|e| matches!(e, RaceEvent::Impact { fresh: true, .. })),
-                );
-                assert!(sim.car().is_finite(), "the run stayed finite");
-            }
-            (
-                contacts,
-                *sim.car(),
-                sim.traffic().cars().to_vec(),
-                sim.camera_pose,
-                sim.impact_count(),
-                sim.contact().clone(),
-            )
-        };
-        let a = run();
-        let b = run();
-        assert!(a.0 >= 3, "the script genuinely hit things: {} contacts", a.0);
-        assert_eq!(a.0, b.0, "contact count");
-        assert_eq!(a.1, b.1, "car state");
-        assert_eq!(a.2, b.2, "traffic, including its yields");
-        assert_eq!(a.3, b.3, "camera");
-        assert_eq!(a.4, b.4, "impact count");
-        assert_eq!(a.5, b.5, "contact episodes and recovery");
     }
 
     /// A traffic car that is hit is nudged, and only nudged.

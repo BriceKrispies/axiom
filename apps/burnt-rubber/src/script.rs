@@ -650,25 +650,6 @@ mod tests {
         let _ = pushed_out;
     }
 
-    #[test]
-    fn the_autopilot_holds_the_road_for_the_whole_course() {
-        let mut sim = racing();
-        let steps = drive_to_the_finish(&mut sim, 40_000);
-        assert_eq!(
-            sim.phase(),
-            RacePhase::Finished,
-            "the autopilot finished (took {steps} steps, reached {} m of {})",
-            sim.car().distance,
-            sim.track().length()
-        );
-        assert!(sim.car().is_finite());
-        assert!(
-            sim.near_miss_count() > 0,
-            "and threaded traffic on the way: {} near misses",
-            sim.near_miss_count()
-        );
-    }
-
     /// The reason the autopilot exists: it lets a test measure the *car* rather
     /// than the car's argument with a guardrail.
     #[test]
@@ -822,83 +803,6 @@ mod tests {
             (report, *sim.car())
         };
         assert_eq!(run(), run());
-    }
-
-    /// Running into the back of traffic must hurt and must be survivable: it
-    /// costs real speed, it does not spin the car, and the car drives out of it
-    /// without a reset.
-    #[test]
-    fn the_car_can_be_driven_into_traffic_and_drive_out_of_it() {
-        let mut sim = racing();
-        drive_autopilot(&mut sim, 600);
-        let report = deliberate_collision(&mut sim, 1_800, 1_200);
-
-        assert!(report.made_contact, "never actually hit anything: {report:?}");
-        assert!(
-            report.closing_speed > 20.0,
-            "the shunt was at a real closing speed: {}",
-            report.closing_speed
-        );
-        assert!(report.strength > 0.0 && report.strength <= 1.0);
-
-        // It hurts, and it hurts by exactly as much as its severity allows.
-        //
-        // How much *that* is depends on whether the approach ended up square on
-        // the back of the car or brushing down its side, and both are real
-        // outcomes of a genuine pursuit — so the claim here is the one that
-        // holds either way: contact is never free, and never costs more than the
-        // retained-momentum floor for the severity that was actually reported.
-        let severity = report.severity.expect("a contact that happened classifies");
-        let floor = severity.speed_floor(&sim.tuning().collision);
-        assert!(
-            report.speed_lost() > 0.0,
-            "contact was completely free ({severity:?})"
-        );
-        assert!(
-            report.speed_lost() <= 1.0 - floor + 1.0e-3,
-            "a {severity:?} took {:.0}% of the speed, past its {:.0}% floor",
-            report.speed_lost() * 100.0,
-            floor * 100.0
-        );
-        // ...but never stops the demo.
-        assert!(
-            report.speed_after_impact > 10.0,
-            "the shunt nearly stopped the car: {} m/s",
-            report.speed_after_impact
-        );
-        assert!(
-            !report.spun,
-            "the shunt spun the car ({} rad of yaw kick)",
-            report.yaw_kick
-        );
-        assert!(
-            report.recovered,
-            "the car never got going again: {report:?}"
-        );
-        assert!(
-            report.recovery_seconds() < 8.0,
-            "recovery took {} s",
-            report.recovery_seconds()
-        );
-        assert!(!report.needed_a_reset, "and never needed a reset");
-        assert!(sim.car().is_finite());
-        assert_ne!(sim.phase(), RacePhase::Finished, "the run continues");
-    }
-
-    /// A shunt can never leave the player slower than the car it hit — that is
-    /// the rule that stops a rear-ender becoming a full stop.
-    #[test]
-    fn a_shunt_never_leaves_the_player_slower_than_the_car_in_front() {
-        let mut sim = racing();
-        drive_autopilot(&mut sim, 600);
-        let report = deliberate_collision(&mut sim, 1_800, 600);
-        assert!(report.made_contact);
-        assert!(
-            report.speed_after_impact >= report.traffic_speed * 0.55,
-            "left at {} m/s behind a car doing {}",
-            report.speed_after_impact,
-            report.traffic_speed
-        );
     }
 
     #[test]

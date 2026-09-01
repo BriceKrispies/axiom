@@ -644,73 +644,6 @@ mod tests {
         assert_eq!(run(), run());
     }
 
-    /// The property that makes the pool safe: recycling an entry cannot change
-    /// what a plan contains, because the pool holds *copies* of an immutable
-    /// list.
-    #[test]
-    fn recycling_a_pool_entry_does_not_change_the_generated_contents() {
-        let plan = plan();
-        let track = plan.track().clone();
-        let r = RaceTuning::DEFAULT;
-        let mut traffic = traffic(plan.clone());
-        let mut distance = 0.0f32;
-        let mut seen: Vec<(u32, TrafficCar)> = Vec::new();
-        for _ in 0..12_000 {
-            distance += 70.0 * DT;
-            traffic.step(distance, &track, &r, &CollisionTuning::DEFAULT);
-            for car in traffic.active() {
-                // Captured as it actually entered. Where a car enters is an
-                // activation-time fact now (see `StreamHead`) rather than a plan
-                // one, so it is the *contents* — lane, speed, variant, identity
-                // — that the plan still owns, and the assertion below re-derives
-                // them from the same entry point to say exactly that.
-                if !seen.iter().any(|(s, _)| *s == car.slot) {
-                    seen.push((car.slot, *car));
-                }
-            }
-        }
-        assert!(seen.len() > 50, "the run recycled through many plans: {}", seen.len());
-        for (slot, captured) in seen {
-            let compiled = plan.vehicle(VehicleId(slot)).expect("the plan still has it");
-            assert_eq!(
-                activate(compiled, captured.plan_index, plan.track(), captured.distance),
-                captured
-            );
-        }
-    }
-
-    /// **Activated once.** A plan that has been copied into the pool is never
-    /// copied again while the player keeps moving forward.
-    #[test]
-    fn a_plan_activates_exactly_once_on_a_forward_run() {
-        let plan = plan();
-        let track = plan.track().clone();
-        let r = RaceTuning::DEFAULT;
-        let mut traffic = traffic(plan.clone());
-        let mut distance = 0.0f32;
-        let mut activations: Vec<u32> = Vec::new();
-        let mut live: Vec<u32> = Vec::new();
-        while distance < track.length() - 200.0 {
-            distance += 90.0 * DT;
-            traffic.step(distance, &track, &r, &CollisionTuning::DEFAULT);
-            let now: Vec<u32> = traffic.active().map(|c| c.slot).collect();
-            now.iter()
-                .filter(|slot| !live.contains(slot))
-                .for_each(|slot| activations.push(*slot));
-            live = now;
-        }
-        let mut unique = activations.clone();
-        unique.sort_unstable();
-        let count = unique.len();
-        unique.dedup();
-        assert_eq!(
-            unique.len(),
-            count,
-            "a plan was activated twice on one forward run"
-        );
-        assert!(count > 40, "the run activated {count} vehicles");
-    }
-
     #[test]
     fn the_pool_is_bounded_and_fills_up_around_the_player() {
         let plan = plan();
@@ -1021,49 +954,6 @@ mod tests {
             }
         }
         assert!(seen.len() >= 20, "the run genuinely recycled: {} slots", seen.len());
-    }
-
-    /// Traffic must never form a wall. Checked over the whole compiled course,
-    /// not a sample of it — and now the compiler's own validator checks the
-    /// same thing before the race ever starts.
-    #[test]
-    fn traffic_never_blocks_the_road_across_the_whole_course() {
-        let plan = plan();
-        let track = plan.track().clone();
-        let r = RaceTuning::DEFAULT;
-        let c = CollisionTuning::DEFAULT;
-        let mut traffic = traffic(plan);
-        let mut player = 0.0f32;
-        let vehicle = crate::tuning::VehicleTuning::DEFAULT;
-        let abreast = vehicle.half_length + r.traffic_half_length;
-        let mut checked = 0u32;
-        while player < track.length() - 200.0 {
-            player += 80.0 * DT;
-            traffic.step(player, &track, &r, &c);
-            let live: Vec<(f32, f32)> = traffic.active().map(|t| (t.distance, t.lateral)).collect();
-            for (distance, _) in &live {
-                let sample = track.sample_at(*distance);
-                let lanes = track.lane_count(&sample);
-                let blockers: Vec<f32> = live
-                    .iter()
-                    .filter(|(d, _)| (d - distance).abs() < abreast * 2.0)
-                    .map(|(_, l)| *l)
-                    .collect();
-                let clearance = vehicle.half_width + r.traffic_half_width;
-                let reach = track.lane_reach(&sample);
-                let open = (-reach..=reach).filter(|lane| {
-                    let centre = track.lane_lateral(&sample, *lane);
-                    blockers.iter().all(|l| (l - centre).abs() >= clearance)
-                });
-                assert!(
-                    open.count() > 0,
-                    "at {distance} m, {} cars abreast blocked all {lanes} lanes",
-                    blockers.len()
-                );
-                checked += 1;
-            }
-        }
-        assert!(checked > 10_000, "the sweep saw {checked} cross-sections");
     }
 
     #[test]

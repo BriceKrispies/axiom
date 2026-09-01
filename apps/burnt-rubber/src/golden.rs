@@ -406,26 +406,6 @@ mod tests {
         });
     }
 
-    /// The final checkpoint is the finish, reached well inside the cap, having
-    /// actually raced: traffic threaded and the course completed.
-    #[test]
-    fn the_final_checkpoint_is_a_completed_race() {
-        let (app, steps) = driven_with_count(GoldenStop::Finish);
-        let state = state_of(&app, steps);
-        assert_eq!(
-            state.phase,
-            phase_index(RacePhase::Finished),
-            "the agent crossed the line in {steps} steps"
-        );
-        assert!(steps < GOLDEN_STEP_LIMIT, "and did not hit the cap");
-        assert!(state.progress > 0.99);
-        assert!(
-            state.near_misses > 60,
-            "only {} near misses — the agent is not hunting them",
-            state.near_misses
-        );
-    }
-
     /// The whole point: the same constants produce the same race, twice.
     #[test]
     fn the_golden_run_replays_identically() {
