@@ -50,6 +50,10 @@ mod vec4;
 /// The double-precision vector family. See [`Scalar`] for when to reach for it
 /// and, more importantly, when not to.
 mod dvec3;
+mod daabb;
+mod dclosest_pair;
+mod dsegment;
+mod dtriangle;
 
 // Scalar numerics whose edge cases are load-bearing: an accurate norm, a
 // rounding mode, a three-valued sign, a degenerate-divisor guard. Free
@@ -112,6 +116,10 @@ pub use vec3::Vec3;
 pub use vec4::Vec4;
 
 pub use dvec3::DVec3;
+pub use daabb::DAabb;
+pub use dclosest_pair::DClosestPair;
+pub use dsegment::DSegment;
+pub use dtriangle::{DTriangle, DTriangleHit};
 
 pub use hypot::{hypot, hypot2, hypot3, hypot4};
 pub use nonzero_or::{nonzero_or, nonzero_or_one};

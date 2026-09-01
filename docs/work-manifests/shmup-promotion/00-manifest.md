@@ -282,6 +282,7 @@ No step is finished until all of it holds:
 | 1b. `fx/noise.rs` → `axiom-noise` (Perlin permutation + Worley) | not started — needs `DVec2` and a seeding seam, see below |
 | 1c. `sky/noise.rs` → `axiom-noise` | not started — needs `DVec2` |
 | 1d. `materials/noise.rs` → `axiom-noise` | **blocked** — another session holds live WIP in `materials/wgsl/`; lands with step 11 |
+| 0c. `physics/math.rs` → `axiom-math` (`DAabb`/`DTriangle`/`DSegment`/`DClosestPair`) | **done** |
 | 2. mesh collider → `axiom-physics` | not started |
 | 3. capsule controller → `axiom-fp-controller` | not started |
 | 4. audio DSP → `axiom-audio` | not started |
