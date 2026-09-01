@@ -39,6 +39,14 @@ allowed_layers = [
     # screenshot has no route from a pixel back to a symbol, which is the
     # bottleneck this whole console exists to remove.
     "introspect",
+    # `value_fbm_01` — the positional value-noise basis `world::noise` binds to.
+    # The algorithm was app-local until the promotion program moved it into the
+    # layer, where it is branchless, fully covered, and pinned against the same
+    # Node-captured goldens. What this app still owns is the *constants* — the
+    # per-axis drift and gain that are this world's surface identity, which is
+    # content and therefore belongs in the composition leaf. See
+    # `docs/work-manifests/shmup-promotion/00-manifest.md`.
+    "noise",
     # Test-only: `RuntimeStep`, the deterministic step identity `AgentApi::step`
     # takes. `tests/player_feel.rs` drives the player through the agent
     # substrate, and one decision needs one step.

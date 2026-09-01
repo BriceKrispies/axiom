@@ -840,6 +840,7 @@ dependencies = [
  "axiom-introspect",
  "axiom-kernel",
  "axiom-math",
+ "axiom-noise",
  "axiom-runtime",
  "axiom-windowing",
  "console_error_panic_hook",

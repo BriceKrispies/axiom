@@ -36,6 +36,14 @@ axiom-kernel = { path = "../../crates/axiom-kernel" }
 # rather than hand-rolling a second, parallel transform path.
 axiom-math = { path = "../../crates/axiom-math" }
 
+# `value_fbm_01` and the positional value basis under it — the world's surface
+# variation, promoted out of this app and into the noise layer. What stays here
+# is `world::noise`, the ~40-line binding that names *this* world's drift and
+# gain constants; the algorithm, and its Node-captured goldens, now live under
+# the Branchless and Coverage Laws. See
+# `docs/work-manifests/shmup-promotion/00-manifest.md`.
+axiom-noise = { path = "../../crates/axiom-noise" }
+
 # `ProceduralBakeRequest`/`ProceduralBakeMaps` — the neutral bake contract
 # `materials::gpu_bake` authors. The forge's nineteen surfaces are ~15.5 us a
 # texel-evaluation on the CPU; at the shipping 1024^2 that is minutes, so the
@@ -146,6 +154,17 @@ web-sys = { version = "0.3", features = [
 # the only thing that proves the WGSL in `materials::wgsl` and the CPU bake in
 # `materials::bake` are the same function.
 axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["offscreen"] }
+
+# The WGSL front end, for `tests/materials_wgsl_validates.rs`. This is the same
+# parser `wgpu` runs internally, at the version `wgpu` pins, so "parses here"
+# and "compiles on the device" are the same question rather than two.
+#
+# Dev-only, and deliberately NOT behind `offscreen`: the point of the test is a
+# validity proof that needs no adapter. The eighteen generators previously had
+# exactly one proof they compiled — `every_generator_compiles_and_bakes`, which
+# builds a real device — so a typo in a `.wgsl` file was uncatchable anywhere
+# without a GPU.
+naga = { version = "25", features = ["wgsl-in"] }
 
 # Reads `tests/audio/golden.json` — the capture of the original `src/audio/*.js`
 # running under Node. Dev-only: nothing in the shipped crate parses JSON.

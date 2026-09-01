@@ -167,6 +167,58 @@ coverage gate for everyone, not just this program. It is app-tier and outside
 the coverage scope line, but it has to be fixed before the gate can certify
 anything.
 
+## Step 1a — the positional value basis, and what a promotion looks like
+
+`world/noise.rs` (258 lines) is now `axiom_noise::{hash_01, value_noise_01,
+value_fbm_01}` + `UnitNoise`, at **100% regions / functions / lines** across the
+layer and **zero** new dylint findings. The app keeps 107 lines: the four-scalar
+call shape its ~50 call sites read best in, and — the part that is genuinely
+content — **this world's constants**, the per-axis drift `(2.03, 2.01, 1.97)`
+and the `0.5` gain that are the identity of its surface variation.
+
+Three things this step establishes as the pattern for the rest:
+
+**The goldens move with the algorithm.** The Node-captured values that pinned
+the app's copy now pin the layer's, in
+`crates/axiom-noise/tests/positional_basis_golden.rs`, asserted with
+`assert_eq!` rather than a tolerance — the basis is exact 32-bit integer
+arithmetic and a divide by a power of two, so slack would be unearned. The
+app keeps a small binding test with five of the same values, which catches the
+one class the layer's goldens cannot: a binding that hands the layer the wrong
+constants or the axes in the wrong order.
+
+**The layer had to say why it now holds two bases.** `axiom-noise` was one
+gradient basis; it is now two, and they are not interchangeable — different
+lattice key, different fade, different range, different precision, and one is
+seeded while the other is deliberately not. That table is in the layer's own
+docs, because a future agent choosing between them needs the *reason*: a seeded
+basis reshuffles when an unrelated subsystem takes one more draw from the shared
+stream, and a positional one cannot. That durability property is why both exist.
+
+**The rulebook caught a real mistake, not a false positive.** `round_ties_up`
+was briefly exported on the argument that a shader reimplementing the basis
+would need to round identically. True, and not a caller —
+`engine_no_unitless_float_public_api` flagged it, and it was right: "someone
+might need it" is how a layer grows an API nobody calls. It is private now.
+Expect this; the gate is a design reviewer, not an obstacle.
+
+### Two findings that will bite every later step
+
+**The app's goldens do not link on the default toolchain.**
+`cargo test -p axiom-shmup` fails to link the `cdylib` with
+`ld.exe: error: export ordinal too large: 90051` — the gnu linker's 65535
+export-ordinal limit, exceeded by ~37%. **Nothing** in `apps/axiom-shmup/tests/`
+can run there, which means the port's entire verification suite is unavailable
+on the default toolchain. It runs clean on
+`RUSTUP_TOOLCHAIN=nightly-x86_64-pc-windows-msvc` (all 153 goldens pass), and
+that is how every step of this program must verify itself. Pre-existing —
+measured at 90052 before this change and 90051 after, because the app's module
+shrank.
+
+**One app lib test is red on a pristine tree.**
+`scene::wiring::weapons::tests::holding_the_trigger_drains_the_magazine_and_kicks_the_camera`
+fails with and without this change, on both toolchains.
+
 ## Order of work
 
 Dependency-ordered. Nothing here is ordered by preference.
@@ -225,7 +277,10 @@ No step is finished until all of it holds:
 | step | state |
 |---|---|
 | 0. the precision floor — kernel `f64` binary/reflect, math `DVec3`, the amended scalar policy | **done** |
-| 1. noise → `axiom-noise` | in flight |
+| 1a. `world/noise.rs` → `axiom-noise` (positional value basis) | **done** |
+| 1b. `fx/noise.rs` → `axiom-noise` (Perlin permutation + Worley) | not started — needs `DVec2` and a seeding seam, see below |
+| 1c. `sky/noise.rs` → `axiom-noise` | not started — needs `DVec2` |
+| 1d. `materials/noise.rs` → `axiom-noise` | **blocked** — another session holds live WIP in `materials/wgsl/`; lands with step 11 |
 | 2. mesh collider → `axiom-physics` | not started |
 | 3. capsule controller → `axiom-fp-controller` | not started |
 | 4. audio DSP → `axiom-audio` | not started |
