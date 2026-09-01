@@ -16,6 +16,23 @@ impl Epsilon {
     /// The engine-wide default tolerance.
     pub const DEFAULT: Epsilon = Epsilon(Scalar::DEFAULT_EPSILON);
 
+    /// The default tolerance for comparing **double-precision** values
+    /// ([`crate::DVec3`], `f64`).
+    ///
+    /// [`Epsilon::DEFAULT`] is sized for `f32`, whose ~7 significant digits make
+    /// `1e-6` a reasonable "equal enough". Applied to an `f64` it is far too
+    /// loose: it would call two values equal that disagree in the sixth digit,
+    /// which is precisely the precision a double-precision type is carried for.
+    /// `1e-12` sits comfortably above `f64::EPSILON` (~2.2e-16) while still
+    /// rejecting genuinely distinct values.
+    ///
+    /// The tolerance is stored as `f32` like every other `Epsilon` — `1e-12` is
+    /// exactly representable in range there, and widening it at the comparison
+    /// costs nothing. The type is shared on purpose: a tolerance is a tolerance,
+    /// and forking `Epsilon` into two types would make every caller choose
+    /// between two spellings of one idea.
+    pub const DEFAULT_DOUBLE: Epsilon = Epsilon(Scalar::DEFAULT_EPSILON_DOUBLE);
+
     /// Construct a tolerance, rejecting `NaN`, `±Inf`, and negative values.
     pub fn new(value: f32) -> MathResult<Self> {
         (!value.is_finite())
@@ -51,6 +68,16 @@ mod tests {
     fn default_matches_scalar_policy() {
         assert_eq!(Epsilon::default().value(), Scalar::DEFAULT_EPSILON);
         assert_eq!(Epsilon::DEFAULT.value(), Scalar::DEFAULT_EPSILON);
+        assert_eq!(
+            Epsilon::DEFAULT_DOUBLE.value(),
+            Scalar::DEFAULT_EPSILON_DOUBLE
+        );
+        // The double default is strictly tighter, and both are positive and
+        // finite — the two properties `Epsilon::new` would have enforced had
+        // they not been consts.
+        assert!(Epsilon::DEFAULT_DOUBLE.value() < Epsilon::DEFAULT.value());
+        assert!(Epsilon::DEFAULT_DOUBLE.value() > 0.0);
+        assert!(Epsilon::DEFAULT_DOUBLE.value().is_finite());
     }
 
     #[test]

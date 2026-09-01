@@ -53,6 +53,18 @@ impl BinaryWriter {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
+    /// Append a little-endian `f64` (IEEE-754 bit pattern).
+    ///
+    /// The double-precision sibling of [`BinaryWriter::write_f32`]. It exists
+    /// because `f32` is Axiom's *interchange* scalar, not its only one: a
+    /// geometry kernel, an atmosphere LUT and a bake-time noise oracle all
+    /// evaluate in `f64` and are serialized at that precision, so a `f64` that
+    /// round-trips through `f32` here would silently lose the digits those
+    /// domains exist to keep. See `axiom_math::DVec3`.
+    pub fn write_f64(&mut self, value: f64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
     /// Append a `bool` as a single `0`/`1` byte.
     pub fn write_bool(&mut self, value: bool) {
         self.bytes.push(u8::from(value));
@@ -141,6 +153,7 @@ mod tests {
         for w in [&mut a, &mut b] {
             w.write_u64(0x1122_3344_5566_7788);
             w.write_f32(1.5);
+            w.write_f64(1.5);
             w.write_i32(-7);
             w.write_i64(-9_000_000_000);
         }

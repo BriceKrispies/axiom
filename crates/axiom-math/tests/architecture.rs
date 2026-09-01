@@ -269,6 +269,7 @@ fn lib_exports_exactly_math_api() {
         "pub use vec2::Vec2;",
         "pub use vec3::Vec3;",
         "pub use vec4::Vec4;",
+        "pub use dvec3::DVec3;",
         "pub use aabb::Aabb;",
         "pub use frustum::Frustum;",
         "pub use obb::Obb;",

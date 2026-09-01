@@ -14,6 +14,18 @@ introduced_capabilities = [
     "Triangle",
     "Obb",
     "Hit",
+    # The double-precision vector family. `f32` remains the engine's
+    # *interchange* scalar — what crosses a facade, fills a vertex buffer and
+    # stores a transform — but some domains must be *evaluated* at more than
+    # that, and doing them in `f32` introduces disagreements the reference does
+    # not have (measured: `axiom_surface::srgb_to_linear` is 0/256 mismatches
+    # computed in f64 and narrowed once, 175/256 transcribed natively in f32).
+    # `DVec3` gives that rule a vocabulary — a collision kernel over a
+    # city-scale world, an atmosphere LUT, a bake-time noise oracle a shader is
+    # pinned against — instead of leaving each caller to pass loose `f64`
+    # triples. It is not a second engine scalar; `DVec3::to_single` is the one
+    # named narrowing point back to `Vec3`. See `src/scalar.rs`.
+    "DVec3",
 ]
 
 consumed_capabilities = [

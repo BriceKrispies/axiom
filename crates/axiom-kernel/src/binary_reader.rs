@@ -89,6 +89,12 @@ impl<'a> BinaryReader<'a> {
             .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
+    /// Read a little-endian `f64`.
+    pub fn read_f64(&mut self) -> KernelResult<f64> {
+        self.take(8)
+            .map(|b| f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    }
+
     /// Read a `bool` encoded as a single `0`/`1` byte. Any non-zero byte reads
     /// as `true`.
     pub fn read_bool(&mut self) -> KernelResult<bool> {
@@ -172,6 +178,7 @@ mod tests {
         w.write_i32(-42);
         w.write_i64(-9_000_000_000);
         w.write_f32(2.5);
+        w.write_f64(2.5);
         w.write_bool(true);
         let bytes = w.into_bytes();
 
@@ -183,8 +190,26 @@ mod tests {
         assert_eq!(r.read_i32().unwrap(), -42);
         assert_eq!(r.read_i64().unwrap(), -9_000_000_000);
         assert_eq!(r.read_f32().unwrap(), 2.5);
+        assert_eq!(r.read_f64().unwrap(), 2.5);
         assert!(r.read_bool().unwrap());
         assert_eq!(r.remaining(), 0);
+    }
+
+    /// `f64` is the precision the geometry/atmosphere/bake domains evaluate at,
+    /// so the round trip has to preserve a value `f32` provably cannot hold —
+    /// otherwise a test passing on `2.5` would say nothing about the reason the
+    /// arm exists. `0.1` is the classic witness: `0.1_f64 as f32 as f64` is not
+    /// `0.1_f64`.
+    #[test]
+    fn f64_round_trip_preserves_precision_f32_would_lose() {
+        let value = 0.1_f64;
+        assert_ne!(f64::from(value as f32), value);
+
+        let mut w = BinaryWriter::new();
+        w.write_f64(value);
+        let bytes = w.into_bytes();
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(BinaryReader::new(&bytes).read_f64().unwrap(), value);
     }
 
     #[test]
@@ -244,6 +269,7 @@ mod cov {
         w.write_i32(-5);
         w.write_i64(-6_000_000_000);
         w.write_f32(1.5);
+        w.write_f64(1.5);
         w.write_bool(true);
         w.write_byte_slice(&[9, 8, 7]);
         let bytes = w.into_bytes();
@@ -254,6 +280,7 @@ mod cov {
         assert_eq!(r.read_i32().unwrap(), -5);
         assert_eq!(r.read_i64().unwrap(), -6_000_000_000);
         assert_eq!(r.read_f32().unwrap(), 1.5);
+        assert_eq!(r.read_f64().unwrap(), 1.5);
         assert!(r.read_bool().unwrap());
         assert_eq!(r.read_byte_slice().unwrap(), &[9, 8, 7]);
         assert_eq!(r.remaining(), 0);
@@ -289,6 +316,7 @@ mod cov2 {
         assert!(BinaryReader::new(&[0u8, 1, 2]).read_i32().is_err());
         assert!(BinaryReader::new(&[0u8; 7]).read_i64().is_err());
         assert!(BinaryReader::new(&[0u8, 1, 2]).read_f32().is_err());
+        assert!(BinaryReader::new(&[0u8; 7]).read_f64().is_err());
         assert!(BinaryReader::new(&[0u8; 0]).read_bool().is_err());
         assert!(BinaryReader::new(&[0u8; 0]).read_byte_slice().is_err());
     }

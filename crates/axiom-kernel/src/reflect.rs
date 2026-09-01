@@ -48,6 +48,7 @@ impl_reflect_scalar!(u64, "u64", write_u64, read_u64);
 impl_reflect_scalar!(i32, "i32", write_i32, read_i32);
 impl_reflect_scalar!(i64, "i64", write_i64, read_i64);
 impl_reflect_scalar!(f32, "f32", write_f32, read_f32);
+impl_reflect_scalar!(f64, "f64", write_f64, read_f64);
 impl_reflect_scalar!(bool, "bool", write_bool, read_bool);
 
 impl Reflect for EntityId {
@@ -84,6 +85,9 @@ mod tests {
         round_trip(-12_345_i32);
         round_trip(-9_000_000_000_i64);
         round_trip(2.5f32);
+        // A value `f32` cannot represent, so the `f64` arm is proven distinct
+        // from its single-precision sibling rather than merely present.
+        round_trip(0.1f64);
         round_trip(true);
         round_trip(false);
         round_trip(EntityId::from_raw(42));
@@ -97,6 +101,7 @@ mod tests {
         assert!(i32::reflect_read(&mut BinaryReader::new(&[])).is_err());
         assert!(i64::reflect_read(&mut BinaryReader::new(&[])).is_err());
         assert!(f32::reflect_read(&mut BinaryReader::new(&[])).is_err());
+        assert!(f64::reflect_read(&mut BinaryReader::new(&[])).is_err());
         assert!(bool::reflect_read(&mut BinaryReader::new(&[])).is_err());
         assert!(EntityId::reflect_read(&mut BinaryReader::new(&[])).is_err());
     }
@@ -105,6 +110,8 @@ mod tests {
     fn scalar_schemas_are_named_leaves() {
         assert_eq!(<f32 as Reflect>::SCHEMA.name(), "f32");
         assert!(<f32 as Reflect>::SCHEMA.fields().is_empty());
+        assert_eq!(<f64 as Reflect>::SCHEMA.name(), "f64");
+        assert!(<f64 as Reflect>::SCHEMA.fields().is_empty());
         assert_eq!(<u8 as Reflect>::SCHEMA.name(), "u8");
         assert_eq!(<i32 as Reflect>::SCHEMA.name(), "i32");
         assert_eq!(<i64 as Reflect>::SCHEMA.name(), "i64");

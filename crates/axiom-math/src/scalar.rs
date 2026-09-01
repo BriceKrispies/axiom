@@ -5,12 +5,36 @@ use crate::math_result::MathResult;
 
 /// The math layer's scalar policy.
 ///
-/// Axiom standardises on IEEE-754 `f32` as the engine scalar. `Scalar` is a
-/// zero-sized policy holder that exposes the chosen constants and the finite
-/// scalar validation rule the rest of the layer follows. There is no implicit
-/// rounding, no clamping and no global epsilon — every checked operation must
-/// route through [`Scalar::validate_finite`] (or take an explicit
-/// [`crate::Epsilon`] — kept private; reached via [`crate::MathApi`]).
+/// Axiom standardises on IEEE-754 `f32` as the engine's **interchange** scalar:
+/// what crosses a facade, sits in a vertex or index buffer, reaches a GPU
+/// uniform, or is stored in a transform. [`crate::Vec3`], [`crate::Mat4`],
+/// [`crate::Quat`] and the whole `f32` geometry family are that scalar's types,
+/// and they are what an engine boundary speaks.
+///
+/// `f32` is **not** a claim that every computation runs at single precision.
+/// Some domains genuinely need more, and evaluating them in `f32` does not
+/// merely lose digits — it *introduces* disagreements the reference does not
+/// have. `axiom_surface::srgb_to_linear` is the measured case: across all 256
+/// byte inputs, computing in `f64` and narrowing once gives **0/256**
+/// mismatches against three.js, while a natively-`f32` transcription of the
+/// same algebra gives **175/256**. The rule that falls out, and that this layer
+/// follows, is:
+///
+/// > **Evaluate at the precision the domain requires; narrow once, at the
+/// > boundary, to the interchange scalar.**
+///
+/// The `f64` types here ([`crate::DVec3`]) exist to give that rule a vocabulary
+/// rather than leaving each caller to pass loose `f64` triples around. They are
+/// for domains whose *internal* precision is load-bearing — a collision kernel
+/// over a city-scale world, an atmosphere LUT, an audio impulse response, a
+/// bake-time noise oracle a shader is pinned against. They are not a second
+/// engine scalar, and nothing should reach for one to store a transform.
+///
+/// `Scalar` is a zero-sized policy holder that exposes the chosen constants and
+/// the finite scalar validation rule the rest of the layer follows. There is no
+/// implicit rounding, no clamping and no global epsilon — every checked
+/// operation must route through [`Scalar::validate_finite`] (or take an
+/// explicit [`crate::Epsilon`] — kept private; reached via [`crate::MathApi`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Scalar;
 
@@ -19,6 +43,11 @@ impl Scalar {
     /// explicit [`crate::Epsilon`] is supplied. `1e-6` is comfortably above
     /// `f32::EPSILON` while still rejecting genuinely distinct values.
     pub const DEFAULT_EPSILON: f32 = 1.0e-6;
+
+    /// The default tolerance for comparing double-precision values. See
+    /// [`crate::Epsilon::DEFAULT_DOUBLE`] for why it is not
+    /// [`Scalar::DEFAULT_EPSILON`].
+    pub const DEFAULT_EPSILON_DOUBLE: f32 = 1.0e-12;
 
     /// Whether `v` is a finite real number (neither `NaN` nor `±Inf`).
     pub const fn is_finite_value(v: f32) -> bool {

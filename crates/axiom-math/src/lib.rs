@@ -47,6 +47,10 @@ mod vec2;
 mod vec3;
 mod vec4;
 
+/// The double-precision vector family. See [`Scalar`] for when to reach for it
+/// and, more importantly, when not to.
+mod dvec3;
+
 mod quat;
 
 mod mat3;
@@ -97,6 +101,8 @@ pub use transform::Transform;
 pub use vec2::Vec2;
 pub use vec3::Vec3;
 pub use vec4::Vec4;
+
+pub use dvec3::DVec3;
 
 pub use aabb::Aabb;
 pub use frustum::Frustum;
