@@ -43,6 +43,28 @@ const BOOL_FLAGS: &[&str] = &[
     "--moved", "--vocab",
 ];
 
+/// Every flag that takes a value. A flag in neither list is a mistake, and
+/// `Args::parse` now says so instead of guessing.
+///
+/// This registry is not bookkeeping — it is the fix for a real defect. An
+/// unlisted flag used to be parsed as a key-value pair, silently swallowing the
+/// next argument: `ax q 'pat' -A 30` made `-A` eat `30` and returned the match
+/// with no context and no error, and `ax shape --help` took `--help` as a path
+/// regex and ranked the whole repository. Three separate agents hit one of
+/// those two in a single afternoon and each reported it as a wrong answer
+/// rather than a usage error. That is the README's own "a zero that is a lie":
+/// output with the shape of a true answer.
+const VALUE_FLAGS: &[&str] = &[
+    "--path", "--lang", "--limit", "--range", "--by", "--want", "--verdict", "--tool",
+    "--replace", "--with", "--root", "--out", "--since", "--agent", "--session", "--kind",
+];
+
+// A boolean flag MUST be listed above. An unlisted `--flag` is parsed as a
+// key-value pair and silently swallows the next argument, so `--vocab --limit
+// 30` made `--vocab` eat `--limit` and the command printed the wrong report
+// with no error. That is the "a zero that is a lie" failure the README names,
+// wearing a different hat: the output had the shape of a true answer.
+
 // A boolean flag MUST be listed above. An unlisted `--flag` is parsed as a
 // key-value pair and silently swallows the next argument, so `--vocab --limit
 // 30` made `--vocab` eat `--limit` and the command printed the wrong report
@@ -80,6 +102,25 @@ fn main() -> ExitCode {
     let args = Args::parse(&argv[1..]);
     let started = Instant::now();
     let mut rec = Record::new(&cmd);
+
+    // A flag the tool does not know is a usage error, not something to guess
+    // at. `--help` after a subcommand lands here too, which is why
+    // `ax shape --help` no longer scans the repository.
+    if !args.unknown.is_empty() {
+        let listed = args.unknown.join(", ");
+        eprintln!("ax {cmd}: unknown flag(s): {listed}");
+        eprintln!("ax {cmd}: run `ax help` for the command list and their flags");
+        return ExitCode::from(2);
+    }
+
+    // `--help` AFTER a subcommand. It is a known bool flag, so the unknown-flag
+    // guard above cannot catch it, and every command that takes a positional
+    // pattern would otherwise read it as one: `ax shape --help` ranked the
+    // whole repository, a slow and confidently wrong answer to a help request.
+    if args.has("--help") || args.has("-h") {
+        println!("{}", command_usage(&cmd));
+        return ExitCode::SUCCESS;
+    }
 
     let outcome = match cmd.as_str() {
         "q" | "search" => cmd_search(&repo, &args, &mut rec, None),
@@ -172,6 +213,9 @@ struct Args {
     positional: Vec<String>,
     values: HashMap<String, String>,
     flags: HashSet<String>,
+    /// Flags in neither registry. Reported before a command runs, so an
+    /// unrecognised flag is a usage error rather than a quietly wrong answer.
+    unknown: Vec<String>,
 }
 
 impl Args {
@@ -179,6 +223,7 @@ impl Args {
         let mut positional = Vec::new();
         let mut values = HashMap::new();
         let mut flags = HashSet::new();
+        let mut unknown = Vec::new();
 
         let mut i = 0;
         while i < rest.len() {
@@ -187,11 +232,20 @@ impl Args {
                 if BOOL_FLAGS.contains(&a.as_str()) {
                     flags.insert(a.clone());
                     i += 1;
-                } else if i + 1 < rest.len() {
-                    values.insert(a.clone(), rest[i + 1].clone());
-                    i += 2;
+                } else if VALUE_FLAGS.contains(&a.as_str()) {
+                    match rest.get(i + 1) {
+                        Some(v) => {
+                            values.insert(a.clone(), v.clone());
+                            i += 2;
+                        }
+                        None => {
+                            unknown.push(format!("{a} needs a value"));
+                            i += 1;
+                        }
+                    }
                 } else {
-                    flags.insert(a.clone());
+                    // Neither list: refuse rather than guess. See VALUE_FLAGS.
+                    unknown.push(a.clone());
                     i += 1;
                 }
             } else {
@@ -199,7 +253,7 @@ impl Args {
                 i += 1;
             }
         }
-        Self { positional, values, flags }
+        Self { positional, values, flags, unknown }
     }
 
     fn arg(&self, n: usize) -> Option<&str> {
@@ -1509,6 +1563,53 @@ fn duck_dir(path: &std::path::Path) -> String {
 ///
 /// Is this code data wearing Rust, or a genuine algorithm? See `shape.rs` for
 /// what each column means and why the walk parses rather than greps.
+/// Per-subcommand usage. Reached by `ax <cmd> --help`.
+fn command_usage(cmd: &str) -> &'static str {
+    match cmd {
+        "q" | "search" => "ax q <regex> [--path P] [--lang L] [--limit N] [-i] [-F] [--json]
+                             Search file contents. Zero results are recorded for `ax miss`.",
+        "def" => "ax def <symbol> [--json]
+  Where a symbol is defined (semantic index).",
+        "refs" => "ax refs <symbol> [--limit N] [--json]
+  Every real reference, with its kind.",
+        "impact" => "ax impact <symbol>
+  Blast radius: packages touched, and the laws in force there.",
+        "file" | "files" => "ax file <regex|glob> [--limit N] [--json]
+  Find files by path.",
+        "read" => "ax read <path> [--range A:B]
+  Read a file, or a line range of one.",
+        "edit" => "ax edit <path> --replace <old> --with <new> [--all]
+  Anchored single edit.",
+        "apply" => "ax apply [<script>] [--dry-run]
+  Batch edits, escape-free, all-or-nothing.",
+        "graph" => "ax graph [<layer|module|app>]
+  Deps, dependents, and the laws in force.",
+        "owns" => "ax owns <path>
+  Which package owns a file, its class, and its rules.",
+        "shape" => "ax shape <path regex> [--vocab] [--limit N] [--json]
+                      Is this code data wearing Rust, or an algorithm?
+                      Columns: literal density (content), branch density (decisions),
+                      reuse = call sites / distinct callees (the closed-vocabulary test),
+                      nodes = AST expression nodes (a lower bound on inlined graph size).
+                      --vocab names the vocabulary, tagging entries defined in the scanned set.
+                      Tests are excluded from every count.",
+        "eol" => "ax eol [<path regex>] [--fix]
+  Line endings: what is, and what should be.",
+        "wgsl" => "ax wgsl [<path regex>] [--apply]
+  Inlined shader strings -> .wgsl files.",
+        "friction" => "ax friction <what> --want <what you needed> --verdict tool|repo|unknown",
+        "resolve" => "ax resolve <id> --by <what fixed it>",
+        "miss" => "ax miss [--all]
+  What the repo, and the tool, could not answer.",
+        "stats" => "ax stats
+  What agents look for and change.",
+        "sql" => "ax sql <query>
+  DuckDB over the whole ledger.",
+        _ => "ax help
+  Run `ax help` for the full command list.",
+    }
+}
+
 fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     let filter = args.arg(0).unwrap_or(".");
     rec.query = Some(filter.to_owned());
@@ -1565,7 +1666,10 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
                 })
             })
             .collect();
-        let vocab = shape::merge_vocab(&shapes);
+        let vocab: Vec<serde_json::Value> = shape::merge_vocab(&shapes)
+            .into_iter()
+            .map(|e| serde_json::json!({ "name": e.name, "count": e.count, "local": e.local }))
+            .collect();
         println!(
             "{}",
             serde_json::json!({
@@ -1585,38 +1689,51 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         return Ok(Status::Empty);
     }
 
-    let totals = shapes.iter().fold((0usize, 0usize, 0usize), |(l, b, c), s| {
-        (l + s.literals, b + s.branches, c + s.code_lines)
-    });
+    let totals = shapes
+        .iter()
+        .fold((0usize, 0usize, 0usize, 0usize), |(l, b, c, t), s| {
+            (
+                l + s.literals,
+                b + s.branches,
+                c + s.code_lines,
+                t + s.test_lines,
+            )
+        });
 
     if args.has("--vocab") {
         let vocab = shape::merge_vocab(&shapes);
+        let sites: usize = vocab.iter().map(|e| e.count).sum();
+        let local = vocab.iter().filter(|e| e.local).count();
         println!(
-            "vocabulary of {} file(s), {} distinct callee(s) over {} call site(s):",
+            "vocabulary of {} file(s): {} distinct callee(s) over {} call site(s); \
+             {local} defined in the scanned set",
             shapes.len(),
             vocab.len(),
-            vocab.values().sum::<usize>()
+            sites,
         );
-        let mut ranked: Vec<(&String, &usize)> = vocab.iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-        ranked.iter().take(args.limit(60)).for_each(|(name, n)| {
-            println!("  {n:6}  {name}");
+        vocab.iter().take(args.limit(60)).for_each(|e| {
+            // `local` is the column that separates a domain verb from an
+            // `Option` combinator. Without it, reading a vocabulary means
+            // classifying every name by hand.
+            let scope = ["", "local"][usize::from(e.local)];
+            println!("  {:6}  {:<6} {}", e.count, scope, e.name);
         });
         return Ok(Status::Found);
     }
 
     println!(
-        "{:>5} {:>7} {:>7} {:>6} {:>6}  {:<9} {}",
-        "lines", "lit/ln", "br/ln", "reuse", "vocab", "verdict", "path"
+        "{:>5} {:>7} {:>7} {:>6} {:>6} {:>7}  {:<9} {}",
+        "lines", "lit/ln", "br/ln", "reuse", "vocab", "nodes", "verdict", "path"
     );
     shapes.iter().take(args.limit(40)).for_each(|s| {
         println!(
-            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>6}  {:<9} {}",
+            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>6} {:>7}  {:<9} {}",
             s.code_lines,
             s.literal_density(),
             s.branch_density(),
             s.reuse(),
             s.distinct_calls(),
+            s.nodes,
             s.verdict().label(),
             s.path
         );
@@ -1639,9 +1756,10 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         shapes.len() - data - algo
     );
     println!(
-        "overall {:.2} literals/line, {:.3} branches/line",
+        "overall {:.2} literals/line, {:.3} branches/line ({} test line(s) excluded)",
         totals.0 as f64 / totals.2.max(1) as f64,
-        totals.1 as f64 / totals.2.max(1) as f64
+        totals.1 as f64 / totals.2.max(1) as f64,
+        totals.3
     );
     if skipped > 0 {
         println!("{skipped} file(s) skipped: could not be parsed as Rust");

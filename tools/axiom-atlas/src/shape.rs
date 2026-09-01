@@ -32,13 +32,25 @@
 //!   two hundred times is assembling something out of a small vocabulary, which
 //!   is exactly what a recipe graph expresses. A file that calls two hundred
 //!   distinct functions once each has no vocabulary to name.
+//! - **nodes** — expression nodes in the AST. A *lower bound* on the size of
+//!   the fully-inlined expression graph a field/recipe VM would have to hold,
+//!   because loops and calls expand further. It is here because that number,
+//!   not the densities, is what decides feasibility: `axiom-recipe`'s budget is
+//!   256 nodes, and a file whose AST alone exceeds it certainly will not fit.
+//!
+//! Tests are excluded from every count. A `#[cfg(test)]` module is not part of
+//! the subsystem being characterised, and counting it inflated the first run of
+//! this command by ~23% on `world/props`.
 //!
 //! The verdict is a **ranking heuristic, not an oracle**. It exists to sort
 //! 128,000 lines into "look at these first", and the real decision is still the
-//! doc's: can you name the vocabulary? `--vocab` prints it so you can try.
+//! doc's: can you name the vocabulary? `--vocab` prints it, tagging each entry
+//! `local` when it is defined inside the scanned set — which is what separates
+//! a domain verb from an `Option` combinator.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use syn::spanned::Spanned as _;
 use syn::visit::Visit;
 
 /// What the walk found in one file.
@@ -46,11 +58,16 @@ use syn::visit::Visit;
 pub struct Shape {
     pub path: String,
     pub code_lines: usize,
+    pub test_lines: usize,
     pub literals: usize,
     pub floats: usize,
     pub branches: usize,
     pub calls: usize,
+    pub nodes: usize,
     pub vocab: BTreeMap<String, usize>,
+    /// Names of functions *defined* in this file, so `--vocab` can tell a
+    /// domain verb from a language builtin.
+    pub defined: BTreeSet<String>,
 }
 
 /// Which side of the datafication line a file falls on.
@@ -119,7 +136,7 @@ impl Shape {
     }
 }
 
-/// Walks a parsed file, counting the three things the verdict turns on.
+/// Walks a parsed file, counting the things the verdict turns on.
 struct Walk {
     shape: Shape,
 }
@@ -132,6 +149,16 @@ impl Walk {
 }
 
 impl<'ast> Visit<'ast> for Walk {
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        self.shape.defined.insert(item.sig.ident.to_string());
+        syn::visit::visit_item_fn(self, item);
+    }
+
+    fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+        self.shape.defined.insert(item.sig.ident.to_string());
+        syn::visit::visit_impl_item_fn(self, item);
+    }
+
     fn visit_lit(&mut self, lit: &'ast syn::Lit) {
         match lit {
             syn::Lit::Float(_) => {
@@ -145,6 +172,7 @@ impl<'ast> Visit<'ast> for Walk {
     }
 
     fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+        self.shape.nodes += 1;
         match expr {
             // Every construct the Branchless Law names, which is the same set
             // that distinguishes a decision from a description.
@@ -175,61 +203,149 @@ impl<'ast> Visit<'ast> for Walk {
     }
 }
 
-/// Count the lines that carry code, as opposed to comment or blank.
+/// Whether an item is compiled only under `cfg(test)`, or is itself a test.
 ///
-/// Deliberately textual rather than span-derived: a span covers the whole item
-/// including its doc comment, and counting those would deflate every density in
-/// a codebase whose files carry long explanatory headers — which is exactly
-/// this one.
-fn code_lines(source: &str) -> usize {
+/// Both spellings appear in this repo — a `#[cfg(test)] mod tests` and a bare
+/// `#[test] fn` — and neither is part of the subsystem being characterised.
+fn is_test_item(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        let path = attr.path();
+        if path.is_ident("test") {
+            return true;
+        }
+        if !path.is_ident("cfg") {
+            return false;
+        }
+        attr.parse_args::<syn::Meta>()
+            .map(|meta| meta.path().is_ident("test"))
+            .unwrap_or(false)
+    })
+}
+
+fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
+    match item {
+        syn::Item::Mod(i) => &i.attrs,
+        syn::Item::Fn(i) => &i.attrs,
+        syn::Item::Impl(i) => &i.attrs,
+        syn::Item::Struct(i) => &i.attrs,
+        syn::Item::Enum(i) => &i.attrs,
+        syn::Item::Const(i) => &i.attrs,
+        syn::Item::Static(i) => &i.attrs,
+        syn::Item::Use(i) => &i.attrs,
+        syn::Item::Type(i) => &i.attrs,
+        syn::Item::Trait(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+/// Count the lines that carry code, as opposed to comment or blank, skipping
+/// any line inside a test item.
+///
+/// Deliberately textual rather than span-derived for the comment part: a span
+/// covers the whole item including its doc comment, and counting those would
+/// deflate every density in a codebase whose files carry long explanatory
+/// headers — which is exactly this one.
+fn code_lines(source: &str, skip: &[(usize, usize)]) -> (usize, usize) {
+    let in_skip = |n: usize| skip.iter().any(|(a, b)| n >= *a && n <= *b);
     let mut in_block = false;
-    source
-        .lines()
-        .filter(|raw| {
-            let line = raw.trim();
-            let was_in_block = in_block;
-            if in_block {
-                if line.contains("*/") {
-                    in_block = false;
-                }
-                return false;
+    let mut code = 0usize;
+    let mut tests = 0usize;
+    source.lines().enumerate().for_each(|(i, raw)| {
+        let number = i + 1;
+        let line = raw.trim();
+        let was_in_block = in_block;
+        if in_block {
+            if line.contains("*/") {
+                in_block = false;
             }
-            if line.starts_with("/*") && !line.contains("*/") {
-                in_block = true;
-                return false;
-            }
-            !was_in_block
-                && !line.is_empty()
-                && !line.starts_with("//")
-                && !line.starts_with("/*")
-        })
-        .count()
+            return;
+        }
+        if line.starts_with("/*") && !line.contains("*/") {
+            in_block = true;
+            return;
+        }
+        let is_code = !was_in_block
+            && !line.is_empty()
+            && !line.starts_with("//")
+            && !line.starts_with("/*");
+        if !is_code {
+            return;
+        }
+        match in_skip(number) {
+            true => tests += 1,
+            false => code += 1,
+        }
+    });
+    (code, tests)
 }
 
 /// Parse one file and report its shape. Returns `None` for anything `syn`
 /// cannot parse, which is reported to the caller as a skip rather than swallowed.
 pub fn analyse(path: &str, source: &str) -> Option<Shape> {
     let parsed = syn::parse_file(source).ok()?;
+
+    let test_spans: Vec<(usize, usize)> = parsed
+        .items
+        .iter()
+        .filter(|item| is_test_item(item_attrs(item)))
+        .map(|item| {
+            let span = item.span();
+            (span.start().line, span.end().line)
+        })
+        .collect();
+
+    let (code, tests) = code_lines(source, &test_spans);
+
     let mut walk = Walk {
         shape: Shape {
             path: path.to_owned(),
-            code_lines: code_lines(source),
+            code_lines: code,
+            test_lines: tests,
             ..Shape::default()
         },
     };
-    walk.visit_file(&parsed);
+    // Visit only the non-test items, so a test's literals and branches cannot
+    // move a verdict about the code it tests.
+    parsed
+        .items
+        .iter()
+        .filter(|item| !is_test_item(item_attrs(item)))
+        .for_each(|item| walk.visit_item(item));
+
     Some(walk.shape)
+}
+
+/// One row of the merged vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VocabEntry {
+    pub name: String,
+    pub count: usize,
+    /// Defined inside the scanned set. The column that separates a domain verb
+    /// from an `Option` combinator — the single thing that made reading a
+    /// vocabulary by hand a manual classification job.
+    pub local: bool,
 }
 
 /// Merge a set of per-file vocabularies into one, for the "what is the closed
 /// vocabulary of this subsystem" question.
-pub fn merge_vocab(shapes: &[Shape]) -> BTreeMap<String, usize> {
-    shapes.iter().fold(BTreeMap::new(), |mut all, shape| {
+pub fn merge_vocab(shapes: &[Shape]) -> Vec<VocabEntry> {
+    let defined: BTreeSet<&String> = shapes.iter().flat_map(|s| s.defined.iter()).collect();
+    let counts = shapes.iter().fold(BTreeMap::new(), |mut all, shape| {
         shape.vocab.iter().for_each(|(name, n)| {
-            *all.entry(name.clone()).or_insert(0) += n;
+            *all.entry(name.clone()).or_insert(0usize) += n;
         });
         all
-    })
+    });
+    let mut rows: Vec<VocabEntry> = counts
+        .into_iter()
+        .map(|(name, count)| VocabEntry {
+            local: defined.contains(&name),
+            name,
+            count,
+        })
+        .collect();
+    rows.sort_by(|a, b| b.count.cmp(&a.count).then(a.name.cmp(&b.name)));
+    rows
 }
 
 #[cfg(test)]
@@ -317,13 +433,61 @@ mod tests {
         assert!(analyse("x.rs", "fn (((").is_none());
     }
 
+    /// Tests are not part of the subsystem. Counting them inflated the first
+    /// run of this command by ~23% on `world/props`, which moved a split
+    /// estimate a fleet of agents was building on.
     #[test]
-    fn vocabularies_merge_across_files() {
+    fn a_cfg_test_module_is_excluded_from_every_count() {
+        let src = "fn f() { g(1.0); }\n\
+                   #[cfg(test)]\n\
+                   mod tests {\n\
+                       fn t() { h(2.0); i(3.0); j(4.0); }\n\
+                   }\n";
+        let shape = analyse("t.rs", src).unwrap();
+        assert_eq!(shape.literals, 1, "test literals leaked into the count");
+        assert_eq!(shape.vocab.get("h"), None, "test calls leaked into the vocab");
+        assert_eq!(shape.code_lines, 1);
+        assert_eq!(shape.test_lines, 4);
+    }
+
+    #[test]
+    fn a_bare_test_function_is_excluded_too() {
+        let src = "fn f() { g(1.0); }\n#[test]\nfn t() { h(2.0); }\n";
+        let shape = analyse("t.rs", src).unwrap();
+        assert_eq!(shape.literals, 1);
+        assert_eq!(shape.vocab.get("h"), None);
+    }
+
+    /// The column that separates a domain verb from a language builtin.
+    #[test]
+    fn the_vocabulary_marks_callees_defined_in_the_scanned_set() {
+        let a = analyse("a.rs", "fn ll(x: f64) -> f64 { x }\nfn f() { ll(1.0); }").unwrap();
+        let b = analyse("b.rs", "fn g() { ll(2.0); opt.map(|v| v); }").unwrap();
+        let rows = merge_vocab(&[a, b]);
+        let ll = rows.iter().find(|r| r.name == "ll").unwrap();
+        let map = rows.iter().find(|r| r.name == "map").unwrap();
+        assert_eq!(ll.count, 2);
+        assert!(ll.local, "a function defined in the set is local");
+        assert!(!map.local, "an Option combinator is not domain vocabulary");
+    }
+
+    #[test]
+    fn vocabularies_merge_and_rank_by_count() {
         let a = analyse("a.rs", "fn f() { g(1.0); h(2.0); }").unwrap();
         let b = analyse("b.rs", "fn f() { g(3.0); }").unwrap();
-        let all = merge_vocab(&[a, b]);
-        assert_eq!(all.get("g"), Some(&2));
-        assert_eq!(all.get("h"), Some(&1));
+        let rows = merge_vocab(&[a, b]);
+        assert_eq!(rows[0].name, "g");
+        assert_eq!(rows[0].count, 2);
+    }
+
+    /// The number that decides field-graph feasibility: `axiom-recipe`'s budget
+    /// is 256 nodes, and an AST already over it certainly will not fit.
+    #[test]
+    fn expression_nodes_are_counted_as_a_lower_bound_on_graph_size() {
+        let flat = analyse("f.rs", "fn f() -> f64 { 1.0 }").unwrap();
+        let nested = analyse("n.rs", "fn f(a: f64) -> f64 { a * 2.0 + a * 3.0 - a }").unwrap();
+        assert!(nested.nodes > flat.nodes);
+        assert!(flat.nodes >= 1);
     }
 
     #[test]
