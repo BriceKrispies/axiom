@@ -26,6 +26,7 @@ mod ledger;
 mod observe;
 mod repo;
 mod search;
+mod shape;
 mod symbols;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -39,8 +40,14 @@ use repo::Repo;
 /// Flags that never take a value.
 const BOOL_FLAGS: &[&str] = &[
     "--all", "--json", "-i", "--ignore-case", "-F", "--fixed", "--apply", "--help", "-h",
-    "--moved",
+    "--moved", "--vocab",
 ];
+
+// A boolean flag MUST be listed above. An unlisted `--flag` is parsed as a
+// key-value pair and silently swallows the next argument, so `--vocab --limit
+// 30` made `--vocab` eat `--limit` and the command printed the wrong report
+// with no error. That is the "a zero that is a lie" failure the README names,
+// wearing a different hat: the output had the shape of a true answer.
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -95,6 +102,7 @@ fn main() -> ExitCode {
         "stats" => cmd_stats(&repo, &args, &mut rec),
         "compact" => cmd_compact(&repo, &mut rec),
         "sql" => cmd_sql(&repo, &args, &mut rec),
+        "shape" => cmd_shape(&repo, &args, &mut rec),
         other => Err(Failure::Usage(format!("unknown command `{other}`"))),
     };
 
@@ -1497,6 +1505,152 @@ fn duck_dir(path: &std::path::Path) -> String {
 /// build, and a 12 MB CLI one `scoop install duckdb` away is the smaller trade.
 /// A machine without it gets the queries printed, exactly as before, so nothing
 /// this command could do yesterday stops working.
+/// `ax shape <path RE> [--vocab] [--limit N] [--json]`
+///
+/// Is this code data wearing Rust, or a genuine algorithm? See `shape.rs` for
+/// what each column means and why the walk parses rather than greps.
+fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let filter = args.arg(0).unwrap_or(".");
+    rec.query = Some(filter.to_owned());
+
+    // `--limit` governs how many ROWS are printed, not how many files are
+    // scanned: the summary counts and the merged vocabulary are only true if
+    // the whole matched set was walked. Throttling the search here made the
+    // first run of this command report on 22 files and call it the app.
+    const SCAN_CAP: usize = 100_000;
+    let files = search::find_files(repo, filter, SCAN_CAP).map_err(Failure::Usage)?;
+
+    let mut skipped = 0usize;
+    let mut shapes: Vec<shape::Shape> = files
+        .iter()
+        .filter_map(|rel| {
+            (rel.ends_with(".rs")).then_some(())?;
+            let abs = repo.resolve_read(rel).ok()?;
+            let source = std::fs::read_to_string(&abs).ok()?;
+            let parsed = shape::analyse(rel, &source);
+            if parsed.is_none() {
+                skipped += 1;
+            }
+            parsed
+        })
+        .collect();
+
+    // Densest-in-constants first: this command exists to rank candidates, and
+    // the top of the list is where a datafication pass should start.
+    shapes.sort_by(|a, b| {
+        b.literal_density()
+            .partial_cmp(&a.literal_density())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    rec.hits = shapes.len();
+    rec.files_matched = shapes.len();
+
+    if args.json() {
+        let items: Vec<serde_json::Value> = shapes
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "path": s.path,
+                    "code_lines": s.code_lines,
+                    "literals": s.literals,
+                    "floats": s.floats,
+                    "branches": s.branches,
+                    "calls": s.calls,
+                    "distinct_calls": s.distinct_calls(),
+                    "literal_density": s.literal_density(),
+                    "branch_density": s.branch_density(),
+                    "reuse": s.reuse(),
+                    "verdict": s.verdict().label(),
+                })
+            })
+            .collect();
+        let vocab = shape::merge_vocab(&shapes);
+        println!(
+            "{}",
+            serde_json::json!({
+                "files": items,
+                "skipped_unparseable": skipped,
+                "vocabulary": vocab,
+            })
+        );
+        return Ok(match shapes.is_empty() {
+            true => Status::Empty,
+            false => Status::Found,
+        });
+    }
+
+    if shapes.is_empty() {
+        println!("ax shape: `{filter}` matched no parseable Rust file");
+        return Ok(Status::Empty);
+    }
+
+    let totals = shapes.iter().fold((0usize, 0usize, 0usize), |(l, b, c), s| {
+        (l + s.literals, b + s.branches, c + s.code_lines)
+    });
+
+    if args.has("--vocab") {
+        let vocab = shape::merge_vocab(&shapes);
+        println!(
+            "vocabulary of {} file(s), {} distinct callee(s) over {} call site(s):",
+            shapes.len(),
+            vocab.len(),
+            vocab.values().sum::<usize>()
+        );
+        let mut ranked: Vec<(&String, &usize)> = vocab.iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        ranked.iter().take(args.limit(60)).for_each(|(name, n)| {
+            println!("  {n:6}  {name}");
+        });
+        return Ok(Status::Found);
+    }
+
+    println!(
+        "{:>5} {:>7} {:>7} {:>6} {:>6}  {:<9} {}",
+        "lines", "lit/ln", "br/ln", "reuse", "vocab", "verdict", "path"
+    );
+    shapes.iter().take(args.limit(40)).for_each(|s| {
+        println!(
+            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>6}  {:<9} {}",
+            s.code_lines,
+            s.literal_density(),
+            s.branch_density(),
+            s.reuse(),
+            s.distinct_calls(),
+            s.verdict().label(),
+            s.path
+        );
+    });
+
+    let data = shapes
+        .iter()
+        .filter(|s| s.verdict() == shape::Verdict::Data)
+        .count();
+    let algo = shapes
+        .iter()
+        .filter(|s| s.verdict() == shape::Verdict::Algorithm)
+        .count();
+    println!(
+        "\n{} file(s), {} code lines: {} data-shaped, {} algorithm, {} mixed",
+        shapes.len(),
+        totals.2,
+        data,
+        algo,
+        shapes.len() - data - algo
+    );
+    println!(
+        "overall {:.2} literals/line, {:.3} branches/line",
+        totals.0 as f64 / totals.2.max(1) as f64,
+        totals.1 as f64 / totals.2.max(1) as f64
+    );
+    if skipped > 0 {
+        println!("{skipped} file(s) skipped: could not be parsed as Rust");
+    }
+    println!("`--vocab` names the closed vocabulary; see docs/engine-datafication.md §3");
+
+    Ok(Status::Found)
+}
+
 fn cmd_sql(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     // The parquet half may hold nothing: `ax compact` may never have run, and a
     // ledger of raw NDJSON alone is the normal state early on. `read_parquet`
