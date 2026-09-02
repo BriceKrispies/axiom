@@ -11,6 +11,24 @@ use std::ffi::OsString;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// A file's contents at a git revision, or `None` if it did not exist there.
+///
+/// Reading history is how a command checks its own work: `ax cite` resolves a
+/// citation against a baseline revision, and `ax wgsl --verify` proves an
+/// extracted `.wgsl` still equals the string literal it replaced. Both need the
+/// same three lines, so they share them.
+pub fn git_show(root: &Path, rev: &str, path: &str) -> Option<String> {
+    let out = Command::new("git")
+        .current_dir(root)
+        .args(["show", &format!("{rev}:{path}")])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
 
 /// Why a path was refused. Every variant is a refusal to leave the repo.
 #[derive(Debug)]

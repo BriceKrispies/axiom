@@ -47,8 +47,14 @@ Read and change (scoped to this repo, always)
   ax read <path> [--range A:B]
   ax edit <path> --replace <old> --with <new> [--all]
   ax write <path>                  content on stdin
-  ax apply                         batch edits as JSON on stdin, all-or-nothing
+  ax apply [<file>] [--dry-run]    batch edits, all-or-nothing. An escape-free
+                                   edit script, or a JSON array (a leading `[`)
   ax record <path> [--bytes N] [--tool T]   log a change made outside ax
+  ax wgsl [<path RE>] [--apply] [--min-score N]
+                                   shader text inlined as a Rust string ->
+                                   a sibling .wgsl file + include_str!
+  ax eol [<path RE>] [--fix]       line endings: what the repo has, and what
+                                   .gitattributes says it should have
 
 Architecture
   ax graph [<layer|module|app>]    deps, dependents, and the laws in force
@@ -62,6 +68,11 @@ The ledger
   ax compact                       roll closed days into Parquet
   ax sql                           DuckDB queries over the whole ledger
 ```
+
+Path patterns (`q --path`, `file`, `cite`, `wgsl`, `eol`) are read as a **regex
+first, then as a glob** (`*`, `**`, `?`) if the regex matches no file. The
+fallback is announced, and a pattern matching nothing either way says so rather
+than returning a bare zero. See `src/pattern.rs`.
 
 `--lang`: `rs ts js web toml md py shader json`
 

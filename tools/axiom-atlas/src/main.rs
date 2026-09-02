@@ -16,6 +16,7 @@
 mod apply;
 mod cite;
 mod edit;
+mod eol;
 // `proc-macro2` is a dependency for its `span-locations` FEATURE, which is what
 // gives `syn` real file:line for every AST node. Nothing here calls it directly.
 use proc_macro2 as _;
@@ -24,10 +25,13 @@ mod graph;
 mod index;
 mod ledger;
 mod observe;
+mod pattern;
 mod repo;
+mod script;
 mod search;
 mod shape;
 mod symbols;
+mod wgsl;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Read as _;
@@ -40,7 +44,7 @@ use repo::Repo;
 /// Flags that never take a value.
 const BOOL_FLAGS: &[&str] = &[
     "--all", "--json", "-i", "--ignore-case", "-F", "--fixed", "--apply", "--help", "-h",
-    "--moved", "--vocab", "--rows",
+    "--moved", "--dry-run", "--fix", "--verify", "--vocab", "--rows",
 ];
 
 /// Every flag that takes a value. A flag in neither list is a mistake, and
@@ -57,6 +61,7 @@ const BOOL_FLAGS: &[&str] = &[
 const VALUE_FLAGS: &[&str] = &[
     "--path", "--lang", "--limit", "--range", "--by", "--want", "--verdict", "--tool",
     "--replace", "--with", "--root", "--out", "--since", "--agent", "--session", "--kind",
+    "-A", "-B", "-C", "--context",
 ];
 
 // A boolean flag MUST be listed above. An unlisted `--flag` is parsed as a
@@ -65,11 +70,26 @@ const VALUE_FLAGS: &[&str] = &[
 // with no error. That is the "a zero that is a lie" failure the README names,
 // wearing a different hat: the output had the shape of a true answer.
 
-// A boolean flag MUST be listed above. An unlisted `--flag` is parsed as a
-// key-value pair and silently swallows the next argument, so `--vocab --limit
-// 30` made `--vocab` eat `--limit` and the command printed the wrong report
-// with no error. That is the "a zero that is a lie" failure the README names,
-// wearing a different hat: the output had the shape of a true answer.
+/// Splits grep's attached count form — `-A3` into `-A` and `3`.
+///
+/// Only for the three context flags, and only when what follows is entirely
+/// digits, so a pattern like `-Abc` is still an unknown flag rather than being
+/// quietly reinterpreted.
+fn split_attached_count(arg: &str) -> Option<(String, String)> {
+    let (flag, digits) = arg.split_at(arg.len().min(2));
+    let is_context = matches!(flag, "-A" | "-B" | "-C");
+    let numeric = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+    (is_context & numeric).then(|| (flag.to_owned(), digits.to_owned()))
+}
+
+/// Reads a context-line count, ignoring a flag that was not given.
+///
+/// A non-numeric value is silently 0 rather than an error, deliberately: this is
+/// a display knob, and refusing the whole search over `-C x` would lose the
+/// answer the caller actually wanted.
+fn context_lines(args: &Args, flag: &str) -> Option<usize> {
+    args.value(flag).map(|v| v.parse().unwrap_or(0))
+}
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -132,7 +152,7 @@ fn main() -> ExitCode {
         "cite" | "cites" => cmd_cite(&repo, &args, &mut rec),
         "read" => cmd_read(&repo, &args, &mut rec),
         "edit" => cmd_edit(&repo, &args, &mut rec),
-        "apply" => cmd_apply(&repo, &mut rec),
+        "apply" => cmd_apply(&repo, &args, &mut rec),
         "write" => cmd_write(&repo, &args, &mut rec),
         "graph" => cmd_graph(&repo, &args, &mut rec),
         "owns" => cmd_owns(&repo, &args, &mut rec),
@@ -143,6 +163,8 @@ fn main() -> ExitCode {
         "stats" => cmd_stats(&repo, &args, &mut rec),
         "compact" => cmd_compact(&repo, &mut rec),
         "sql" => cmd_sql(&repo, &args, &mut rec),
+        "wgsl" => cmd_wgsl(&repo, &args, &mut rec),
+        "eol" => cmd_eol(&repo, &args, &mut rec),
         "shape" => cmd_shape(&repo, &args, &mut rec),
         other => Err(Failure::Usage(format!("unknown command `{other}`"))),
     };
@@ -225,6 +247,17 @@ impl Args {
         let mut flags = HashSet::new();
         let mut unknown = Vec::new();
 
+        // grep accepts `-A3` as well as `-A 3`, and the attached form is the one
+        // fingers type. Splitting it here means the flag registry below sees the
+        // canonical spelling and nothing else has to know.
+        let rest: Vec<String> = rest
+            .iter()
+            .flat_map(|a| match split_attached_count(a) {
+                Some((flag, n)) => vec![flag, n],
+                None => vec![a.clone()],
+            })
+            .collect();
+
         let mut i = 0;
         while i < rest.len() {
             let a = &rest[i];
@@ -292,22 +325,77 @@ fn cmd_search(repo: &Repo, args: &Args, rec: &mut Record, pattern: Option<String
             .to_owned(),
     };
 
+    // `--path` speaks the same language as every other path pattern (see
+    // `crate::pattern`), but a content search filters inside the walk rather
+    // than over a candidate set, so the two readings are applied as regex
+    // sources instead of by `select`.
+    let selector = args
+        .value("--path")
+        .map(pattern::PathPattern::parse)
+        .transpose()
+        .map_err(Failure::Usage)?;
+
+    let both = context_lines(&args, "-C")
+        .or_else(|| context_lines(&args, "--context"))
+        .unwrap_or(0);
+
     let q = search::Query {
         pattern: pattern.clone(),
-        path_filter: args.value("--path").map(str::to_owned),
+        // The regex reading first; a pattern with no regex reading (`*.rs`)
+        // goes straight to the glob rather than failing to compile.
+        path_filter: selector
+            .as_ref()
+            .map(|s| s.regex_source().unwrap_or_else(|| s.glob_source()).to_owned()),
         lang: args.value("--lang").map(str::to_owned),
         limit: args.limit(80),
         case_insensitive: args.has("-i") || args.has("--ignore-case"),
         fixed: args.has("-F") || args.has("--fixed"),
+        // `-C` sets both sides; `-A`/`-B` override their own side, so
+        // `-C2 -A6` means two before and six after, as grep does it.
+        before: context_lines(&args, "-B").unwrap_or(both),
+        after: context_lines(&args, "-A").unwrap_or(both),
     };
 
     rec.query = Some(args.arg(0).unwrap_or(&pattern).to_owned());
     rec.scope = Scope {
-        path: q.path_filter.clone(),
+        // The ledger records what the CALLER typed, not what it was compiled
+        // to — `ax miss` is a record of the questions asked.
+        path: args.value("--path").map(str::to_owned),
         lang: q.lang.clone(),
     };
 
-    let out = search::run(repo, &q).map_err(Failure::Usage)?;
+    let first = search::run(repo, &q).map_err(Failure::Usage)?;
+
+    // A zero under a `--path` that also has a glob reading is exactly the case
+    // that used to lie. Retrying costs a second walk, but only on the answer
+    // that was going to be "nothing" anyway.
+    let retry = (first.total == 0)
+        .then(|| selector.as_ref().filter(|s| !s.glob_only()))
+        .flatten()
+        .map(|s| {
+            let widened = search::Query { path_filter: Some(s.glob_source().to_owned()), ..q };
+            search::run(repo, &widened).map(|out| (out, s))
+        })
+        .transpose()
+        .map_err(Failure::Usage)?;
+
+    let out = match retry {
+        Some((glob_out, s)) if glob_out.total > 0 => {
+            eprintln!("ax q: {}", s.note(pattern::Kind::Glob).unwrap_or_default());
+            glob_out
+        }
+        _ => first,
+    };
+
+    // A zero under `--path` has two very different causes, and the ledger
+    // records it either way as a question the repo could not answer. Say which
+    // one it was: a path pattern that selected no file at all is a mistyped
+    // filter, not a gap in the repo.
+    (out.total == 0)
+        .then_some(selector.as_ref())
+        .flatten()
+        .filter(|s| s.select(search::all_files(repo)).0.is_empty())
+        .map(|s| eprintln!("ax q: {} — the search never ran", s.empty_note()));
     rec.hits = out.total;
     rec.files_matched = out.files_matched;
     rec.top_paths = distinct_paths(&out.hits, 10);
@@ -541,7 +629,10 @@ fn cmd_files(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         .ok_or_else(|| Failure::Usage("`file` needs a path pattern".to_owned()))?;
     rec.query = Some(needle.to_owned());
 
-    let found = search::find_files(repo, needle, args.limit(100)).map_err(Failure::Usage)?;
+    let (found, kind, selector) =
+        search::find_files_kinded(repo, needle, args.limit(100)).map_err(Failure::Usage)?;
+    selector.note(kind).map(|n| eprintln!("ax file: {n}"));
+    found.is_empty().then(|| eprintln!("ax file: {}", selector.empty_note()));
     rec.hits = found.len();
     rec.files_matched = found.len();
     rec.top_paths = found.iter().take(10).cloned().collect();
@@ -908,7 +999,11 @@ fn emit_hits(args: &Args, out: &search::Outcome) {
         let rows: Vec<_> = out
             .hits
             .iter()
-            .map(|h| serde_json::json!({ "path": h.path, "line": h.line, "text": h.text }))
+            .map(|h| {
+                serde_json::json!({
+                    "path": h.path, "line": h.line, "text": h.text, "match": h.is_match,
+                })
+            })
             .collect();
         println!(
             "{}",
@@ -923,12 +1018,19 @@ fn emit_hits(args: &Args, out: &search::Outcome) {
     }
 
     for h in &out.hits {
-        println!("{}:{}:{}", h.path, h.line, h.text);
+        // grep's convention: `:` after the line number for a match, `-` for a
+        // context line. One character, and it is what lets a reader — or a
+        // downstream regex — tell which line the pattern actually hit.
+        let sep = ['-', ':'][usize::from(h.is_match)];
+        println!("{}{sep}{}{sep}{}", h.path, h.line, h.text);
     }
     if out.truncated {
         println!(
             "... {} more hits in {} files (raise --limit)",
-            out.total - out.hits.len(),
+            // Matches, not lines. `hits` also carries context lines now, so
+            // subtracting its length from a match count underflowed a `usize`
+            // and printed 18446744073709551614.
+            out.total.saturating_sub(out.hits.iter().filter(|h| h.is_match).count()),
             out.files_matched
         );
     }
@@ -940,6 +1042,12 @@ fn emit_hits(args: &Args, out: &search::Outcome) {
 
 fn resolve(repo: &Repo, raw: &str) -> Result<std::path::PathBuf, Failure> {
     repo.resolve(raw).map_err(|e| Failure::Refused(e.to_string()))
+}
+
+/// The read-only twin of [`resolve`]: it may also land in a configured
+/// reference root. Nothing that writes ever calls this one.
+fn resolve_read(repo: &Repo, raw: &str) -> Result<std::path::PathBuf, Failure> {
+    repo.resolve_read(raw).map_err(|e| Failure::Refused(e.to_string()))
 }
 
 fn cmd_read(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
@@ -982,8 +1090,10 @@ fn cmd_edit(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         .value("--with")
         .ok_or_else(|| Failure::Usage("`edit` needs --with <text>".to_owned()))?;
 
-    let out = edit::replace(&path, &repo.rel(&path), old, new, args.has("--all"))
+    let attrs = eol::Attributes::new(repo);
+    let out = edit::replace(&attrs, &path, &repo.rel(&path), old, new, args.has("--all"))
         .map_err(Failure::Failed)?;
+    out.notice.as_deref().map(|n| eprintln!("ax: {n}"));
     rec.hits = out.replacements;
     rec.files_matched = 1;
     rec.bytes_changed = out.delta();
@@ -1010,7 +1120,8 @@ fn cmd_write(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         .read_to_string(&mut content)
         .map_err(|e| Failure::Failed(format!("cannot read stdin: {e}")))?;
 
-    let out = edit::write(&path, &repo.rel(&path), &content).map_err(Failure::Failed)?;
+    let attrs = eol::Attributes::new(repo);
+    let out = edit::write(&attrs, &path, &repo.rel(&path), &content).map_err(Failure::Failed)?;
     rec.files_matched = 1;
     rec.bytes_changed = out.delta();
 
@@ -1018,26 +1129,59 @@ fn cmd_write(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     Ok(Status::Found)
 }
 
-/// Applies a batch of edits read as JSON from stdin.
+/// Applies a batch of edits, from a file or from stdin.
 ///
 /// Every anchor is resolved against in-memory content before anything is
 /// written, so a batch that would half-apply is rejected whole. This is the
 /// command to reach for instead of writing a script.
-fn cmd_apply(repo: &Repo, rec: &mut Record) -> Outcome {
-    let mut raw = String::new();
-    std::io::stdin()
-        .read_to_string(&mut raw)
-        .map_err(|e| Failure::Failed(format!("cannot read stdin: {e}")))?;
+///
+/// Two input formats, told apart by their first character and nothing else:
+/// a JSON array (`[`) for a programmatic caller, or the **edit script** — the
+/// escape-free heredoc format in `script.rs` — for everything an agent writes
+/// by hand. The script exists because JSON escaping made a caller transform
+/// its own source code before sending it, and a transform done by hand is a
+/// transform that goes wrong.
+fn cmd_apply(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let raw = match args.arg(0) {
+        Some(path) => {
+            let src = resolve_read(repo, path)?;
+            rec.query = Some(repo.rel(&src));
+            std::fs::read_to_string(&src)
+                .map_err(|e| Failure::Failed(format!("cannot read `{path}`: {e}")))?
+        }
+        None => {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| Failure::Failed(format!("cannot read stdin: {e}")))?;
+            buf
+        }
+    };
 
-    let ops: Vec<apply::EditOp> = serde_json::from_str(&raw).map_err(|e| {
-        Failure::Usage(format!(
-            "stdin must be a JSON array of edits, e.g.\n  \
-             [{{\"path\":\"a.md\",\"replace\":\"old\",\"with\":\"new\"}}]\n{e}"
-        ))
-    })?;
+    let ops: Vec<apply::EditOp> = match script::looks_like_script(&raw) {
+        true => script::parse(&raw).map_err(|errs| {
+            Failure::Usage(format!(
+                "the edit script has {} problem(s) - nothing was written:\n  {}",
+                errs.len(),
+                errs.join("\n  ")
+            ))
+        })?,
+        false => serde_json::from_str(&raw).map_err(|e| {
+            Failure::Usage(format!(
+                "input must be a JSON array of edits, or an edit script:\n  \
+                 [{{\"path\":\"a.md\",\"replace\":\"old\",\"with\":\"new\"}}]\n  \
+                 edit a.md / replace <<T ... T / with <<T ... T\n{e}"
+            ))
+        })?,
+    };
 
-    // Scope every path — the edit target and any payload file — before a
+    if ops.is_empty() {
+        return Err(Failure::Usage("the batch contains no edits".to_owned()));
+    }
+
+    // Scope every path - the edit target and any payload file - before a
     // single edit is planned.
+    let attrs = eol::Attributes::new(repo);
     let mut resolved: Vec<apply::Resolved<'_>> = Vec::new();
     for op in &ops {
         let path = resolve(repo, &op.path)?;
@@ -1054,7 +1198,7 @@ fn cmd_apply(repo: &Repo, rec: &mut Record) -> Outcome {
         resolved.push((path, label, op, payload));
     }
 
-    let planned = apply::plan(&resolved).map_err(|errs| {
+    let planned = apply::plan(&attrs, &resolved).map_err(|errs| {
         Failure::Failed(format!(
             "{} of {} edit(s) could not be applied - nothing was written:\n  {}",
             errs.len(),
@@ -1063,23 +1207,496 @@ fn cmd_apply(repo: &Repo, rec: &mut Record) -> Outcome {
         ))
     })?;
 
+    let dry = args.has("--dry-run");
+    dry.then(|| {
+        ops.iter().for_each(|op| println!("  {} : {}", op.path, op.summary()));
+    });
+
     let mut changed = 0usize;
     for p in &planned {
-        let on_disk = std::fs::read_to_string(&p.path).unwrap_or_default();
-        if on_disk == p.content {
+        p.loaded
+            .reflow_notice
+            .as_deref()
+            .map(|n| eprintln!("ax: {n}"));
+        if p.is_noop() {
             continue;
         }
-        edit::write(&p.path, &p.label, &p.content).map_err(Failure::Failed)?;
-        rec.bytes_changed += p.after - p.before;
+        let after = match dry {
+            true => i64::try_from(p.loaded.render(&p.content).len()).unwrap_or(i64::MAX),
+            false => eol::store(&p.path, &p.label, &p.loaded, &p.content)
+                .map_err(Failure::Failed)?,
+        };
+        rec.bytes_changed += after - p.before;
         rec.top_paths.push(p.label.clone());
         changed += 1;
-        println!("{}: {:+} bytes", p.label, p.after - p.before);
+        println!("{}: {:+} bytes", p.label, after - p.before);
     }
 
     rec.hits = ops.len();
     rec.files_matched = changed;
-    println!("{} edit(s) applied across {changed} file(s)", ops.len());
+    let verb = dry.then_some("would apply").unwrap_or("applied");
+    println!("{verb} {} edit(s) across {changed} file(s)", ops.len());
     Ok(Status::Found)
+}
+
+/// `ax wgsl <path RE> --verify [--rev REV]` — prove the extraction was a move,
+/// not an edit.
+///
+/// For every shader constant a revision held as a string literal, this checks
+/// that the same constant now reads `include_str!(…)` and that the file it
+/// names holds **exactly** the bytes the literal did. That is the one claim an
+/// extraction has to make and the one nothing else in the repo can check: the
+/// app's own tests compare each constant against itself, so they pass whether
+/// or not the text survived the move.
+fn verify_wgsl(
+    repo: &Repo,
+    args: &Args,
+    rec: &mut Record,
+    sources: &[(String, String)],
+    min_score: u32,
+) -> Outcome {
+    let rev = args.value("--rev").unwrap_or("HEAD");
+    let mut checked = 0usize;
+    let mut bad: Vec<String> = Vec::new();
+
+    for (rel, current) in sources {
+        let Some(before) = repo::git_show(&repo.root, rev, rel) else {
+            continue;
+        };
+        // `git show` hands back the blob, which is LF in the object store; the
+        // worktree side was loaded LF too. Both halves are in the one form.
+        let was = wgsl::scan(rel, &eol::to_lf(&before), min_score);
+        if was.found.is_empty() {
+            continue;
+        }
+        let now = wgsl::includes(current);
+        let dir = rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+
+        for f in &was.found {
+            checked += 1;
+            let Some(arg) = now.get(&f.name) else {
+                bad.push(format!(
+                    "{rel}: `{}` held shader text at {rev} and is not an include_str! now",
+                    f.name
+                ));
+                continue;
+            };
+            let target = match dir.is_empty() {
+                true => arg.clone(),
+                false => format!("{dir}/{arg}"),
+            };
+            let text = repo
+                .resolve_read(&target)
+                .ok()
+                .and_then(|abs| std::fs::read_to_string(abs).ok());
+            match text {
+                None => bad.push(format!("{rel}: `{}` points at `{target}`, which cannot be read", f.name)),
+                Some(t) if t != f.value => bad.push(format!(
+                    "{rel}: `{}` -> `{target}` differs from the {rev} literal ({} bytes vs {}){}",
+                    f.name,
+                    t.len(),
+                    f.value.len(),
+                    t.contains('\r')
+                        .then_some(" — the file has CR, the literal did not")
+                        .unwrap_or_default()
+                )),
+                Some(_) => (),
+            }
+        }
+    }
+
+    rec.hits = bad.len();
+    rec.files_matched = checked;
+
+    if args.json() {
+        println!(
+            "{}",
+            serde_json::json!({ "checked": checked, "mismatches": bad, "rev": rev })
+        );
+        return Ok(match bad.is_empty() {
+            true => Status::Found,
+            false => Status::Empty,
+        });
+    }
+
+    bad.iter().for_each(|b| println!("{b}"));
+    match bad.is_empty() {
+        true => {
+            println!("{checked} extracted shader(s) are byte-identical to their {rev} literals");
+            Ok(Status::Found)
+        }
+        false => Err(Failure::Failed(format!(
+            "{} of {checked} extracted shader(s) do not match their {rev} literals",
+            bad.len()
+        ))),
+    }
+}
+
+/// `ax eol [<path RE>] [--fix]` - what line endings the repo actually has,
+/// and what it declares it should have.
+///
+/// A repo's line endings are invisible until they break something, and by then
+/// the symptom is somewhere else entirely: an anchor that "does not occur", a
+/// golden that stopped matching, an extracted shader that is no longer the
+/// string it replaced. This makes the state answerable.
+/// `ax shape <path RE> [--vocab] [--limit N] [--json]`
+///
+/// Is this code data wearing Rust, or a genuine algorithm? See `shape.rs` for
+/// what each column means and why the walk parses rather than greps.
+/// Per-subcommand usage. Reached by `ax <cmd> --help`.
+fn command_usage(cmd: &str) -> &'static str {
+    match cmd {
+        "q" | "search" => "ax q <regex> [--path P] [--lang L] [--limit N] [-i] [-F] [--json]
+                             [-C N | -A N | -B N] context lines around each match, as grep.
+                             `-C3` and `-C 3` both work. A context line prints with `-`
+                             separators and a match with `:`, so the two are told apart.
+                             --limit counts MATCHES; context comes with the match it
+                             belongs to. Zero results are recorded for `ax miss`.",
+        "def" => "ax def <symbol> [--json]
+  Where a symbol is defined (semantic index).",
+        "refs" => "ax refs <symbol> [--limit N] [--json]
+  Every real reference, with its kind.",
+        "impact" => "ax impact <symbol>
+  Blast radius: packages touched, and the laws in force there.",
+        "file" | "files" => "ax file <regex|glob> [--limit N] [--json]
+  Find files by path.",
+        "read" => "ax read <path> [--range A:B]
+  Read a file, or a line range of one.",
+        "edit" => "ax edit <path> --replace <old> --with <new> [--all]
+  Anchored single edit.",
+        "apply" => "ax apply [<script>] [--dry-run]
+  Batch edits, escape-free, all-or-nothing.
+  A `from`/`to` span runs from the START of `from` to the START of `to`, so the
+  `to` anchor is NOT consumed -- it stays in the file after the replacement.
+  Include it at the end of your `with` payload if you meant to replace it.",
+        "graph" => "ax graph [<layer|module|app>]
+  Deps, dependents, and the laws in force.",
+        "owns" => "ax owns <path>
+  Which package owns a file, its class, and its rules.",
+        "shape" => "ax shape <path regex> [--vocab] [--rows] [--limit N] [--json]
+                      Is this code data wearing Rust, or an algorithm?
+                      rows    = how many rows the biggest repeated record has (the N in
+                                the Datafication Law's (N-1) x per-variant-code).
+                      frm/row = what share of that record's fields vary in SHAPE rather
+                                than just in value. 0.00 = every field one shape.
+                      READ THOSE TWO TOGETHER. Low frm/row says a table is POSSIBLE;
+                      high rows says it is WORTH IT. frm/row 0.00 at rows=3 saves
+                      nothing; rows=30 at frm/row 0.84 is an algorithm.
+                      lit/ln and reuse say only that content is PRESENT, not that it
+                      is addressable -- do not screen on them alone.
+                      --vocab names the callee vocabulary; --rows breaks frm/row down
+                      per target. Tests are excluded from every count.",
+        "eol" => "ax eol [<path regex>] [--fix]
+  Line endings: what is, and what should be.",
+        "wgsl" => "ax wgsl [<path regex>] [--apply]
+  Inlined shader strings -> .wgsl files.",
+        "friction" => "ax friction <what> --want <what you needed> --verdict tool|repo|unknown",
+        "resolve" => "ax resolve <id> --by <what fixed it>",
+        "miss" => "ax miss [--all]
+  What the repo, and the tool, could not answer.",
+        "stats" => "ax stats
+  What agents look for and change.",
+        "sql" => "ax sql <query>
+  DuckDB over the whole ledger.",
+        _ => "ax help
+  Run `ax help` for the full command list.",
+    }
+}
+
+fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let filter = args.arg(0).unwrap_or(".");
+    rec.query = Some(filter.to_owned());
+
+    // `--limit` governs how many ROWS are printed, not how many files are
+    // scanned: the summary counts and the merged vocabulary are only true if
+    // the whole matched set was walked. Throttling the search here made the
+    // first run of this command report on 22 files and call it the app.
+    const SCAN_CAP: usize = 100_000;
+    let files = search::find_files(repo, filter, SCAN_CAP).map_err(Failure::Usage)?;
+
+    let mut skipped = 0usize;
+    let mut shapes: Vec<shape::Shape> = files
+        .iter()
+        .filter_map(|rel| {
+            (rel.ends_with(".rs")).then_some(())?;
+            let abs = repo.resolve_read(rel).ok()?;
+            let source = std::fs::read_to_string(&abs).ok()?;
+            let parsed = shape::analyse(rel, &source);
+            if parsed.is_none() {
+                skipped += 1;
+            }
+            parsed
+        })
+        .collect();
+
+    // Densest-in-constants first: this command exists to rank candidates, and
+    // the top of the list is where a datafication pass should start.
+    shapes.sort_by(|a, b| {
+        b.literal_density()
+            .partial_cmp(&a.literal_density())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    rec.hits = shapes.len();
+    rec.files_matched = shapes.len();
+
+    if args.json() {
+        let items: Vec<serde_json::Value> = shapes
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "path": s.path,
+                    "code_lines": s.code_lines,
+                    "literals": s.literals,
+                    "floats": s.floats,
+                    "branches": s.branches,
+                    "calls": s.calls,
+                    "distinct_calls": s.distinct_calls(),
+                    "literal_density": s.literal_density(),
+                    "branch_density": s.branch_density(),
+                    "reuse": s.reuse(),
+                    "verdict": s.verdict().label(),
+                })
+            })
+            .collect();
+        let vocab: Vec<serde_json::Value> = shape::merge_vocab(&shapes)
+            .into_iter()
+            .map(|e| serde_json::json!({ "name": e.name, "count": e.count, "local": e.local }))
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "files": items,
+                "skipped_unparseable": skipped,
+                "vocabulary": vocab,
+            })
+        );
+        return Ok(match shapes.is_empty() {
+            true => Status::Empty,
+            false => Status::Found,
+        });
+    }
+
+    if shapes.is_empty() {
+        println!("ax shape: `{filter}` matched no parseable Rust file");
+        return Ok(Status::Empty);
+    }
+
+    let totals = shapes
+        .iter()
+        .fold((0usize, 0usize, 0usize, 0usize), |(l, b, c, t), s| {
+            (
+                l + s.literals,
+                b + s.branches,
+                c + s.code_lines,
+                t + s.test_lines,
+            )
+        });
+
+    if args.has("--rows") {
+        let mut rows: Vec<(&String, &shape::Slot)> = shapes
+            .iter()
+            .flat_map(|s| s.slots.iter())
+            .filter(|(_, sl)| sl.writes > 1)
+            .collect();
+        // Worst first: the target that varies most is the one that decides
+        // whether this file can be a table at all.
+        rows.sort_by(|a, b| {
+            (b.1.forms.len(), b.1.writes)
+                .cmp(&(a.1.forms.len(), a.1.writes))
+                .then_with(|| a.0.cmp(b.0))
+        });
+        println!(
+            "{} recurring target(s); `forms` distinct right-hand-side shapes over `writes`:",
+            rows.len()
+        );
+        println!("{:>6} {:>6}  {}", "forms", "writes", "target");
+        rows.iter().take(args.limit(40)).for_each(|(name, sl)| {
+            println!("{:>6} {:>6}  {}", sl.forms.len(), sl.writes, name);
+        });
+        return Ok(Status::Found);
+    }
+
+    if args.has("--vocab") {
+        let vocab = shape::merge_vocab(&shapes);
+        let sites: usize = vocab.iter().map(|e| e.count).sum();
+        let local = vocab.iter().filter(|e| e.local).count();
+        println!(
+            "vocabulary of {} file(s): {} distinct callee(s) over {} call site(s); \
+             {local} defined in the scanned set",
+            shapes.len(),
+            vocab.len(),
+            sites,
+        );
+        vocab.iter().take(args.limit(60)).for_each(|e| {
+            // `local` is the column that separates a domain verb from an
+            // `Option` combinator. Without it, reading a vocabulary means
+            // classifying every name by hand.
+            let scope = ["", "local"][usize::from(e.local)];
+            println!("  {:6}  {:<6} {}", e.count, scope, e.name);
+        });
+        return Ok(Status::Found);
+    }
+
+    println!(
+        "{:>5} {:>7} {:>7} {:>6} {:>5} {:>7}  {:<9} {}",
+        "lines", "lit/ln", "br/ln", "reuse", "rows", "frm/row", "verdict", "path"
+    );
+    shapes.iter().take(args.limit(40)).for_each(|s| {
+        println!(
+            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>5} {:>7}  {:<9} {}",
+            s.code_lines,
+            s.literal_density(),
+            s.branch_density(),
+            s.reuse(),
+            s.row_count()
+                .map_or_else(|| "-".to_owned(), |n| n.to_string()),
+            s.form_ratio()
+                .map_or_else(|| "  -".to_owned(), |r| format!("{r:.2}")),
+            s.verdict().label(),
+            s.path
+        );
+    });
+
+    let data = shapes
+        .iter()
+        .filter(|s| s.verdict() == shape::Verdict::Data)
+        .count();
+    let algo = shapes
+        .iter()
+        .filter(|s| s.verdict() == shape::Verdict::Algorithm)
+        .count();
+    println!(
+        "\n{} file(s), {} code lines: {} data-shaped, {} algorithm, {} mixed",
+        shapes.len(),
+        totals.2,
+        data,
+        algo,
+        shapes.len() - data - algo
+    );
+    println!(
+        "overall {:.2} literals/line, {:.3} branches/line ({} test line(s) excluded)",
+        totals.0 as f64 / totals.2.max(1) as f64,
+        totals.1 as f64 / totals.2.max(1) as f64,
+        totals.3
+    );
+    if skipped > 0 {
+        println!("{skipped} file(s) skipped: could not be parsed as Rust");
+    }
+    println!(
+        "`--vocab` names the closed vocabulary; `--rows` breaks frm/row down per target."
+    );
+    println!(
+        "rows    = how many rows the biggest repeated record has -- the N in the \
+         Datafication Law's (N-1) x per-variant-code.\n\
+         frm/row = what share of that record's fields vary in SHAPE, not just value. \
+         0.00 means every field always has the same shape, whatever the row count; \
+         1.00 means every row is its own shape.\n\
+         Read them together: low frm/row says a table is POSSIBLE, high rows says it \
+         is WORTH IT. Either alone misleads -- frm/row 0.00 at rows=3 saves nothing, \
+         and a high row count at frm/row 0.84 is an algorithm. lit/ln and reuse say \
+         only that content is PRESENT, not that it is addressable."
+    );
+
+    Ok(Status::Found)
+}
+
+fn cmd_eol(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let filter = args.arg(0).unwrap_or(".");
+    rec.query = Some(filter.to_owned());
+
+    let files = search::find_files(repo, filter, args.limit(100_000)).map_err(Failure::Usage)?;
+    let attrs = eol::Attributes::new(repo);
+    let fix = args.has("--fix");
+
+    let rows: Vec<(String, eol::Shape, eol::Mode, bool)> = files
+        .iter()
+        .filter_map(|rel| {
+            let abs = repo.resolve_read(rel).ok()?;
+            // One loader for the whole tool: this is the same call an edit
+            // makes, so the report cannot drift from what an edit would do.
+            let loaded = eol::load(&attrs, &abs, rel).ok()?;
+            let (shape, mode) = (loaded.shape, loaded.mode);
+            let agrees = match mode {
+                eol::Mode::Raw => true,
+                eol::Mode::Text(want) => matches!(
+                    (shape, want),
+                    (eol::Shape::None, _)
+                        | (eol::Shape::Lf, eol::Eol::Lf)
+                        | (eol::Shape::Crlf, eol::Eol::Crlf)
+                ),
+            };
+            Some((rel.clone(), shape, mode, agrees))
+        })
+        .collect();
+
+    let off: Vec<&(String, eol::Shape, eol::Mode, bool)> =
+        rows.iter().filter(|r| !r.3).collect();
+
+    if args.json() {
+        let items: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|(rel, shape, mode, agrees)| {
+                serde_json::json!({
+                    "path": rel,
+                    "shape": shape.label(),
+                    "write_as": mode.label(),
+                    "agrees": agrees,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({ "files": items, "scanned": rows.len(), "disagreeing": off.len() })
+        );
+        rec.hits = off.len();
+        rec.files_matched = rows.len();
+        return Ok(match rows.is_empty() {
+            true => Status::Empty,
+            false => Status::Found,
+        });
+    }
+
+    let counts = rows.iter().fold((0, 0, 0, 0), |(n, l, c, m), r| match r.1 {
+        eol::Shape::None => (n + 1, l, c, m),
+        eol::Shape::Lf => (n, l + 1, c, m),
+        eol::Shape::Crlf => (n, l, c + 1, m),
+        eol::Shape::Mixed => (n, l, c, m + 1),
+    });
+    println!(
+        "{} text file(s): {} lf, {} crlf, {} mixed, {} with no line ending",
+        rows.len(),
+        counts.1,
+        counts.2,
+        counts.3,
+        counts.0
+    );
+
+    off.iter().take(args.limit(40)).for_each(|(rel, shape, mode, _)| {
+        println!("  {rel}: is {}, should be written {}", shape.label(), mode.label());
+    });
+
+    if fix {
+        let mut fixed = 0usize;
+        for (rel, _, _, _) in &off {
+            let abs = resolve(repo, rel)?;
+            let loaded = eol::load(&attrs, &abs, rel).map_err(Failure::Failed)?;
+            let lf = loaded.lf.clone();
+            eol::store(&abs, rel, &loaded, &lf).map_err(Failure::Failed)?;
+            rec.top_paths.push(rel.clone());
+            fixed += 1;
+        }
+        println!("rewrote {fixed} file(s) to their declared convention");
+        rec.files_matched = fixed;
+    } else {
+        (!off.is_empty()).then(|| println!("re-run with --fix to rewrite them"));
+    }
+
+    rec.hits = off.len();
+    Ok(match rows.is_empty() {
+        true => Status::Empty,
+        false => Status::Found,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,6 +1776,17 @@ fn cmd_owns(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     } else {
         println!("{rel}");
         print!("{}", graph::describe(&nodes, node));
+        // The line-ending rule is one of the rules in force on a file, and it
+        // is the one nothing else will tell you.
+        let attrs = eol::Attributes::new(repo);
+        let shape = std::fs::read_to_string(&path)
+            .map(|t| eol::Shape::of(&t))
+            .unwrap_or(eol::Shape::None);
+        println!(
+            "  line endings   on disk {}, written back as {}",
+            shape.label(),
+            eol::mode_for(&attrs, &rel, shape).label()
+        );
     }
     Ok(Status::Found)
 }
@@ -1559,264 +2187,6 @@ fn duck_dir(path: &std::path::Path) -> String {
 /// build, and a 12 MB CLI one `scoop install duckdb` away is the smaller trade.
 /// A machine without it gets the queries printed, exactly as before, so nothing
 /// this command could do yesterday stops working.
-/// `ax shape <path RE> [--vocab] [--limit N] [--json]`
-///
-/// Is this code data wearing Rust, or a genuine algorithm? See `shape.rs` for
-/// what each column means and why the walk parses rather than greps.
-/// Per-subcommand usage. Reached by `ax <cmd> --help`.
-fn command_usage(cmd: &str) -> &'static str {
-    match cmd {
-        "q" | "search" => "ax q <regex> [--path P] [--lang L] [--limit N] [-i] [-F] [--json]
-                             Search file contents. Zero results are recorded for `ax miss`.",
-        "def" => "ax def <symbol> [--json]
-  Where a symbol is defined (semantic index).",
-        "refs" => "ax refs <symbol> [--limit N] [--json]
-  Every real reference, with its kind.",
-        "impact" => "ax impact <symbol>
-  Blast radius: packages touched, and the laws in force there.",
-        "file" | "files" => "ax file <regex|glob> [--limit N] [--json]
-  Find files by path.",
-        "read" => "ax read <path> [--range A:B]
-  Read a file, or a line range of one.",
-        "edit" => "ax edit <path> --replace <old> --with <new> [--all]
-  Anchored single edit.",
-        "apply" => "ax apply [<script>] [--dry-run]
-  Batch edits, escape-free, all-or-nothing.
-  A `from`/`to` span runs from the START of `from` to the START of `to`, so the
-  `to` anchor is NOT consumed -- it stays in the file after the replacement.
-  Include it at the end of your `with` payload if you meant to replace it.",
-        "graph" => "ax graph [<layer|module|app>]
-  Deps, dependents, and the laws in force.",
-        "owns" => "ax owns <path>
-  Which package owns a file, its class, and its rules.",
-        "shape" => "ax shape <path regex> [--vocab] [--rows] [--limit N] [--json]
-                      Is this code data wearing Rust, or an algorithm?
-                      rows    = how many rows the biggest repeated record has (the N in
-                                the Datafication Law's (N-1) x per-variant-code).
-                      frm/row = what share of that record's fields vary in SHAPE rather
-                                than just in value. 0.00 = every field one shape.
-                      READ THOSE TWO TOGETHER. Low frm/row says a table is POSSIBLE;
-                      high rows says it is WORTH IT. frm/row 0.00 at rows=3 saves
-                      nothing; rows=30 at frm/row 0.84 is an algorithm.
-                      lit/ln and reuse say only that content is PRESENT, not that it
-                      is addressable -- do not screen on them alone.
-                      --vocab names the callee vocabulary; --rows breaks frm/row down
-                      per target. Tests are excluded from every count.",
-        "eol" => "ax eol [<path regex>] [--fix]
-  Line endings: what is, and what should be.",
-        "wgsl" => "ax wgsl [<path regex>] [--apply]
-  Inlined shader strings -> .wgsl files.",
-        "friction" => "ax friction <what> --want <what you needed> --verdict tool|repo|unknown",
-        "resolve" => "ax resolve <id> --by <what fixed it>",
-        "miss" => "ax miss [--all]
-  What the repo, and the tool, could not answer.",
-        "stats" => "ax stats
-  What agents look for and change.",
-        "sql" => "ax sql <query>
-  DuckDB over the whole ledger.",
-        _ => "ax help
-  Run `ax help` for the full command list.",
-    }
-}
-
-fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
-    let filter = args.arg(0).unwrap_or(".");
-    rec.query = Some(filter.to_owned());
-
-    // `--limit` governs how many ROWS are printed, not how many files are
-    // scanned: the summary counts and the merged vocabulary are only true if
-    // the whole matched set was walked. Throttling the search here made the
-    // first run of this command report on 22 files and call it the app.
-    const SCAN_CAP: usize = 100_000;
-    let files = search::find_files(repo, filter, SCAN_CAP).map_err(Failure::Usage)?;
-
-    let mut skipped = 0usize;
-    let mut shapes: Vec<shape::Shape> = files
-        .iter()
-        .filter_map(|rel| {
-            (rel.ends_with(".rs")).then_some(())?;
-            let abs = repo.resolve_read(rel).ok()?;
-            let source = std::fs::read_to_string(&abs).ok()?;
-            let parsed = shape::analyse(rel, &source);
-            if parsed.is_none() {
-                skipped += 1;
-            }
-            parsed
-        })
-        .collect();
-
-    // Densest-in-constants first: this command exists to rank candidates, and
-    // the top of the list is where a datafication pass should start.
-    shapes.sort_by(|a, b| {
-        b.literal_density()
-            .partial_cmp(&a.literal_density())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    rec.hits = shapes.len();
-    rec.files_matched = shapes.len();
-
-    if args.json() {
-        let items: Vec<serde_json::Value> = shapes
-            .iter()
-            .map(|s| {
-                serde_json::json!({
-                    "path": s.path,
-                    "code_lines": s.code_lines,
-                    "literals": s.literals,
-                    "floats": s.floats,
-                    "branches": s.branches,
-                    "calls": s.calls,
-                    "distinct_calls": s.distinct_calls(),
-                    "literal_density": s.literal_density(),
-                    "branch_density": s.branch_density(),
-                    "reuse": s.reuse(),
-                    "verdict": s.verdict().label(),
-                })
-            })
-            .collect();
-        let vocab: Vec<serde_json::Value> = shape::merge_vocab(&shapes)
-            .into_iter()
-            .map(|e| serde_json::json!({ "name": e.name, "count": e.count, "local": e.local }))
-            .collect();
-        println!(
-            "{}",
-            serde_json::json!({
-                "files": items,
-                "skipped_unparseable": skipped,
-                "vocabulary": vocab,
-            })
-        );
-        return Ok(match shapes.is_empty() {
-            true => Status::Empty,
-            false => Status::Found,
-        });
-    }
-
-    if shapes.is_empty() {
-        println!("ax shape: `{filter}` matched no parseable Rust file");
-        return Ok(Status::Empty);
-    }
-
-    let totals = shapes
-        .iter()
-        .fold((0usize, 0usize, 0usize, 0usize), |(l, b, c, t), s| {
-            (
-                l + s.literals,
-                b + s.branches,
-                c + s.code_lines,
-                t + s.test_lines,
-            )
-        });
-
-    if args.has("--rows") {
-        let mut rows: Vec<(&String, &shape::Slot)> = shapes
-            .iter()
-            .flat_map(|s| s.slots.iter())
-            .filter(|(_, sl)| sl.writes > 1)
-            .collect();
-        // Worst first: the target that varies most is the one that decides
-        // whether this file can be a table at all.
-        rows.sort_by(|a, b| {
-            (b.1.forms.len(), b.1.writes)
-                .cmp(&(a.1.forms.len(), a.1.writes))
-                .then_with(|| a.0.cmp(b.0))
-        });
-        println!(
-            "{} recurring target(s); `forms` distinct right-hand-side shapes over `writes`:",
-            rows.len()
-        );
-        println!("{:>6} {:>6}  {}", "forms", "writes", "target");
-        rows.iter().take(args.limit(40)).for_each(|(name, sl)| {
-            println!("{:>6} {:>6}  {}", sl.forms.len(), sl.writes, name);
-        });
-        return Ok(Status::Found);
-    }
-
-    if args.has("--vocab") {
-        let vocab = shape::merge_vocab(&shapes);
-        let sites: usize = vocab.iter().map(|e| e.count).sum();
-        let local = vocab.iter().filter(|e| e.local).count();
-        println!(
-            "vocabulary of {} file(s): {} distinct callee(s) over {} call site(s); \
-             {local} defined in the scanned set",
-            shapes.len(),
-            vocab.len(),
-            sites,
-        );
-        vocab.iter().take(args.limit(60)).for_each(|e| {
-            // `local` is the column that separates a domain verb from an
-            // `Option` combinator. Without it, reading a vocabulary means
-            // classifying every name by hand.
-            let scope = ["", "local"][usize::from(e.local)];
-            println!("  {:6}  {:<6} {}", e.count, scope, e.name);
-        });
-        return Ok(Status::Found);
-    }
-
-    println!(
-        "{:>5} {:>7} {:>7} {:>6} {:>5} {:>7}  {:<9} {}",
-        "lines", "lit/ln", "br/ln", "reuse", "rows", "frm/row", "verdict", "path"
-    );
-    shapes.iter().take(args.limit(40)).for_each(|s| {
-        println!(
-            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>5} {:>7}  {:<9} {}",
-            s.code_lines,
-            s.literal_density(),
-            s.branch_density(),
-            s.reuse(),
-            s.row_count()
-                .map_or_else(|| "-".to_owned(), |n| n.to_string()),
-            s.form_ratio()
-                .map_or_else(|| "  -".to_owned(), |r| format!("{r:.2}")),
-            s.verdict().label(),
-            s.path
-        );
-    });
-
-    let data = shapes
-        .iter()
-        .filter(|s| s.verdict() == shape::Verdict::Data)
-        .count();
-    let algo = shapes
-        .iter()
-        .filter(|s| s.verdict() == shape::Verdict::Algorithm)
-        .count();
-    println!(
-        "\n{} file(s), {} code lines: {} data-shaped, {} algorithm, {} mixed",
-        shapes.len(),
-        totals.2,
-        data,
-        algo,
-        shapes.len() - data - algo
-    );
-    println!(
-        "overall {:.2} literals/line, {:.3} branches/line ({} test line(s) excluded)",
-        totals.0 as f64 / totals.2.max(1) as f64,
-        totals.1 as f64 / totals.2.max(1) as f64,
-        totals.3
-    );
-    if skipped > 0 {
-        println!("{skipped} file(s) skipped: could not be parsed as Rust");
-    }
-    println!(
-        "`--vocab` names the closed vocabulary; `--rows` breaks frm/row down per target."
-    );
-    println!(
-        "rows    = how many rows the biggest repeated record has -- the N in the \
-         Datafication Law's (N-1) x per-variant-code.\n\
-         frm/row = what share of that record's fields vary in SHAPE, not just value. \
-         0.00 means every field always has the same shape, whatever the row count; \
-         1.00 means every row is its own shape.\n\
-         Read them together: low frm/row says a table is POSSIBLE, high rows says it \
-         is WORTH IT. Either alone misleads -- frm/row 0.00 at rows=3 saves nothing, \
-         and a high row count at frm/row 0.84 is an algorithm. lit/ln and reuse say \
-         only that content is PRESENT, not that it is addressable."
-    );
-
-    Ok(Status::Found)
-}
-
 fn cmd_sql(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     // The parquet half may hold nothing: `ax compact` may never have run, and a
     // ledger of raw NDJSON alone is the normal state early on. `read_parquet`
@@ -1903,6 +2273,133 @@ fn print_sql_starters(halves: &str) {
 
 // ---------------------------------------------------------------------------
 
+/// `ax wgsl [<path-regex>] [--apply]` — lift inlined shader text into `.wgsl`.
+///
+/// A shader written as a Rust string literal is invisible to every tool that
+/// understands shaders, and invisible to `ax --lang wgsl`. This finds those
+/// literals, and with `--apply` moves each one into a sibling `.wgsl` file and
+/// points the constant at it with `include_str!` — all-or-nothing, in the same
+/// shape `ax apply` guarantees. See `wgsl.rs` for why `include_str!` and not
+/// `wgpu::include_wgsl!`, and for the CRLF trap the extraction is defined
+/// around.
+fn cmd_wgsl(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
+    let filter = args.arg(0).unwrap_or(r"\.rs$");
+    rec.query = Some(filter.to_owned());
+
+    let min_score = args
+        .value("--min-score")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(wgsl::DEFAULT_MIN_SCORE);
+
+    let files = search::find_files(repo, filter, 100_000).map_err(Failure::Usage)?;
+    let attrs = eol::Attributes::new(repo);
+    // Sources are loaded LF, so the `syn` spans, the extracted bodies and the
+    // rewritten files are all in the one form the whole tool works in.
+    let sources: Vec<(String, String)> = files
+        .into_iter()
+        .filter(|p| p.ends_with(".rs"))
+        .filter_map(|p| {
+            let abs = repo.resolve_read(&p).ok()?;
+            let loaded = eol::load(&attrs, &abs, &p).ok()?;
+            Some((p, loaded.lf))
+        })
+        .collect();
+
+    if args.has("--verify") {
+        return verify_wgsl(repo, args, rec, &sources, min_score);
+    }
+
+    let plan = wgsl::plan(repo, &attrs, &sources, min_score).map_err(Failure::Failed)?;
+    rec.hits = plan.extractions.len();
+    rec.files_matched = plan.rewrites.len();
+    rec.top_paths = plan.rewrites.keys().take(10).cloned().collect();
+
+    if plan.is_empty() {
+        (!args.json()).then(|| println!("ax: no inlined shader text under `{filter}`"));
+        args.json().then(|| {
+            println!("{}", serde_json::json!({ "extractions": [], "count": 0, "applied": false }));
+        });
+        return Ok(Status::Empty);
+    }
+
+    // The guard the whole command turns on: a body that still carries a CR
+    // would compile to a different string than the literal it replaced, and
+    // nothing downstream would notice. Refuse rather than write it.
+    (!plan.is_lf_only())
+        .then(|| {
+            Err::<(), Failure>(Failure::Failed(
+                "an extracted body still contains CR — refusing to write it".to_owned(),
+            ))
+        })
+        .transpose()?;
+
+    plan.warnings
+        .iter()
+        .for_each(|w| eprintln!("ax wgsl: {w}"));
+
+    let applied = args.has("--apply");
+    applied
+        .then(|| wgsl::apply(repo, &attrs, &plan))
+        .transpose()
+        .map_err(Failure::Failed)?;
+    rec.bytes_changed = i64::try_from(plan.bytes()).unwrap_or(i64::MAX);
+
+    if args.json() {
+        let rows: Vec<serde_json::Value> = plan
+            .extractions
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "rs": e.rs_path,
+                    "line": e.line,
+                    "name": e.name,
+                    "wgsl": e.wgsl_path,
+                    "bytes": e.bytes,
+                    "lines": e.lines,
+                    "score": e.score,
+                    "module": e.is_module,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "extractions": rows,
+                "count": plan.extractions.len(),
+                "files": plan.rewrites.len(),
+                "bytes": plan.bytes(),
+                "warnings": plan.warnings,
+                "applied": applied,
+            })
+        );
+        return Ok(Status::Found);
+    }
+
+    let width = plan
+        .extractions
+        .iter()
+        .map(|e| e.name.len())
+        .max()
+        .unwrap_or(0);
+    plan.extractions.iter().for_each(|e| {
+        let kind = e.is_module.then_some(" [module]").unwrap_or("");
+        println!(
+            "{}:{}  {:width$}  {:>5} lines  {:>7} B  ->  {}{kind}",
+            e.rs_path, e.line, e.name, e.lines, e.bytes, e.include_arg,
+        );
+    });
+
+    let verb = applied.then_some("extracted").unwrap_or("would extract");
+    println!(
+        "\n{verb} {} shader constant(s) from {} file(s), {} bytes of WGSL",
+        plan.extractions.len(),
+        plan.rewrites.len(),
+        plan.bytes(),
+    );
+    (!applied).then(|| println!("re-run with --apply to write them"));
+    Ok(Status::Found)
+}
+
 fn print_usage() {
     eprintln!(
         r"ax - the Axiom repo's query-and-change gateway
@@ -1927,15 +2424,51 @@ fn print_usage() {
     ax read <path> [--range A:B]
     ax edit <path> --replace <old> --with <new> [--all]
     ax write <path>                   content on stdin
-    ax apply                          batch edits as JSON on stdin; all-or-nothing.
-                                      Reach for this instead of writing a script.
+    ax apply [<file>] [--dry-run]     batch edits, from a file or stdin;
+                                      all-or-nothing. Reach for this instead of
+                                      writing a script. Two input formats, told
+                                      apart by the first character:
+
+                                      EDIT SCRIPT - nothing is ever escaped:
+                                        edit path/to/file.rs
+                                        replace <<T
+                                        old text, verbatim
+                                        T
+                                        with <<T
+                                        new text, verbatim
+                                        T
+                                        all
+                                      directives: replace/with, from/to/with,
+                                      insert_before|insert_after + text,
+                                      append, content. Payload three ways:
+                                      `name <<T ... T` (lines, newline-ended),
+                                      `name: text` (one line, chomped),
+                                      `name < path` (from a repo file).
+                                      `<<-T` chomps a fenced payload.
+
+                                      JSON (a `[`) - for a programmatic caller:
                                       [{{path, replace, with, all}}]
                                       [{{path, from, to, with}}]  span replace
                                       [{{path, insert_before|insert_after, text}}]
                                       [{{path, append}}] [{{path, content}}]
                                       any op: text_file <path> supplies the
-                                      payload from a file (no escaping needed)
+                                      payload from a file
     ax record <path> [--bytes N] [--tool T]   log a change made outside ax
+    ax wgsl [<path RE>] [--apply] [--min-score N] [--json]
+                                      shader text inlined as a Rust string ->
+                                      a sibling .wgsl file + include_str!.
+                                      Dry-run by default; --apply is
+                                      all-or-nothing. Flags whole modules
+                                      (@vertex/@fragment/@compute) as [module].
+    ax wgsl <path RE> --verify [--rev REV]
+                                      prove an extraction preserved every byte:
+                                      each .wgsl is compared against the string
+                                      literal the same constant held at REV
+                                      (default HEAD).
+    ax eol [<path RE>] [--fix] [--json]
+                                      what line endings the repo has, and what
+                                      .gitattributes says it should have.
+                                      --fix rewrites the ones that disagree.
 
   Architecture
     ax graph [<layer|module|app>]     deps, dependents and the laws in force

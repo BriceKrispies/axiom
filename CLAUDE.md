@@ -43,7 +43,8 @@ ripgrep's ~232 ms on this repo, because it links ripgrep's `ignore` walker and
 `grep-searcher` as libraries and skips `target/`, `node_modules/`, `.git/`.
 
 ```sh
-scripts/ax q <regex> [--path RE] [--lang rs|ts|...] [--limit N] [-i] [-F] [--json]
+scripts/ax q <regex> [--path P] [--lang rs|ts|...] [--limit N] [-i] [-F] [--json]
+scripts/ax q <regex> -C 3          # context lines, as grep (-A/-B/-C, `-C3` too)
 scripts/ax def <symbol>        # where a symbol is defined (semantic index)
 scripts/ax refs <symbol>       # every real reference, with its kind
 scripts/ax impact <symbol>     # blast radius: which packages, under which laws
@@ -51,7 +52,9 @@ scripts/ax index               # rebuild the semantic index
 scripts/ax file <regex>        # find files by path
 scripts/ax read <path> [--range A:B]
 scripts/ax edit <path> --replace <old> --with <new> [--all]
-scripts/ax apply               # batch edits as JSON on stdin — all-or-nothing
+scripts/ax apply [<file>]      # batch edits, escape-free — all-or-nothing
+scripts/ax wgsl [<path RE>] --apply     # inlined shader strings -> .wgsl files
+scripts/ax eol [<path RE>] [--fix]      # line endings: what is, what should be
 scripts/ax graph [<layer|module|app>]   # deps, dependents, laws in force
 scripts/ax owns <path>         # which package owns a file, and its rules
 scripts/ax friction <what>     # log that ax itself fell short
@@ -72,6 +75,32 @@ Use `scripts/ax` (or `scripts/ax.ps1`); it execs the prebuilt release binary and
 builds it once if missing. `target/release/ax` directly is fastest of all.
 Exit codes: `0` found, `1` nothing found (grep convention), `2` usage,
 `3` out-of-repo path refused, `4` failed.
+
+### One path-pattern language
+
+Every command that takes a path pattern — `q --path`, `file`, `cite`, `wgsl`,
+`eol` — reads it the same way: **as a regex first, and as a glob (`*`, `**`,
+`?`) if the regex reading matches no file**. A bare word is a regex substring,
+so `ax cite foo` selects what `ax file foo` selects.
+
+When the glob reading is the one that fired, `ax` says so, and a pattern that
+matches nothing either way says *that* rather than returning a bare zero:
+
+```console
+$ scripts/ax file 'apps/**/wgsl/*.wgsl'
+ax file: `apps/**/wgsl/*.wgsl` matched no path as a regex; read as a glob
+$ scripts/ax file 'no/such/thing'
+ax file: `no/such/thing` matched nothing, as a regex or as a glob
+```
+
+This matters more than a convenience. `cite` used to decide glob-versus-regex
+by asking *"does the pattern contain a `*`"*, so any regex containing one — most
+regexes — had its `.`, `[` and `$` escaped and came back with **zero results and
+no error**. A zero that is a lie is the worst thing this tool can do: it has the
+shape of a true answer, and `ax miss` files it as *"a question the repo could not
+answer"* when the repo answered fine and the tool mis-read the question. For the
+same reason, a zero-result `q --path` now distinguishes "the path pattern
+selected no file" from "the content is not there".
 
 ### `ax owns` — ask before you write
 
@@ -97,26 +126,96 @@ from one definition of the graph.
 
 ### `ax apply` — reach for this instead of writing a script
 
-Multi-line, multi-file changes go through `ax apply`, which reads a JSON array
-of edits on stdin. It resolves every anchor against in-memory content *before
-writing a single byte*, so a batch that would half-apply is rejected whole — a
-guarantee no ad-hoc script gives you. It also normalises incoming text to each
-file's existing line endings, so LF text cannot silently corrupt a CRLF file.
+Multi-line, multi-file changes go through `ax apply`. It resolves every anchor
+against in-memory content *before writing a single byte*, so a batch that would
+half-apply is rejected whole — a guarantee no ad-hoc script gives you.
 
-```sh
-scripts/ax apply <<'JSON'
-[
-  {"path": "a.rs", "replace": "old", "with": "new", "all": false},
-  {"path": "b.md", "from": "## Section", "to": "## Next", "with": "..."},
-  {"path": "c.rs", "insert_before": "fn main", "text": "..."},
-  {"path": ".gitignore", "append": "build/\n"},
-  {"path": "d.md", "text_file": ".axiom-atlas/staging/payload.md"}
-]
-JSON
+**Write the batch as an edit script, in a file, and hand `ax apply` the path.**
+Nothing in an edit script is ever escaped: payloads sit between heredoc fences
+and are taken verbatim, so you paste the code you mean rather than transforming
+it into `\n` and `\"` first. That transform was the single biggest source of
+friction in using this tool, and it is gone.
+
+```text
+# .axiom-atlas/staging/change.ax
+edit crates/axiom-kernel/src/lib.rs
+replace <<RS
+let s = "old \ text";
+RS
+with <<RS
+let s = r#"new \ text"#;
+RS
+
+edit .gitignore
+append <<TXT
+build/
+TXT
 ```
 
-When a payload is too large or too quote-heavy to survive the shell, stage it as
-a file and reference it with `text_file` rather than fighting the quoting.
+```sh
+scripts/ax apply .axiom-atlas/staging/change.ax --dry-run   # see the plan
+scripts/ax apply .axiom-atlas/staging/change.ax             # write it
+```
+
+Directives: `replace`/`with`, `from`/`to`/`with`, `insert_before` or
+`insert_after` + `text`, `append`, `content`, `at <line>`/`with`, and a bare
+`all` line. Each takes
+its payload three ways — `name <<TAG … TAG` (whole lines, newline-terminated),
+`name: text` (one line, no trailing newline — right for a line fragment or an
+anchor at end of file), or `name < path` (from a repo file, for something
+enormous). `<<-TAG` chomps a fenced payload.
+
+A JSON array on stdin still works and is still the right shape for a
+programmatic caller; the format is chosen by the first character, so nothing
+that worked before has changed.
+
+**Anchors are the default; `at` is for machine-generated batches.** An anchor
+survives the file moving underneath it, which a line number does not — so reach
+for `at <line>` (or `at <first>:<last>`, 1-based and inclusive) only when the
+batch came from compiler or linter output that already carries exact lines and
+no anchor:
+
+```text
+edit crates/axiom-kernel/src/lib.rs
+at 412:414
+with <<RS
+    let s = r#"new text"#;
+RS
+```
+
+**Order `at` edits from the last line to the first.** Edits apply in sequence, so
+one that changes a file's line count shifts everything below it; working bottom-up
+keeps every later line number valid against the file you read. A batch that
+violates this is refused with that reason rather than silently applied to the
+wrong line.
+
+Two matching rules worth knowing, because both are silent when you get them
+wrong. A `<<TAG` payload is **whole lines**, so it only matches at a line
+boundary — without that, an eight-space anchor matches inside an identical
+twelve-space line and the tool reports "occurs 2 times" for a line you can only
+find once. And a `from`/`to` span runs to the **start** of `to`, so the `to`
+anchor is not consumed; include it at the end of your `with` payload if you meant
+to replace it.
+
+### Line endings are `ax`'s problem, not yours
+
+`ax` is **LF-internal**: every file is read into LF, every anchor and payload
+you write is matched as LF, and the file is rendered back to its own convention
+on the way out. So a multi-line anchor typed with `\n` matches a CRLF file, and
+that file is still CRLF afterwards.
+
+What decides the convention, in order: `.gitattributes` (`binary` means the
+bytes are never reflowed — that is what protects the golden corpora; `eol=lf`
+pins a path outright), then the file's existing content by a real count, then
+the worktree default. `ax owns <path>` prints the answer for one file and
+`ax eol` reports it across the repo — including files whose endings are *mixed*,
+which nothing could see before.
+
+This matters more than it sounds. Rust's lexer folds a CRLF inside a string
+literal to a single LF, and `include_str!` folds nothing — so extracting a
+shader string into a `.wgsl` file on a CRLF checkout silently changes what the
+compiler sees, with nothing failing. `ax wgsl` refuses to run unless the target
+resolves to LF.
 
 ### The two backlogs
 

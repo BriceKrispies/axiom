@@ -25,6 +25,11 @@ pub struct Hit {
     pub path: String,
     pub line: u64,
     pub text: String,
+    /// False for a surrounding line pulled in by `--context`, true for a line
+    /// that actually matched. Printed as grep does it — `path:line:` for a
+    /// match, `path-line-` for context — so the two are distinguishable at a
+    /// glance and by a downstream regex.
+    pub is_match: bool,
 }
 
 #[derive(Debug)]
@@ -35,6 +40,14 @@ pub struct Query {
     pub limit: usize,
     pub case_insensitive: bool,
     pub fixed: bool,
+    /// Lines of context to show before and after each match.
+    ///
+    /// Without these, reading anything that spans more than one line means a
+    /// search followed by an `ax read --range` per hit, with the caller doing
+    /// the arithmetic — which is precisely when an agent gives up and reaches
+    /// for `grep -C`, and the ledger stops seeing the query.
+    pub before: usize,
+    pub after: usize,
 }
 
 #[derive(Debug, Default)]
@@ -110,6 +123,8 @@ pub fn run(repo: &Repo, q: &Query) -> Result<Outcome, String> {
         let mut searcher = SearcherBuilder::new()
             .binary_detection(BinaryDetection::quit(0))
             .line_number(true)
+            .before_context(q.before)
+            .after_context(q.after)
             .build();
 
         Box::new(move |entry| {
@@ -140,19 +155,15 @@ pub fn run(repo: &Repo, q: &Query) -> Result<Outcome, String> {
                 return WalkState::Quit;
             }
 
-            let mut local: Vec<Hit> = Vec::new();
-            let sink = sinks::UTF8(|lnum, line| {
-                local.push(Hit {
-                    path: rel.clone(),
-                    line: lnum,
-                    text: line.trim_end().to_owned(),
-                });
-                Ok(local.len() < CEILING)
-            });
+            let mut collector = Collector { rel: &rel, out: Vec::new(), matches: 0 };
 
-            if searcher.search_path(&matcher, path, sink).is_ok() && !local.is_empty() {
+            let searched = searcher.search_path(&matcher, path, &mut collector).is_ok();
+            let Collector { out: local, matches, .. } = collector;
+            if searched && matches > 0 {
                 files_ref.fetch_add(1, Ordering::Relaxed);
-                total_ref.fetch_add(local.len(), Ordering::Relaxed);
+                // Counts MATCHES, not lines: context is there to be read, not
+                // to fill up `--limit` or inflate the total.
+                total_ref.fetch_add(matches, Ordering::Relaxed);
                 if let Ok(mut guard) = hits_ref.lock() {
                     guard.extend(local);
                 }
@@ -164,9 +175,23 @@ pub fn run(repo: &Repo, q: &Query) -> Result<Outcome, String> {
     let mut hits = hits.into_inner().unwrap_or_default();
     hits.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.line.cmp(&b.line)));
 
-    let total = hits.len();
+    // `--limit` bounds matches; the context around a kept match comes with it.
+    let total = hits.iter().filter(|h| h.is_match).count();
     let truncated = total > q.limit;
-    hits.truncate(q.limit);
+    let mut kept = 0usize;
+    hits.retain(|h| {
+        kept += usize::from(h.is_match);
+        kept <= q.limit
+    });
+    // `retain` keeps context lines that sit after the last kept match, which is
+    // right for that match's own trailing context and wrong for the *leading*
+    // context of the first dropped match — the two are indistinguishable in the
+    // stream, so bound it by how much trailing context was asked for.
+    let end = hits
+        .iter()
+        .rposition(|h| h.is_match)
+        .map_or(0, |i| (i + 1 + q.after).min(hits.len()));
+    hits.truncate(end);
 
     Ok(Outcome {
         hits,
@@ -176,9 +201,75 @@ pub fn run(repo: &Repo, q: &Query) -> Result<Outcome, String> {
     })
 }
 
+/// Gathers matched and context lines from one file.
+///
+/// `sinks::UTF8` only sees matches, so context needs a real `Sink`. The two
+/// callbacks are the whole difference: `matched` for a line the pattern hit,
+/// `context` for one pulled in around it.
+struct Collector<'a> {
+    rel: &'a str,
+    out: Vec<Hit>,
+    matches: usize,
+}
+
+impl Collector<'_> {
+    fn push(&mut self, line: u64, bytes: &[u8], is_match: bool) -> bool {
+        self.matches += usize::from(is_match);
+        self.out.push(Hit {
+            path: self.rel.to_owned(),
+            line,
+            text: String::from_utf8_lossy(bytes).trim_end().to_owned(),
+            is_match,
+        });
+        self.out.len() < CEILING
+    }
+}
+
+impl grep_searcher::Sink for Collector<'_> {
+    type Error = std::io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        m: &grep_searcher::SinkMatch<'_>,
+    ) -> Result<bool, Self::Error> {
+        Ok(self.push(m.line_number().unwrap_or(0), m.bytes(), true))
+    }
+
+    fn context(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        c: &grep_searcher::SinkContext<'_>,
+    ) -> Result<bool, Self::Error> {
+        Ok(self.push(c.line_number().unwrap_or(0), c.bytes(), false))
+    }
+}
+
 /// Finds files whose repo-relative path matches `needle` (a regex).
 pub fn find_files(repo: &Repo, needle: &str, limit: usize) -> Result<Vec<String>, String> {
-    let re = regex::Regex::new(needle).map_err(|e| format!("bad pattern `{needle}`: {e}"))?;
+    find_files_kinded(repo, needle, limit).map(|(files, _, _)| files)
+}
+
+/// [`find_files`], plus which reading of the pattern selected them and the
+/// pattern itself — for callers that want to report a glob fallback or an
+/// honest zero. See [`crate::pattern`].
+pub fn find_files_kinded(
+    repo: &Repo,
+    needle: &str,
+    limit: usize,
+) -> Result<(Vec<String>, crate::pattern::Kind, crate::pattern::PathPattern), String> {
+    let selector = crate::pattern::PathPattern::parse(needle)?;
+    let (mut out, kind) = selector.select(all_files(repo));
+    out.truncate(limit);
+    Ok((out, kind, selector))
+}
+
+/// Every file in the checkout, repo-relative and sorted.
+///
+/// Selection is [`crate::pattern`]'s job, not the walker's: the walker's
+/// business is which files exist, and holding one grammar in one place is what
+/// stops `cite` and `file` disagreeing about what a pattern means again.
+pub fn all_files(repo: &Repo) -> Vec<String> {
     let found: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let found_ref = &found;
 
@@ -190,15 +281,11 @@ pub fn find_files(repo: &Repo, needle: &str, limit: usize) -> Result<Vec<String>
         .filter_entry(|e| !ALWAYS_SKIP.contains(&e.file_name().to_string_lossy().as_ref()))
         .build_parallel()
         .run(|| {
-            let re = re.clone();
             Box::new(move |entry| {
                 let Ok(entry) = entry else { return WalkState::Continue };
                 if entry.file_type().is_some_and(|t| t.is_file()) {
-                    let rel = repo.rel(entry.path());
-                    if re.is_match(&rel) {
-                        if let Ok(mut g) = found_ref.lock() {
-                            g.push(rel);
-                        }
+                    if let Ok(mut g) = found_ref.lock() {
+                        g.push(repo.rel(entry.path()));
                     }
                 }
                 WalkState::Continue
@@ -207,6 +294,5 @@ pub fn find_files(repo: &Repo, needle: &str, limit: usize) -> Result<Vec<String>
 
     let mut out = found.into_inner().unwrap_or_default();
     out.sort();
-    out.truncate(limit);
-    Ok(out)
+    out
 }

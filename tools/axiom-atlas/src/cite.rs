@@ -34,7 +34,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use ignore::WalkBuilder;
 
@@ -283,8 +282,13 @@ pub enum CiteError {
 }
 
 pub fn run(repo: &Repo, req: &Request) -> Result<Report, CiteError> {
-    let re = path_matcher(&req.pattern).map_err(CiteError::Usage)?;
-    let files = walk(repo, &re);
+    // One pattern language for the whole tool. `cite` used to decide glob vs
+    // regex by looking for a `*`, which silently mangled every regex that had
+    // one into a glob matching nothing. See `crate::pattern`.
+    let selector = crate::pattern::PathPattern::parse(&req.pattern).map_err(CiteError::Usage)?;
+    let (files, kind) = selector.select(walk_all(repo));
+    selector.note(kind).map(|n| eprintln!("ax cite: {n}"));
+    files.is_empty().then(|| eprintln!("ax cite: {}", selector.empty_note()));
 
     let explicit_root = req
         .source_root
@@ -948,7 +952,7 @@ impl<'a> SourceIndex<'a> {
         if !self.text.contains_key(&key) {
             let loaded = match rev {
                 None => read_text(&self.repo.root.join(path)).ok().map(|t| SourceText::new(&t)),
-                Some(r) => git_show(&self.repo.root, r, path).map(|t| SourceText::new(&t)),
+                Some(r) => crate::repo::git_show(&self.repo.root, r, path).map(|t| SourceText::new(&t)),
             };
             self.text.insert(key.clone(), loaded);
         }
@@ -999,17 +1003,6 @@ pub fn prefer_candidate(
         };
     }
     (cands.first().cloned().unwrap_or_default(), true)
-}
-
-fn git_show(root: &Path, rev: &str, path: &str) -> Option<String> {
-    let out = Command::new("git")
-        .current_dir(root)
-        .args(["show", &format!("{rev}:{path}")])
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,48 +1149,10 @@ fn find_moved(
 // Walking and summarising
 // ---------------------------------------------------------------------------
 
-/// Turns a glob into an anchored regex; anything without a `*` is used as the
-/// unanchored regex `ax file` already accepts.
-pub fn path_matcher(pattern: &str) -> Result<regex::Regex, String> {
-    let src = match pattern.contains('*') || pattern.contains('?') {
-        false => pattern.to_owned(),
-        true => {
-            let mut out = String::from("^");
-            let b: Vec<char> = pattern.chars().collect();
-            let mut i = 0;
-            while i < b.len() {
-                match b[i] {
-                    '*' if i + 1 < b.len() && b[i + 1] == '*' => {
-                        out.push_str(".*");
-                        i += 2;
-                        // `**/` also matches nothing at all.
-                        if i < b.len() && b[i] == '/' {
-                            out.push_str("/?");
-                            i += 1;
-                        }
-                    }
-                    '*' => {
-                        out.push_str("[^/]*");
-                        i += 1;
-                    }
-                    '?' => {
-                        out.push('.');
-                        i += 1;
-                    }
-                    c => {
-                        out.push_str(&regex::escape(&c.to_string()));
-                        i += 1;
-                    }
-                }
-            }
-            out.push('$');
-            out
-        }
-    };
-    regex::Regex::new(&src).map_err(|e| format!("bad path pattern `{pattern}`: {e}"))
-}
-
-fn walk(repo: &Repo, re: &regex::Regex) -> Vec<String> {
+/// Every file in the checkout, repo-relative and sorted — the candidate set the
+/// pattern chooses from. Selection is `crate::pattern`'s job, not the walker's,
+/// so one grammar governs every command.
+fn walk_all(repo: &Repo) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for entry in WalkBuilder::new(&repo.root)
         .hidden(false)
@@ -1207,13 +1162,10 @@ fn walk(repo: &Repo, re: &regex::Regex) -> Vec<String> {
         .build()
         .flatten()
     {
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
-        let rel = repo.rel(entry.path());
-        if re.is_match(&rel) {
-            out.push(rel);
-        }
+        entry
+            .file_type()
+            .is_some_and(|t| t.is_file())
+            .then(|| out.push(repo.rel(entry.path())));
     }
     out.sort();
     out
@@ -1594,23 +1546,6 @@ function plaster() {{
             None,
             "an undecidable row is not evidence of anything"
         );
-    }
-
-    /// The glob in the documented invocation matches what it should, and a
-    /// pattern without a `*` stays the unanchored regex `ax file` accepts.
-    #[test]
-    fn a_glob_matches_a_subtree_and_a_regex_still_works() {
-        let g = path_matcher("apps/axiom-shmup/src/fx/**").expect("glob");
-        assert!(g.is_match("apps/axiom-shmup/src/fx/shells.rs"));
-        assert!(g.is_match("apps/axiom-shmup/src/fx/sub/deep.rs"));
-        assert!(!g.is_match("apps/axiom-shmup/src/ai/agent.rs"));
-
-        let star = path_matcher("apps/*/src/*.rs").expect("glob");
-        assert!(star.is_match("apps/x/src/a.rs"));
-        assert!(!star.is_match("apps/x/src/deep/a.rs"), "a single star stops at /");
-
-        let re = path_matcher("axiom-shmup/src/fx").expect("regex");
-        assert!(re.is_match("apps/axiom-shmup/src/fx/shells.rs"));
     }
 
     /// **A citation written against a tree outside the checkout is named as
