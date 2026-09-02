@@ -459,122 +459,8 @@ fn concrete(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: 
 
 /// Plaster / drywall: white powder, crumbs, no sparks. `impacts.js:332-410`.
 fn plaster(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
-    let q = fx.pscale;
-    let (vx, vy, vz) = reflect(inc.0, inc.1, inc.2, n.0, n.1, n.2);
-    let (rx, ry, rz) = ((vx + n.0 * 1.3) * 0.5, (vy + n.1 * 1.3) * 0.5, (vz + n.2 * 1.3) * 0.5);
-    let (px, py, pz) = point;
-    let sun = fx.sun_world();
-
-    let n_dust = (8.0 * q).round() as i32 + 3;
-    for i in 0..n_dust {
-        let (mut vx2, mut vy2, mut vz2) = cone(&mut fx.rng, rx, ry, rz, 1.3, 0.6);
-        let th = toward_hemi(vx2, vy2, vz2, n.0, n.1, n.2, 0.05);
-        vx2 = th.0;
-        vy2 = th.1;
-        vz2 = th.2;
-        let sp = fx.rng.range(0.6, 2.2);
-        let mut s = reset_spawn();
-        let off = fx.rng.range(0.05, 0.14);
-        s.x = px + n.0 * off;
-        s.y = py + n.1 * off;
-        s.z = pz + n.2 * off;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp + 0.4;
-        s.vz = vz2 * sp;
-        s.tile = (if i % 2 == 1 { p::DUST } else { p::MIST }) as f64;
-        let band = i % 3;
-        s.size0 = fx.rng.range(0.05, 0.11) * e * if band == 0 { 0.8 } else { 1.0 };
-        s.size1 = fx.rng.range(0.34, 0.62) * e * if band == 2 { 1.3 } else { 1.0 };
-        s.size_curve = if band == 0 { 0.3 } else if band == 1 { 0.48 } else { 0.78 };
-        s.delay = if band == 0 { 0.0 } else { fx.rng.range(0.02, if band == 1 { 0.1 } else { 0.22 }) };
-        s.life = if band == 0 {
-            fx.rng.range(0.25, 0.45)
-        } else if band == 1 {
-            fx.rng.range(0.7, 1.2)
-        } else {
-            fx.rng.range(1.4, 2.2)
-        };
-        s.drag = if band == 0 { fx.rng.range(5.0, 7.0) } else { fx.rng.range(2.6, 3.8) };
-        s.gravity = -0.55;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 1.2;
-        let lit = 0.68 + 0.74 * (vx2 * sun.0 + vy2 * sun.1 + vz2 * sun.2).max(0.0);
-        s.r0 = 0.74 * lit;
-        s.g0 = 0.63 * lit;
-        s.b0 = 0.465 * lit;
-        s.r1 = 0.63 * lit;
-        s.g1 = 0.53 * lit;
-        s.b1 = 0.385 * lit;
-        s.alpha = fx.rng.range(0.42, 0.72) * if band == 2 { 0.7 } else { 1.0 };
-        s.alpha_curve = 1.6;
-        s.soft = 0.09;
-        s.turb = 0.06;
-        s.turb_freq = 2.0;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_chip = (7.0 * q).round() as i32 + 2;
-    for _ in 0..n_chip {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, rx, ry, rz, 0.95, 1.3);
-        let sp = fx.rng.range(2.0, 6.0);
-        let mut s = reset_spawn();
-        s.x = px + n.0 * 0.01;
-        s.y = py + n.1 * 0.01;
-        s.z = pz + n.2 * 0.01;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = p::CHIP as f64;
-        s.size0 = fx.rng.range(0.007, 0.02);
-        s.size1 = s.size0;
-        s.life = fx.rng.range(0.5, 0.9);
-        s.drag = 0.5;
-        s.gravity = -19.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 18.0;
-        s.r0 = 0.72;
-        s.g0 = 0.65;
-        s.b0 = 0.52;
-        s.r1 = 0.64;
-        s.g1 = 0.575;
-        s.b1 = 0.46;
-        s.alpha_curve = 0.25;
-        s.soft = 0.06;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_ej = (4.0 * q).round() as i32 + 2;
-    for _ in 0..n_ej {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, rx, ry, rz, 0.32, 1.6);
-        let sp = fx.rng.range(3.0, 6.5);
-        let mut s = reset_spawn();
-        s.x = px + n.0 * 0.02;
-        s.y = py + n.1 * 0.02;
-        s.z = pz + n.2 * 0.02;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp + 0.2;
-        s.vz = vz2 * sp;
-        s.tile = p::DUST as f64;
-        s.size0 = fx.rng.range(0.022, 0.045) * e;
-        s.size1 = fx.rng.range(0.12, 0.24) * e;
-        s.size_curve = 0.5;
-        s.life = fx.rng.range(0.18, 0.3);
-        s.drag = fx.rng.range(6.0, 9.0);
-        s.gravity = -1.1;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 2.2;
-        s.r0 = 0.77;
-        s.g0 = 0.66;
-        s.b0 = 0.485;
-        s.r1 = 0.65;
-        s.g1 = 0.55;
-        s.b1 = 0.40;
-        s.alpha = fx.rng.range(0.35, 0.6);
-        s.alpha_curve = 1.2;
-        s.soft = 0.08;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    let site = crate::fx::burst::Site::at(fx, point, n, inc, e);
+    crate::fx::burst::run_all(fx, &crate::fx::recipes::PLASTER, site);
     bullet_hole(
         fx,
         point,
@@ -811,16 +697,8 @@ fn metal(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 
 /// Wood: splinters and a brown, resinous puff. `impacts.js:546-594`.
 fn wood(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
-    crate::fx::burst::run_all(
-        fx,
-        &crate::fx::recipes::WOOD,
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            incident: inc,
-            energy: e,
-        },
-    );
+    let site = crate::fx::burst::Site::at(fx, point, n, inc, e);
+    crate::fx::burst::run_all(fx, &crate::fx::recipes::WOOD, site);
     bullet_hole(
         fx,
         point,
@@ -839,19 +717,11 @@ fn wood(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64
 
 /// Dirt / sand: a plume, plus heavy ejected clods. `impacts.js:597-659`.
 fn ground(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64, sand: bool) {
-    crate::fx::burst::run_all(
-        fx,
-        [&crate::fx::recipes::GROUND_DIRT, &crate::fx::recipes::GROUND_SAND][usize::from(sand)],
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            // Ground never reads the incident direction: the plume and the
-            // clods both leave along the surface normal, whichever way the
-            // bullet came in.
-            incident: (0.0, 0.0, 0.0),
-            energy: e,
-        },
-    );
+    // Ground never reads the incident direction: the plume and the
+    // clods both leave along the surface normal, whichever way the
+    // bullet came in.
+    let site = crate::fx::burst::Site::at(fx, point, n, (0.0, 0.0, 0.0), e);
+    crate::fx::burst::run_all(fx, [&crate::fx::recipes::GROUND_DIRT, &crate::fx::recipes::GROUND_SAND][usize::from(sand)], site);
     bullet_hole(
         fx,
         point,
@@ -875,16 +745,8 @@ fn ground(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64,
 fn glass(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
     // Glass ignores impact energy — a pane either breaks or it does not.
     let _ = e;
-    crate::fx::burst::run_all(
-        fx,
-        &crate::fx::recipes::GLASS,
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            incident: inc,
-            energy: 1.0,
-        },
-    );
+    let site = crate::fx::burst::Site::at(fx, point, n, inc, 1.0);
+    crate::fx::burst::run_all(fx, &crate::fx::recipes::GLASS, site);
     let glass_tile = if fx.rng.float() < 0.5 { d::GLASS_CRACK } else { d::HOLE_GLASS };
     let glass_size = fx.rng.range(0.3, 0.55);
     let glass_roll = fx.rng.float() * TWO_PI;
@@ -907,18 +769,10 @@ fn glass(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 
 /// Water: a column, droplets, an expanding ripple. `impacts.js:727-790`.
 fn water(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64) {
-    crate::fx::burst::run_all(
-        fx,
-        &crate::fx::recipes::WATER,
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            // Water never reads it: the column, the droplets and the mist all
-            // leave along the normal, whichever way the bullet came in.
-            incident: (0.0, 0.0, 0.0),
-            energy: e,
-        },
-    );
+    // Water never reads it: the column, the droplets and the mist all
+    // leave along the normal, whichever way the bullet came in.
+    let site = crate::fx::burst::Site::at(fx, point, n, (0.0, 0.0, 0.0), e);
+    crate::fx::burst::run_all(fx, &crate::fx::recipes::WATER, site);
     let ripple_size = fx.rng.range(0.45, 0.7);
     fx.add_decal(
         point,
@@ -940,16 +794,8 @@ fn water(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64) 
 /// Flesh: a dark aerosol cone, heavy droplets, spatter behind.
 /// `impacts.js:793-841`.
 fn flesh(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
-    crate::fx::burst::run_all(
-        fx,
-        &crate::fx::recipes::FLESH,
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            incident: inc,
-            energy: e,
-        },
-    );
+    let site = crate::fx::burst::Site::at(fx, point, n, inc, e);
+    crate::fx::burst::run_all(fx, &crate::fx::recipes::FLESH, site);
     fx.blood_spatter_behind(point, inc);
 }
 
@@ -962,30 +808,14 @@ fn flesh(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 /// random-stream state alike — before the swap, and the test that proves it is
 /// still in this file's `tests` module.
 fn foliage(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64)) {
-    crate::fx::burst::run_all(
-        fx,
-        &crate::fx::recipes::FOLIAGE,
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            incident: inc,
-            energy: 1.0,
-        },
-    );
+    let site = crate::fx::burst::Site::at(fx, point, n, inc, 1.0);
+    crate::fx::burst::run_all(fx, &crate::fx::recipes::FOLIAGE, site);
 }
 
 /// Fabric / rubber: dust, fibres, a tear. `impacts.js:867-916`.
 fn soft(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), rubber: bool) {
-    crate::fx::burst::run_all(
-        fx,
-        [&crate::fx::recipes::FABRIC, &crate::fx::recipes::RUBBER][usize::from(rubber)],
-        crate::fx::burst::Site {
-            point,
-            normal: n,
-            incident: inc,
-            energy: 1.0,
-        },
-    );
+    let site = crate::fx::burst::Site::at(fx, point, n, inc, 1.0);
+    crate::fx::burst::run_all(fx, [&crate::fx::recipes::FABRIC, &crate::fx::recipes::RUBBER][usize::from(rubber)], site);
     let tear_size = fx.rng.range(0.09, 0.15);
     let tear_roll = fx.rng.float() * TWO_PI;
     fx.add_decal(
@@ -1061,16 +891,8 @@ mod tests {
         foliage_hand_written(&mut hand, point, n, inc);
 
         let mut data = FxSystem::test_instance(0x5eed);
-        crate::fx::burst::run_all(
-            &mut data,
-            &crate::fx::recipes::FOLIAGE,
-            crate::fx::burst::Site {
-                point,
-                normal: n,
-                incident: inc,
-                energy: 1.0,
-            },
-        );
+        let site = crate::fx::burst::Site::at(&data, point, n, inc, 1.0);
+        crate::fx::burst::run_all(&mut data, &crate::fx::recipes::FOLIAGE, site);
 
         assert_eq!(hand.lit.spawned(), data.lit.spawned(), "particle count");
         assert!(hand.lit.spawned() > 0, "the case emitted nothing");

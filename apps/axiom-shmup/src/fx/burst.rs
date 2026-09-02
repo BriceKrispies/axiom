@@ -55,6 +55,16 @@ pub enum Input {
     IncidentY,
     IncidentZ,
     Energy,
+    /// The world direction toward the sun.
+    ///
+    /// Plaster's dust is the one burst that shades itself: a particle leaving
+    /// toward the light is brighter than one leaving away from it, which is why
+    /// a scene-level value reaches a per-particle program at all. It arrives
+    /// through the site rather than as a magic global, so a recipe run twice
+    /// with the same site produces the same particles.
+    SunX,
+    SunY,
+    SunZ,
     /// The index of the particle being emitted, `0..count`.
     ///
     /// The source uses it for phase: `i % 4 == 0` picks every fourth tile, a
@@ -73,6 +83,13 @@ pub enum Input {
 /// that is the property the whole format exists to keep honest.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
+    /// A literal. Writes 1.
+    ///
+    /// Rare, because a constant that only feeds a *field* belongs in the field
+    /// table as [`Src::Imm`] and never enters the program at all. This is for
+    /// the few that feed an *instruction* — a range bound whose partner is
+    /// selected, so both have to be registers.
+    Const(f64),
     /// A value from the call site. Writes 1.
     Read(Input),
     /// `rng.range(lo, hi)`. Writes 1. **Draws once.**
@@ -122,6 +139,30 @@ pub enum Op {
     Scale(u16, f64),
     /// `a + b`. Writes 1.
     Add(u16, u16),
+    /// `a - b`. Writes 1.
+    Sub(u16, u16),
+    /// `dot(a, b)`. Writes 1.
+    Dot { a: [u16; 3], b: [u16; 3] },
+    /// `max(a, k)`. Writes 1.
+    Max(u16, f64),
+    /// Run the next `len` instructions only when `probe < threshold`. Writes 0.
+    ///
+    /// **The instructions inside a closed gate do not draw**, which is the
+    /// point: plaster's dust delays every particle except the ones in its first
+    /// band, and the source draws that delay only for the bands that have one.
+    /// A burst whose draw count is the same either way would be a different
+    /// function.
+    ///
+    /// A skipped instruction still writes its registers, as **zero**. That
+    /// keeps register numbering identical on both paths — a handle means the
+    /// same thing whether the gate opened or not — and it happens to be exactly
+    /// what the source wants, since the value it substitutes for the undrawn
+    /// delay is `0.0`.
+    Gate {
+        probe: u16,
+        threshold: f64,
+        len: u16,
+    },
     /// `a + k`. Writes 1.
     Offset(u16, f64),
     /// `a * k1 + k2`, the shape `px + n.x * off` takes everywhere in this
@@ -376,6 +417,11 @@ impl Program {
         self.read3(Input::IncidentX, Input::IncidentY, Input::IncidentZ)
     }
 
+    /// The world direction toward the sun.
+    pub fn sun(&mut self) -> V3 {
+        self.read3(Input::SunX, Input::SunY, Input::SunZ)
+    }
+
     fn read3(&mut self, x: Input, y: Input, z: Input) -> V3 {
         V3(self.read(x), self.read(y), self.read(z))
     }
@@ -457,6 +503,66 @@ impl Program {
     /// `a + b`.
     pub fn add(&mut self, a: Reg, b: Reg) -> Reg {
         self.push(Op::Add(a.0, b.0))
+    }
+
+    /// A literal as a register, for the few places one has to be an operand
+    /// rather than a field value — a range bound that the other bound selects.
+    pub fn push_const(&mut self, v: f64) -> Reg {
+        self.push(Op::Const(v))
+    }
+
+    /// `a - b`.
+    pub fn sub(&mut self, a: Reg, b: Reg) -> Reg {
+        self.push(Op::Sub(a.0, b.0))
+    }
+
+    /// `dot(a, b)`.
+    pub fn dot(&mut self, a: V3, b: V3) -> Reg {
+        self.push(Op::Dot {
+            a: [a.0 .0, a.1 .0, a.2 .0],
+            b: [b.0 .0, b.1 .0, b.2 .0],
+        })
+    }
+
+    /// `max(a, k)`.
+    pub fn max(&mut self, a: Reg, k: f64) -> Reg {
+        self.push(Op::Max(a.0, k))
+    }
+
+    /// `rng.range(lo, hi)` with the bounds computed rather than literal.
+    ///
+    /// `range` is `lo + (hi - lo) * float()`, so this is the same single draw
+    /// spelt out — which is what makes a band-dependent range expressible
+    /// without a branch and without changing how many times the burst draws.
+    pub fn range_between(&mut self, lo: Reg, hi: Reg) -> Reg {
+        let u = self.unit();
+        let span = self.sub(hi, lo);
+        let scaled = self.mul(span, u);
+        self.add(lo, scaled)
+    }
+
+    /// Open a gate: everything appended until [`Program::close_gate`] runs only
+    /// when `probe < threshold`, and draws only then.
+    ///
+    /// The instruction count is patched in on close, so nothing here counts
+    /// instructions either.
+    pub fn open_gate(&mut self, probe: Reg, threshold: f64) -> GateMark {
+        let at = self.ops.len();
+        self.push(Op::Gate {
+            probe: probe.0,
+            threshold,
+            len: 0,
+        });
+        GateMark(at)
+    }
+
+    /// Close a gate opened by [`Program::open_gate`].
+    pub fn close_gate(&mut self, mark: GateMark) {
+        let len = (self.ops.len() - mark.0 - 1) as u16;
+        match &mut self.ops[mark.0] {
+            Op::Gate { len: slot, .. } => *slot = len,
+            _ => unreachable!("a mark always points at its own gate"),
+        }
     }
 
     /// `a + k`.
@@ -577,6 +683,10 @@ impl Program {
     }
 }
 
+/// Where a gate was opened, so its length can be patched in when it closes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GateMark(usize);
+
 /// A literal field value, so a recipe's constant table reads as a table.
 pub const fn imm(v: f64) -> Src {
     Src::Imm(v)
@@ -589,6 +699,9 @@ pub struct Site {
     pub normal: (f64, f64, f64),
     pub incident: (f64, f64, f64),
     pub energy: f64,
+    /// The world direction toward the sun. Zero when a recipe never reads it,
+    /// which is every recipe but plaster's.
+    pub sun: (f64, f64, f64),
 }
 
 /// The per-particle values [`Input`] can reach that are not part of the site:
@@ -600,6 +713,27 @@ struct Position {
 }
 
 impl Site {
+    /// The site of one impact, reading the scene-level values from `fx`.
+    ///
+    /// A constructor rather than a literal at each call site, so that adding a
+    /// scene value a recipe can read — the sun was the first — does not mean
+    /// editing every caller to pass a zero it does not care about.
+    pub fn at(
+        fx: &FxSystem,
+        point: (f64, f64, f64),
+        normal: (f64, f64, f64),
+        incident: (f64, f64, f64),
+        energy: f64,
+    ) -> Self {
+        Self {
+            point,
+            normal,
+            incident,
+            energy,
+            sun: fx.sun_world(),
+        }
+    }
+
     fn read(&self, input: Input, reflected: (f64, f64, f64), at: Position) -> f64 {
         match input {
             Input::PointX => self.point.0,
@@ -614,6 +748,9 @@ impl Site {
             Input::IncidentX => self.incident.0,
             Input::IncidentY => self.incident.1,
             Input::IncidentZ => self.incident.2,
+            Input::SunX => self.sun.0,
+            Input::SunY => self.sun.1,
+            Input::SunZ => self.sun.2,
             Input::Energy => self.energy,
             Input::Index => at.index,
             Input::Count => at.count,
@@ -630,6 +767,7 @@ impl Op {
     /// a function rather than left implicit in the interpreter, and
     /// [`Burst::operands_resolve`] checks every recipe against it.
     pub fn writes(self) -> usize {
+        let none = matches!(self, Op::Gate { .. });
         let three = matches!(
             self,
             Op::Cone { .. }
@@ -638,20 +776,22 @@ impl Op {
                 | Op::TowardHemi { .. }
                 | Op::ClampCone { .. }
         );
-        [1, 3][usize::from(three)]
+        [[1, 3][usize::from(three)], 0][usize::from(none)]
     }
 
     /// The registers this instruction reads. At most three.
     pub fn operands(self) -> Vec<u16> {
         match self {
-            Op::Read(_) | Op::Range(..) | Op::Unit | Op::Signed => Vec::new(),
+            Op::Const(_) | Op::Read(_) | Op::Range(..) | Op::Unit | Op::Signed => Vec::new(),
             Op::Cone { dir, .. } => dir.to_vec(),
             Op::DiscOn { normal, .. } => normal.to_vec(),
             Op::Blackbody(k) => vec![k],
             Op::TowardHemi { dir, axis, .. } | Op::ClampCone { dir, axis, .. } => {
                 dir.iter().chain(axis.iter()).copied().collect()
             }
-            Op::Mul(a, b) | Op::Add(a, b) => vec![a, b],
+            Op::Mul(a, b) | Op::Add(a, b) | Op::Sub(a, b) => vec![a, b],
+            Op::Dot { a, b } => a.iter().chain(b.iter()).copied().collect(),
+            Op::Max(a, _) | Op::Gate { probe: a, .. } => vec![a],
             Op::Mad(a, _, b) => vec![a, b],
             Op::Scale(a, _) | Op::Offset(a, _) | Op::Mod(a, _) => vec![a],
             Op::SelectLt {
@@ -768,8 +908,31 @@ fn eval(
     reflected: (f64, f64, f64),
     at: Position,
 ) {
-        for op in ops {
+        let mut cursor = 0usize;
+        while cursor < ops.len() {
+            // A closed gate skips its run and fills every register that run
+            // would have written with zero, so a handle points at the same
+            // value on both paths and nothing after it shifts.
+            if let Op::Gate {
+                probe,
+                threshold,
+                len,
+            } = ops[cursor]
+            {
+                let open = regs[probe as usize] < threshold;
+                let run = &ops[cursor + 1..cursor + 1 + usize::from(len)];
+                let skipped: usize = run.iter().map(|o| o.writes()).sum();
+                (!open).then(|| {
+                    regs.resize(regs.len() + skipped, 0.0);
+                    cursor += usize::from(len);
+                });
+                cursor += 1;
+                continue;
+            }
+            let op = &ops[cursor];
+            cursor += 1;
             match *op {
+                Op::Const(v) => regs.push(v),
                 Op::Read(input) => regs.push(site.read(input, reflected, at)),
                 Op::Range(lo, hi) => {
                     let v = fx.rng.range(lo, hi);
@@ -835,6 +998,15 @@ fn eval(
                 Op::Mul(a, b) => regs.push(regs[a as usize] * regs[b as usize]),
                 Op::Scale(a, k) => regs.push(regs[a as usize] * k),
                 Op::Add(a, b) => regs.push(regs[a as usize] + regs[b as usize]),
+                Op::Sub(a, b) => regs.push(regs[a as usize] - regs[b as usize]),
+                Op::Dot { a, b } => {
+                    let d = (0..3)
+                        .map(|k| regs[a[k] as usize] * regs[b[k] as usize])
+                        .sum();
+                    regs.push(d);
+                }
+                Op::Max(a, k) => regs.push(regs[a as usize].max(k)),
+                Op::Gate { .. } => unreachable!("gates are handled by the walker"),
                 Op::Offset(a, k) => regs.push(regs[a as usize] + k),
                 Op::Mad(a, k, b) => regs.push(regs[a as usize] * k + regs[b as usize]),
                 Op::Mod(a, k) => regs.push(regs[a as usize] % k),
@@ -914,5 +1086,180 @@ fn write(s: &mut ParticleSpawn, field: Field, v: f64) {
         Field::TurbFreq => s.turb_freq = v,
         Field::Seed => s.seed = v,
         Field::Flags => s.flags = v,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fx::system::FxSystem;
+
+    /// `size0` is the field these tests read a value back through: the layer
+    /// stores it straight, where `life` is stored as its reciprocal and `rot`
+    /// is folded into a shared word. One field, written once, read once.
+    const SIZE0: usize = 3;
+
+    fn site() -> Site {
+        Site {
+            point: (1.0, 2.0, 3.0),
+            normal: (0.0, 1.0, 0.0),
+            incident: (0.3, -0.9, 0.3),
+            energy: 1.0,
+            sun: (0.2, 0.9, -0.1),
+        }
+    }
+
+    /// One particle, one field, so a test can read a single value back out.
+    fn one(fx: &mut FxSystem, ops: Vec<Op>, value: Src) {
+        let burst = Burst {
+            count: Count {
+                factor: 0.0,
+                plus: 1,
+            },
+            ops,
+            pool: Pool::Lit,
+            fields: vec![(Field::Size0, value)],
+            companion: None,
+        };
+        run(fx, &burst, site());
+    }
+
+    fn read(fx: &FxSystem) -> f64 {
+        f64::from(fx.lit.raw()[SIZE0])
+    }
+
+    /// A **closed** gate spends none of its run's draws. That is the whole
+    /// reason the gate exists rather than a select over a value that was drawn
+    /// either way: the random stream is shared across the frame, so one extra
+    /// draw here shifts every later effect.
+    #[test]
+    fn a_closed_gate_draws_nothing_and_an_open_one_draws() {
+        let build = |probe_value: f64| {
+            let mut b = Program::new();
+            let probe = b.push_const(probe_value);
+            let mark = b.open_gate(probe, 0.5);
+            let _ = b.range(10.0, 20.0);
+            b.close_gate(mark);
+            b.ops
+        };
+
+        let mut shut = FxSystem::test_instance(11);
+        one(&mut shut, build(1.0), Src::Imm(1.0));
+
+        let mut open = FxSystem::test_instance(11);
+        one(&mut open, build(0.0), Src::Imm(1.0));
+
+        // Same seed, same instructions, same everything but whether the gated
+        // `range` drew. Where the stream now stands is what says which.
+        assert_ne!(shut.rng.float(), open.rng.float());
+    }
+
+    /// A skipped instruction still writes its registers, as zero — so a handle
+    /// means the same thing on both paths, and a field reading it gets the
+    /// value the source substitutes for the draw it did not make.
+    #[test]
+    fn a_skipped_instruction_leaves_zero_and_shifts_nothing_after_it() {
+        let mut b = Program::new();
+        let probe = b.push_const(1.0);
+        let mark = b.open_gate(probe, 0.5);
+        let skipped = b.range(10.0, 20.0);
+        b.close_gate(mark);
+        let after = b.push_const(0.075);
+
+        let mut fx = FxSystem::test_instance(3);
+        one(&mut fx, b.ops.clone(), skipped.src());
+        assert_eq!(read(&fx), 0.0, "a skipped range should read as zero");
+
+        let mut fx = FxSystem::test_instance(3);
+        one(&mut fx, b.ops.clone(), after.src());
+        assert_eq!(
+            read(&fx),
+            f64::from(0.075_f32),
+            "the register after a gate should not shift"
+        );
+    }
+
+    /// `range_between` is `rng.range` with its bounds in registers, and it has
+    /// to be the *same* function — same value, same single draw — or a
+    /// band-selected range would be a different recipe rather than the same one
+    /// with different bounds.
+    #[test]
+    fn a_computed_range_matches_the_drawn_one_exactly() {
+        let mut b = Program::new();
+        let lo = b.push_const(0.02);
+        let hi = b.push_const(0.22);
+        let v = b.range_between(lo, hi);
+
+        let mut fx = FxSystem::test_instance(5);
+        one(&mut fx, b.ops, v.src());
+
+        let mut direct = FxSystem::test_instance(5);
+        let expected = direct.rng.range(0.02, 0.22);
+        assert_eq!(read(&fx), f64::from(expected as f32));
+        // And exactly one draw, so the two streams still agree afterwards.
+        assert_eq!(fx.rng.float(), direct.rng.float());
+    }
+
+    /// The dot product is the only op plaster's self-shading depends on.
+    #[test]
+    fn a_dot_product_is_the_sum_of_three_products() {
+        let mut b = Program::new();
+        let n = b.normal();
+        let sun = b.sun();
+        let d = b.dot(n, sun);
+
+        let mut fx = FxSystem::test_instance(1);
+        one(&mut fx, b.ops, d.src());
+        // The normal is +Y and the sun is (0.2, 0.9, -0.1), so the dot is 0.9.
+        assert!((read(&fx) - 0.9).abs() < 1e-6, "{}", read(&fx));
+    }
+
+    /// A companion overlays the parent's record rather than replacing it, so a
+    /// field it does not mention keeps the parent's value. That is what makes
+    /// glass's glint ride its shard instead of flying off on its own.
+    #[test]
+    fn a_companion_inherits_what_it_does_not_overwrite() {
+        let mut b = Program::new();
+        let size = b.push_const(0.5);
+        b.companion_from(1.1); // above 1.0, so the gate always opens
+        let burst = b.emit_with(
+            (0.0, 1),
+            Pool::Lit,
+            vec![(Field::Size0, size.src()), (Field::R0, imm(0.25))],
+            Some((Pool::Additive, vec![(Field::R0, imm(0.75))])),
+        );
+
+        let mut fx = FxSystem::test_instance(2);
+        run(&mut fx, &burst, site());
+        assert_eq!(fx.lit.spawned(), 1);
+        assert_eq!(fx.add.spawned(), 1, "the companion did not fire");
+        assert_eq!(
+            f64::from(fx.add.raw()[SIZE0]),
+            0.5,
+            "the companion should have inherited the parent's size"
+        );
+    }
+
+    /// The gate that never opens is the one whose companion never fires, and a
+    /// companion below the threshold must still cost its single gate draw.
+    #[test]
+    fn a_companion_that_never_fires_still_spends_its_gate_draw() {
+        let mut b = Program::new();
+        let size = b.push_const(0.5);
+        b.companion_from(0.0); // nothing is < 0.0
+        let burst = b.emit_with(
+            (0.0, 1),
+            Pool::Lit,
+            vec![(Field::Size0, size.src())],
+            Some((Pool::Additive, vec![])),
+        );
+
+        let mut fx = FxSystem::test_instance(2);
+        run(&mut fx, &burst, site());
+        assert_eq!(fx.add.spawned(), 0, "the companion should not have fired");
+
+        let mut bare = FxSystem::test_instance(2);
+        let _ = bare.rng.float(); // the gate draw the burst made
+        assert_eq!(fx.rng.float(), bare.rng.float());
     }
 }

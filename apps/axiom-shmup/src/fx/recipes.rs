@@ -926,6 +926,252 @@ pub static GLASS: LazyLock<Vec<Burst>> = LazyLock::new(|| {
     vec![shards, mist]
 });
 
+/// Plaster / drywall: white powder, crumbs, no sparks. `impacts.js:332-410`.
+///
+/// The hardest recipe in the file, and the one that decided the last two
+/// features of the format.
+///
+/// Its dust is **banded**: `i % 3` sorts each particle into a near, middle or
+/// far puff, and the band picks a different size, curve, life, drag and delay.
+/// Two of those are drawn, which is the difficulty — a band-dependent *range*,
+/// not a band-dependent value. `rng.range(lo, hi)` is `lo + (hi - lo) * float()`,
+/// so the recipe picks the bounds with a select and then draws once, spending
+/// exactly the one draw the source spends whichever band the particle is in.
+/// The delay is the exception: band zero has none, and draws nothing for it,
+/// which is what [`Op::Gate`] exists for.
+///
+/// It is also the only burst that shades itself. A particle leaving toward the
+/// sun is brighter than one leaving away from it, so the recipe reads the sun
+/// direction from the site and dots it against the particle's own velocity.
+pub static PLASTER: LazyLock<Vec<Burst>> = LazyLock::new(|| {
+    // Powder — `impacts.js:339-388`.
+    let mut d = Program::new();
+    let at = d.point();
+    let n = d.normal();
+    // Plaster's ejecta axis leans harder off the wall than wood's: the normal
+    // is weighted 1.3 before the average, so the puff stands off the surface.
+    let r = d.reflected();
+    let lean = d.mad3(n, 1.3, r);
+    let axis = d.scale3(lean, 0.5);
+    let raw = d.cone(axis, 1.3, 0.6);
+    // Anything the cone threw into the wall is folded back out of it.
+    let dir = d.toward_hemi(raw, n, 0.05);
+    let speed = d.range(0.6, 2.2);
+    let off = d.range(0.05, 0.14);
+    let step = d.mul3(n, off);
+    let from = d.add3(at, step);
+    let vel = d.mul3(dir, speed);
+    let rise = d.offset(vel.1, 0.4);
+    let energy = d.read(Input::Energy);
+
+    let index = d.read(Input::Index);
+    let odd = d.modulo(index, 2.0);
+    let tile = d.select_lt(odd, 0.5, p::MIST as f64, p::DUST as f64);
+    let band = d.modulo(index, 3.0);
+    // `band == 0` is `band < 0.5`; `band == 2` is `band >= 1.5`.
+    let near_k = d.select_lt(band, 0.5, 0.8, 1.0);
+    let far_k = d.select_lt(band, 1.5, 1.0, 1.3);
+
+    let near = d.range(0.05, 0.11);
+    let near_e = d.mul(near, energy);
+    let size0 = d.mul(near_e, near_k);
+    let far = d.range(0.34, 0.62);
+    let far_e = d.mul(far, energy);
+    let size1 = d.mul(far_e, far_k);
+
+    let mid_or_far = d.select_lt(band, 1.5, 0.48, 0.78);
+    let size_curve = d.pick(band, 0.5, imm(0.3), mid_or_far.src());
+
+    // The delay: none at all for the near band, which therefore draws nothing.
+    // `has_delay` is 1.0 exactly when the band is zero, so the gate — which
+    // opens on `< 0.5` — is closed for that band and open for the others.
+    let is_near = d.select_lt(band, 0.5, 1.0, 0.0);
+    let delay_hi = d.select_lt(band, 1.5, 0.1, 0.22);
+    let delay_lo = d.push_const(0.02);
+    let gate = d.open_gate(is_near, 0.5);
+    let delay = d.range_between(delay_lo, delay_hi);
+    d.close_gate(gate);
+
+    let life_lo_far = d.select_lt(band, 1.5, 0.7, 1.4);
+    let life_lo = d.pick(band, 0.5, imm(0.25), life_lo_far.src());
+    let life_hi_far = d.select_lt(band, 1.5, 1.2, 2.2);
+    let life_hi = d.pick(band, 0.5, imm(0.45), life_hi_far.src());
+    let life = d.range_between(life_lo, life_hi);
+
+    let drag_lo = d.select_lt(band, 0.5, 5.0, 2.6);
+    let drag_hi = d.select_lt(band, 0.5, 7.0, 3.8);
+    let drag = d.range_between(drag_lo, drag_hi);
+
+    let spun = d.unit();
+    let rot = d.scale(spun, TWO_PI);
+    let signed = d.signed();
+    let spin = d.scale(signed, 1.2);
+
+    // Self-shading: `0.68 + 0.74 * max(dot(v, sun), 0)`, then the powder's
+    // colour scaled by it. The dot is against the *shaped* direction, before
+    // the speed is applied, exactly as the source does.
+    let sun = d.sun();
+    let facing = d.dot(dir, sun);
+    let toward = d.max(facing, 0.0);
+    let lifted = d.scale(toward, 0.74);
+    let lit = d.offset(lifted, 0.68);
+    let r0 = d.scale(lit, 0.74);
+    let g0 = d.scale(lit, 0.63);
+    let b0 = d.scale(lit, 0.465);
+    let r1 = d.scale(lit, 0.63);
+    let g1 = d.scale(lit, 0.53);
+    let b1 = d.scale(lit, 0.385);
+
+    let alpha_k = d.select_lt(band, 1.5, 1.0, 0.7);
+    let alpha_drawn = d.range(0.42, 0.72);
+    let alpha = d.mul(alpha_drawn, alpha_k);
+    let seed = d.unit();
+
+    let powder = d.emit(
+        (8.0, 3),
+        Pool::Lit,
+        vec![
+            (Field::X, from.0.src()),
+            (Field::Y, from.1.src()),
+            (Field::Z, from.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, rise.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Tile, tile.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::SizeCurve, size_curve.src()),
+            (Field::Delay, delay.src()),
+            (Field::Life, life.src()),
+            (Field::Drag, drag.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::R0, r0.src()),
+            (Field::G0, g0.src()),
+            (Field::B0, b0.src()),
+            (Field::R1, r1.src()),
+            (Field::G1, g1.src()),
+            (Field::B1, b1.src()),
+            (Field::Alpha, alpha.src()),
+            (Field::Seed, seed.src()),
+            (Field::Gravity, imm(-0.55)),
+            (Field::AlphaCurve, imm(1.6)),
+            (Field::Soft, imm(0.09)),
+            (Field::Turb, imm(0.06)),
+            (Field::TurbFreq, imm(2.0)),
+        ],
+    );
+
+    // Crumbs — `impacts.js:390-408`.
+    let mut c = Program::new();
+    let at = c.point();
+    let n = c.normal();
+    let from = c.mad3(n, 0.01, at);
+    let r = c.reflected();
+    let lean = c.mad3(n, 1.3, r);
+    let axis = c.scale3(lean, 0.5);
+    let dir = c.cone(axis, 0.95, 1.3);
+    let speed = c.range(2.0, 6.0);
+    let vel = c.mul3(dir, speed);
+    let size = c.range(0.007, 0.02);
+    let life = c.range(0.5, 0.9);
+    let spun = c.unit();
+    let rot = c.scale(spun, TWO_PI);
+    let signed = c.signed();
+    let spin = c.scale(signed, 18.0);
+    let seed = c.unit();
+
+    let crumbs = c.emit(
+        (7.0, 2),
+        Pool::Lit,
+        vec![
+            (Field::X, from.0.src()),
+            (Field::Y, from.1.src()),
+            (Field::Z, from.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size0, size.src()),
+            (Field::Size1, size.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::CHIP as f64)),
+            (Field::Drag, imm(0.5)),
+            (Field::Gravity, imm(-19.0)),
+            (Field::R0, imm(0.72)),
+            (Field::G0, imm(0.65)),
+            (Field::B0, imm(0.52)),
+            (Field::R1, imm(0.64)),
+            (Field::G1, imm(0.575)),
+            (Field::B1, imm(0.46)),
+            (Field::AlphaCurve, imm(0.25)),
+            (Field::Soft, imm(0.06)),
+        ],
+    );
+
+    // Ejecta — `impacts.js:410-433`. A tight, fast jet straight back out.
+    let mut e = Program::new();
+    let at = e.point();
+    let n = e.normal();
+    let from = e.mad3(n, 0.02, at);
+    let r = e.reflected();
+    let lean = e.mad3(n, 1.3, r);
+    let axis = e.scale3(lean, 0.5);
+    let dir = e.cone(axis, 0.32, 1.6);
+    let speed = e.range(3.0, 6.5);
+    let vel = e.mul3(dir, speed);
+    let rise = e.offset(vel.1, 0.2);
+    let energy = e.read(Input::Energy);
+    let near = e.range(0.022, 0.045);
+    let size0 = e.mul(near, energy);
+    let far = e.range(0.12, 0.24);
+    let size1 = e.mul(far, energy);
+    let life = e.range(0.18, 0.3);
+    let drag = e.range(6.0, 9.0);
+    let spun = e.unit();
+    let rot = e.scale(spun, TWO_PI);
+    let signed = e.signed();
+    let spin = e.scale(signed, 2.2);
+    let alpha = e.range(0.35, 0.6);
+    let seed = e.unit();
+
+    let ejecta = e.emit(
+        (4.0, 2),
+        Pool::Lit,
+        vec![
+            (Field::X, from.0.src()),
+            (Field::Y, from.1.src()),
+            (Field::Z, from.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, rise.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Drag, drag.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Alpha, alpha.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::DUST as f64)),
+            (Field::SizeCurve, imm(0.5)),
+            (Field::Gravity, imm(-1.1)),
+            (Field::R0, imm(0.77)),
+            (Field::G0, imm(0.66)),
+            (Field::B0, imm(0.485)),
+            (Field::R1, imm(0.65)),
+            (Field::G1, imm(0.55)),
+            (Field::B1, imm(0.4)),
+            (Field::AlphaCurve, imm(1.2)),
+            (Field::Soft, imm(0.08)),
+        ],
+    );
+
+    vec![powder, crumbs, ejecta]
+});
+
 /// The reflection and the normal, averaged — the axis ejecta follows when the
 /// debris cares about the bullet more than the surface, but not entirely.
 ///
@@ -951,6 +1197,7 @@ pub fn all() -> Vec<(&'static str, &'static Burst)> {
         ("fabric", &*FABRIC),
         ("rubber", &*RUBBER),
         ("glass", &*GLASS),
+        ("plaster", &*PLASTER),
     ]
         .into_iter()
         .flat_map(|(name, bursts)| bursts.iter().map(move |b| (name, b)))
