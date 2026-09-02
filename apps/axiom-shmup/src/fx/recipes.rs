@@ -218,6 +218,568 @@ pub static WOOD: LazyLock<Vec<Burst>> = LazyLock::new(|| {
     vec![splinters, dust]
 });
 
+/// Flesh: a dark aerosol cone, heavy droplets. `impacts.js:793-841`.
+///
+/// The one recipe whose ejecta axis follows the bullet rather than the surface —
+/// `inc * 0.75 - n * 0.25`, mostly *through* the wound — which is what makes
+/// [`Input::IncidentX`] worth reading directly instead of only its reflection.
+///
+/// `bloodSpatterBehind` (`impacts.js:840`) is not here: it needs a physics
+/// raycast to find the wall behind, which is a query and not a burst.
+pub static FLESH: LazyLock<Vec<Burst>> = LazyLock::new(|| {
+    // Aerosol mist — `impacts.js:800-826`, spawned a couple of centimetres
+    // *inside* the surface so the cone reads as coming out of the wound.
+    let mut m = Program::new();
+    let at = m.point();
+    let n = m.normal();
+    let inc = m.incident();
+    let back = m.scale3(n, -0.25);
+    let axis = m.mad3(inc, 0.75, back);
+    let from = m.mad3(n, -0.02, at);
+    let dir = m.cone(axis, 0.95, 0.8);
+    let speed = m.range(1.2, 4.5);
+    let vel = m.mul3(dir, speed);
+    let rise = m.offset(vel.1, 0.3);
+    let index = m.read(Input::Index);
+    let phase = m.modulo(index, 3.0);
+    let tile = m.select_lt(phase, 0.5, p::SMOKE_A as f64, p::MIST as f64);
+    let energy = m.read(Input::Energy);
+    let near = m.range(0.035, 0.075);
+    let size0 = m.mul(near, energy);
+    let far = m.range(0.16, 0.34);
+    let size1 = m.mul(far, energy);
+    let life = m.range(0.3, 0.62);
+    let drag = m.range(4.5, 6.5);
+    let spun = m.unit();
+    let rot = m.scale(spun, TWO_PI);
+    let signed = m.signed();
+    let spin = m.scale(signed, 2.0);
+    let alpha = m.range(0.6, 0.95);
+    let seed = m.unit();
+
+    let mist = m.emit(
+        (9.0, 4),
+        Pool::Lit,
+        vec![
+            (Field::X, from.0.src()),
+            (Field::Y, from.1.src()),
+            (Field::Z, from.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, rise.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Tile, tile.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Drag, drag.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Alpha, alpha.src()),
+            (Field::Seed, seed.src()),
+            (Field::SizeCurve, imm(0.5)),
+            (Field::Gravity, imm(-3.2)),
+            (Field::R0, imm(0.34)),
+            (Field::G0, imm(0.035)),
+            (Field::B0, imm(0.03)),
+            (Field::R1, imm(0.16)),
+            (Field::G1, imm(0.016)),
+            (Field::B1, imm(0.014)),
+            (Field::AlphaCurve, imm(1.5)),
+            (Field::Soft, imm(0.08)),
+            (Field::Turb, imm(0.04)),
+            (Field::TurbFreq, imm(3.0)),
+        ],
+    );
+
+    // Droplets — `impacts.js:828-839`. Heavier, faster, stretched along their
+    // own velocity, and thrown from the surface itself rather than behind it.
+    let mut d = Program::new();
+    let at = d.point();
+    let n = d.normal();
+    let inc = d.incident();
+    let back = d.scale3(n, -0.25);
+    let axis = d.mad3(inc, 0.75, back);
+    let dir = d.cone(axis, 1.1, 1.2);
+    let speed = d.range(2.0, 8.0);
+    let vel = d.mul3(dir, speed);
+    let size = d.range(0.007, 0.022);
+    let life = d.range(0.35, 0.8);
+    let seed = d.unit();
+
+    let drops = d.emit(
+        (14.0, 5),
+        Pool::Lit,
+        vec![
+            (Field::X, at.0.src()),
+            (Field::Y, at.1.src()),
+            (Field::Z, at.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size0, size.src()),
+            (Field::Size1, size.src()),
+            (Field::Life, life.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::DROPLET as f64)),
+            (Field::Stretch, imm(0.6)),
+            (Field::Drag, imm(0.9)),
+            (Field::Gravity, imm(-19.0)),
+            (Field::R0, imm(0.3)),
+            (Field::G0, imm(0.03)),
+            (Field::B0, imm(0.025)),
+            (Field::R1, imm(0.22)),
+            (Field::G1, imm(0.022)),
+            (Field::B1, imm(0.018)),
+            (Field::Alpha, imm(0.95)),
+            (Field::AlphaCurve, imm(0.35)),
+            (Field::Soft, imm(0.05)),
+        ],
+    );
+
+    vec![mist, drops]
+});
+
+/// What separates dirt from sand: a colour, how far a clod can spread, and how
+/// hard the air holds it back. `impacts.js:597-659`.
+///
+/// **Dirt and sand are one program with two rows.** The source writes them as a
+/// single function taking a `sand` flag, and every place that flag is read is a
+/// constant — a colour, a size ceiling, a drag — never a different computation.
+/// That is a table, and it is the first place in this file where the *table*
+/// half of the format earns its keep on its own: two ground recipes are the same
+/// instructions and two sets of `imm`.
+struct Ground {
+    albedo: (f64, f64, f64),
+    clod_size_max: f64,
+    clod_drag: f64,
+}
+
+const DIRT: Ground = Ground {
+    albedo: (0.3, 0.22, 0.15),
+    clod_size_max: 0.035,
+    clod_drag: 0.5,
+};
+
+const SAND: Ground = Ground {
+    albedo: (0.66, 0.56, 0.4),
+    clod_size_max: 0.02,
+    clod_drag: 1.4,
+};
+
+/// Dirt / sand: a plume, plus heavy ejected clods. `impacts.js:597-659`.
+fn ground(g: Ground) -> Vec<Burst> {
+    let (cr, cg, cb) = g.albedo;
+
+    // The plume — `impacts.js:604-635`. Spawn points are spread over a small
+    // disc on the surface rather than stacked on the impact point, so the puff
+    // reads as a crater rather than a jet.
+    let mut p_ = Program::new();
+    let at = p_.point();
+    let n = p_.normal();
+    let energy = p_.read(Input::Energy);
+    let dir = p_.cone(n, 0.75, 0.55);
+    let drawn = p_.range(1.6, 4.2);
+    let speed = p_.mul(drawn, energy);
+    let spread = p_.disc_on(n, 0.06);
+    let from = p_.add3(at, spread);
+    let lifted = p_.offset(from.1, 0.01);
+    let vel = p_.mul3(dir, speed);
+    let index = p_.read(Input::Index);
+    let phase = p_.modulo(index, 3.0);
+    let tile = p_.select_lt(phase, 0.5, p::SMOKE_B as f64, p::DUST as f64);
+    let near = p_.range(0.06, 0.13);
+    let size0 = p_.mul(near, energy);
+    let far = p_.range(0.55, 1.0);
+    let size1 = p_.mul(far, energy);
+    let life = p_.range(0.8, 1.5);
+    let drag = p_.range(2.2, 3.2);
+    let spun = p_.unit();
+    let rot = p_.scale(spun, TWO_PI);
+    let signed = p_.signed();
+    let spin = p_.scale(signed, 1.1);
+    let alpha = p_.range(0.6, 0.95);
+    let seed = p_.unit();
+
+    let plume = p_.emit(
+        (8.0, 3),
+        Pool::Lit,
+        vec![
+            (Field::X, from.0.src()),
+            (Field::Y, lifted.src()),
+            (Field::Z, from.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Tile, tile.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Drag, drag.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Alpha, alpha.src()),
+            (Field::Seed, seed.src()),
+            (Field::SizeCurve, imm(0.5)),
+            (Field::Gravity, imm(-1.6)),
+            (Field::R0, imm(cr)),
+            (Field::G0, imm(cg)),
+            (Field::B0, imm(cb)),
+            (Field::R1, imm(cr * 0.85)),
+            (Field::G1, imm(cg * 0.85)),
+            (Field::B1, imm(cb * 0.85)),
+            (Field::AlphaCurve, imm(1.4)),
+            (Field::Soft, imm(0.14)),
+            (Field::Turb, imm(0.08)),
+            (Field::TurbFreq, imm(1.6)),
+        ],
+    );
+
+    // Clods — `impacts.js:637-657`.
+    let mut c = Program::new();
+    let at = c.point();
+    let n = c.normal();
+    let lifted = c.offset(at.1, 0.01);
+    let dir = c.cone(n, 0.95, 1.1);
+    let speed = c.range(3.0, 9.0);
+    let vel = c.mul3(dir, speed);
+    let size = c.range(0.008, g.clod_size_max);
+    let life = c.range(0.6, 1.2);
+    let spun = c.unit();
+    let rot = c.scale(spun, TWO_PI);
+    let signed = c.signed();
+    let spin = c.scale(signed, 20.0);
+    let seed = c.unit();
+
+    let clods = c.emit(
+        (13.0, 5),
+        Pool::Lit,
+        vec![
+            (Field::X, at.0.src()),
+            (Field::Y, lifted.src()),
+            (Field::Z, at.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size0, size.src()),
+            (Field::Size1, size.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::CHIP as f64)),
+            (Field::Drag, imm(g.clod_drag)),
+            (Field::Gravity, imm(-19.0)),
+            (Field::R0, imm(cr * 0.8)),
+            (Field::G0, imm(cg * 0.8)),
+            (Field::B0, imm(cb * 0.8)),
+            (Field::R1, imm(cr * 0.7)),
+            (Field::G1, imm(cg * 0.7)),
+            (Field::B1, imm(cb * 0.7)),
+            (Field::AlphaCurve, imm(0.3)),
+            (Field::Soft, imm(0.06)),
+        ],
+    );
+
+    vec![plume, clods]
+}
+
+/// Wet earth. `impacts.js:597-659` with the dirt row.
+pub static GROUND_DIRT: LazyLock<Vec<Burst>> = LazyLock::new(|| ground(DIRT));
+
+/// Dry sand — paler, finer clods, more air resistance holding them back.
+pub static GROUND_SAND: LazyLock<Vec<Burst>> = LazyLock::new(|| ground(SAND));
+
+/// Water: a column, droplets, a hanging mist. `impacts.js:727-790`.
+///
+/// The only recipe that never reads the incident direction — everything leaves
+/// along the surface normal, whichever way the bullet came in — and the only one
+/// whose first burst has no cone at all: the column's outward velocity *is* its
+/// spawn offset, scaled, so the splash widens as it rises.
+///
+/// The ripple decal `impacts.js:786` writes is not here; it is a decal.
+pub static WATER: LazyLock<Vec<Burst>> = LazyLock::new(|| {
+    // The column — `impacts.js:733-758`.
+    let mut c = Program::new();
+    let at = c.point();
+    let n = c.normal();
+    let energy = c.read(Input::Energy);
+    let spread = c.disc_on(n, 0.05);
+    let x = c.add(at.0, spread.0);
+    let y = c.offset(at.1, 0.02);
+    let z = c.add(at.2, spread.2);
+    let vx = c.scale(spread.0, 2.5);
+    let drawn = c.range(2.4, 4.6);
+    let vy = c.mul(drawn, energy);
+    let vz = c.scale(spread.2, 2.5);
+    let near = c.range(0.07, 0.13);
+    let size0 = c.mul(near, energy);
+    let far = c.range(0.3, 0.55);
+    let size1 = c.mul(far, energy);
+    let life = c.range(0.4, 0.72);
+    let tilted = c.signed();
+    let rot = c.scale(tilted, 0.25);
+    let signed = c.signed();
+    let spin = c.scale(signed, 0.6);
+    let alpha = c.range(0.6, 0.9);
+    let seed = c.unit();
+
+    let column = c.emit(
+        (4.0, 2),
+        Pool::Lit,
+        vec![
+            (Field::X, x.src()),
+            (Field::Y, y.src()),
+            (Field::Z, z.src()),
+            (Field::Vx, vx.src()),
+            (Field::Vy, vy.src()),
+            (Field::Vz, vz.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Alpha, alpha.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::SPLASH as f64)),
+            (Field::SizeCurve, imm(0.55)),
+            (Field::Drag, imm(1.1)),
+            (Field::Gravity, imm(-13.0)),
+            (Field::R0, imm(0.7)),
+            (Field::G0, imm(0.76)),
+            (Field::B0, imm(0.8)),
+            (Field::R1, imm(0.6)),
+            (Field::G1, imm(0.68)),
+            (Field::B1, imm(0.72)),
+            (Field::AlphaCurve, imm(1.5)),
+            (Field::Soft, imm(0.1)),
+        ],
+    );
+
+    // Droplets — `impacts.js:760-781`.
+    let mut d = Program::new();
+    let at = d.point();
+    let n = d.normal();
+    let y = d.offset(at.1, 0.02);
+    let dir = d.cone(n, 0.85, 0.9);
+    let speed = d.range(2.5, 7.5);
+    let vel = d.mul3(dir, speed);
+    let size0 = d.range(0.008, 0.026);
+    let size1 = d.scale(size0, 0.9);
+    let life = d.range(0.4, 0.9);
+    let seed = d.unit();
+
+    let drops = d.emit(
+        (18.0, 6),
+        Pool::Lit,
+        vec![
+            (Field::X, at.0.src()),
+            (Field::Y, y.src()),
+            (Field::Z, at.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::DROPLET as f64)),
+            (Field::Stretch, imm(0.5)),
+            (Field::Drag, imm(0.7)),
+            (Field::Gravity, imm(-19.0)),
+            (Field::R0, imm(0.72)),
+            (Field::G0, imm(0.78)),
+            (Field::B0, imm(0.82)),
+            (Field::R1, imm(0.66)),
+            (Field::G1, imm(0.72)),
+            (Field::B1, imm(0.76)),
+            (Field::Alpha, imm(0.8)),
+            (Field::AlphaCurve, imm(0.4)),
+            (Field::Soft, imm(0.05)),
+        ],
+    );
+
+    // Hanging mist — `impacts.js:763-785`. No cone and no drawn velocity: it
+    // rises straight up at a fixed rate and expands.
+    let mut m = Program::new();
+    let at = m.point();
+    let y = m.offset(at.1, 0.05);
+    let size1 = m.range(0.35, 0.6);
+    let life = m.range(0.5, 0.9);
+    let spun = m.unit();
+    let rot = m.scale(spun, TWO_PI);
+    let seed = m.unit();
+
+    let mist = m.emit(
+        (3.0, 1),
+        Pool::Lit,
+        vec![
+            (Field::X, at.0.src()),
+            (Field::Y, y.src()),
+            (Field::Z, at.2.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Seed, seed.src()),
+            (Field::Vy, imm(0.7)),
+            (Field::Tile, imm(p::MIST as f64)),
+            (Field::Size0, imm(0.08)),
+            (Field::SizeCurve, imm(0.5)),
+            (Field::Drag, imm(3.4)),
+            (Field::Gravity, imm(-1.4)),
+            (Field::R0, imm(0.78)),
+            (Field::G0, imm(0.83)),
+            (Field::B0, imm(0.86)),
+            (Field::R1, imm(0.7)),
+            (Field::G1, imm(0.75)),
+            (Field::B1, imm(0.78)),
+            (Field::Alpha, imm(0.4)),
+            (Field::AlphaCurve, imm(1.7)),
+            (Field::Soft, imm(0.12)),
+        ],
+    );
+
+    vec![column, drops, mist]
+});
+
+/// What separates fabric from rubber: two colour pairs, and nothing else.
+/// `impacts.js:867-916`.
+///
+/// The second two-row table in this file, and a starker one than ground —
+/// every use of the source's `rubber` flag is a colour. Same instructions,
+/// same counts, same drags; two palettes.
+struct Soft {
+    dust0: (f64, f64, f64),
+    dust1: (f64, f64, f64),
+    fibre: (f64, f64, f64),
+}
+
+const FABRIC_PALETTE: Soft = Soft {
+    dust0: (0.5, 0.45, 0.38),
+    dust1: (0.42, 0.38, 0.32),
+    fibre: (0.46, 0.41, 0.34),
+};
+
+const RUBBER_PALETTE: Soft = Soft {
+    dust0: (0.1, 0.095, 0.09),
+    dust1: (0.08, 0.078, 0.075),
+    fibre: (0.09, 0.085, 0.08),
+};
+
+/// Fabric / rubber: dust, fibres, a tear. `impacts.js:867-916`.
+fn soft(s: Soft) -> Vec<Burst> {
+    // Dust — `impacts.js:874-901`.
+    let mut d = Program::new();
+    let at = d.point();
+    let n = d.normal();
+    let from = d.mad3(n, 0.02, at);
+    let axis = ejecta_axis(&mut d, n);
+    let dir = d.cone(axis, 1.1, 0.8);
+    let speed = d.range(0.8, 3.0);
+    let vel = d.mul3(dir, speed);
+    let rise = d.offset(vel.1, 0.3);
+    // Odd particles are dust, even are mist. `i % 2 < 0.5` is `i % 2 == 0`,
+    // which is the *even* case, so mist is the low arm.
+    let index = d.read(Input::Index);
+    let phase = d.modulo(index, 2.0);
+    let tile = d.select_lt(phase, 0.5, p::MIST as f64, p::DUST as f64);
+    let size0 = d.range(0.04, 0.08);
+    let size1 = d.range(0.2, 0.36);
+    let life = d.range(0.4, 0.8);
+    let spun = d.unit();
+    let rot = d.scale(spun, TWO_PI);
+    let signed = d.signed();
+    let spin = d.scale(signed, 1.5);
+    let alpha = d.range(0.45, 0.7);
+    let seed = d.unit();
+
+    let dust = d.emit(
+        (6.0, 2),
+        Pool::Lit,
+        vec![
+            (Field::X, from.0.src()),
+            (Field::Y, from.1.src()),
+            (Field::Z, from.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, rise.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Tile, tile.src()),
+            (Field::Size0, size0.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Alpha, alpha.src()),
+            (Field::Seed, seed.src()),
+            (Field::SizeCurve, imm(0.45)),
+            (Field::Drag, imm(3.8)),
+            (Field::Gravity, imm(-1.2)),
+            (Field::R0, imm(s.dust0.0)),
+            (Field::G0, imm(s.dust0.1)),
+            (Field::B0, imm(s.dust0.2)),
+            (Field::R1, imm(s.dust1.0)),
+            (Field::G1, imm(s.dust1.1)),
+            (Field::B1, imm(s.dust1.2)),
+            (Field::AlphaCurve, imm(1.5)),
+            (Field::Soft, imm(0.09)),
+        ],
+    );
+
+    // Fibres — `impacts.js:903-913`. The far colour is the near one at 90%,
+    // which is arithmetic on constants and therefore still a constant.
+    let mut f = Program::new();
+    let at = f.point();
+    let n = f.normal();
+    let axis = ejecta_axis(&mut f, n);
+    let dir = f.cone(axis, 1.0, 1.2);
+    let speed = f.range(1.5, 4.5);
+    let vel = f.mul3(dir, speed);
+    let size = f.range(0.01, 0.03);
+    let life = f.range(0.6, 1.2);
+    let spun = f.unit();
+    let rot = f.scale(spun, TWO_PI);
+    let signed = f.signed();
+    let spin = f.scale(signed, 18.0);
+    let seed = f.unit();
+
+    let fibres = f.emit(
+        (5.0, 2),
+        Pool::Lit,
+        vec![
+            (Field::X, at.0.src()),
+            (Field::Y, at.1.src()),
+            (Field::Z, at.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size0, size.src()),
+            (Field::Size1, size.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Spin, spin.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::SPLINTER as f64)),
+            (Field::Drag, imm(2.4)),
+            (Field::Gravity, imm(-14.0)),
+            (Field::R0, imm(s.fibre.0)),
+            (Field::G0, imm(s.fibre.1)),
+            (Field::B0, imm(s.fibre.2)),
+            (Field::R1, imm(s.fibre.0 * 0.9)),
+            (Field::G1, imm(s.fibre.1 * 0.9)),
+            (Field::B1, imm(s.fibre.2 * 0.9)),
+            (Field::AlphaCurve, imm(0.35)),
+            (Field::Soft, imm(0.06)),
+        ],
+    );
+
+    vec![dust, fibres]
+}
+
+/// Woven cloth — pale, dusty fibres.
+pub static FABRIC: LazyLock<Vec<Burst>> = LazyLock::new(|| soft(FABRIC_PALETTE));
+
+/// Rubber — the same burst, nearly black.
+pub static RUBBER: LazyLock<Vec<Burst>> = LazyLock::new(|| soft(RUBBER_PALETTE));
+
 /// The reflection and the normal, averaged — the axis ejecta follows when the
 /// debris cares about the bullet more than the surface, but not entirely.
 ///
@@ -233,7 +795,16 @@ fn ejecta_axis(b: &mut Program, n: V3) -> V3 {
 
 /// Every recipe, so a test can sweep them.
 pub fn all() -> Vec<(&'static str, &'static Burst)> {
-    [("foliage", &*FOLIAGE), ("wood", &*WOOD)]
+    [
+        ("foliage", &*FOLIAGE),
+        ("wood", &*WOOD),
+        ("flesh", &*FLESH),
+        ("ground.dirt", &*GROUND_DIRT),
+        ("ground.sand", &*GROUND_SAND),
+        ("water", &*WATER),
+        ("fabric", &*FABRIC),
+        ("rubber", &*RUBBER),
+    ]
         .into_iter()
         .flat_map(|(name, bursts)| bursts.iter().map(move |b| (name, b)))
         .collect()

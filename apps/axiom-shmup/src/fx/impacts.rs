@@ -839,75 +839,19 @@ fn wood(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64
 
 /// Dirt / sand: a plume, plus heavy ejected clods. `impacts.js:597-659`.
 fn ground(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64, sand: bool) {
-    let q = fx.pscale;
-    let (cr, cg, cb) = if sand { (0.66, 0.56, 0.4) } else { (0.3, 0.22, 0.15) };
-    let (px, py, pz) = point;
-
-    let n_plume = (8.0 * q).round() as i32 + 3;
-    for i in 0..n_plume {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, n.0, n.1, n.2, 0.75, 0.55);
-        let sp = fx.rng.range(1.6, 4.2) * e;
-        let mut s = reset_spawn();
-        let (dvx, dvy, dvz) = disc_on(&mut fx.rng, n.0, n.1, n.2, 0.06);
-        s.x = px + dvx;
-        s.y = py + dvy + 0.01;
-        s.z = pz + dvz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = (if i % 3 == 0 { p::SMOKE_B } else { p::DUST }) as f64;
-        s.size0 = fx.rng.range(0.06, 0.13) * e;
-        s.size1 = fx.rng.range(0.55, 1.0) * e;
-        s.size_curve = 0.5;
-        s.life = fx.rng.range(0.8, 1.5);
-        s.drag = fx.rng.range(2.2, 3.2);
-        s.gravity = -1.6;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 1.1;
-        s.r0 = cr;
-        s.g0 = cg;
-        s.b0 = cb;
-        s.r1 = cr * 0.85;
-        s.g1 = cg * 0.85;
-        s.b1 = cb * 0.85;
-        s.alpha = fx.rng.range(0.6, 0.95);
-        s.alpha_curve = 1.4;
-        s.soft = 0.14;
-        s.turb = 0.08;
-        s.turb_freq = 1.6;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_clod = (13.0 * q).round() as i32 + 5;
-    for _ in 0..n_clod {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, n.0, n.1, n.2, 0.95, 1.1);
-        let sp = fx.rng.range(3.0, 9.0);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py + 0.01;
-        s.z = pz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = p::CHIP as f64;
-        s.size0 = fx.rng.range(0.008, if sand { 0.02 } else { 0.035 });
-        s.size1 = s.size0;
-        s.life = fx.rng.range(0.6, 1.2);
-        s.drag = if sand { 1.4 } else { 0.5 };
-        s.gravity = -19.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 20.0;
-        s.r0 = cr * 0.8;
-        s.g0 = cg * 0.8;
-        s.b0 = cb * 0.8;
-        s.r1 = cr * 0.7;
-        s.g1 = cg * 0.7;
-        s.b1 = cb * 0.7;
-        s.alpha_curve = 0.3;
-        s.soft = 0.06;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run_all(
+        fx,
+        [&crate::fx::recipes::GROUND_DIRT, &crate::fx::recipes::GROUND_SAND][usize::from(sand)],
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            // Ground never reads the incident direction: the plume and the
+            // clods both leave along the surface normal, whichever way the
+            // bullet came in.
+            incident: (0.0, 0.0, 0.0),
+            energy: e,
+        },
+    );
     bullet_hole(
         fx,
         point,
@@ -1040,98 +984,18 @@ fn glass(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 
 /// Water: a column, droplets, an expanding ripple. `impacts.js:727-790`.
 fn water(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64) {
-    let q = fx.pscale;
-    let (px, py, pz) = point;
-
-    let n_col = (4.0 * q).round() as i32 + 2;
-    for _ in 0..n_col {
-        let mut s = reset_spawn();
-        let (dvx, dvy, dvz) = disc_on(&mut fx.rng, n.0, n.1, n.2, 0.05);
-        let _ = dvy;
-        s.x = px + dvx;
-        s.y = py + 0.02;
-        s.z = pz + dvz;
-        s.vx = dvx * 2.5;
-        s.vy = fx.rng.range(2.4, 4.6) * e;
-        s.vz = dvz * 2.5;
-        s.tile = p::SPLASH as f64;
-        s.size0 = fx.rng.range(0.07, 0.13) * e;
-        s.size1 = fx.rng.range(0.3, 0.55) * e;
-        s.size_curve = 0.55;
-        s.life = fx.rng.range(0.4, 0.72);
-        s.drag = 1.1;
-        s.gravity = -13.0;
-        s.rot = fx.rng.signed() * 0.25;
-        s.spin = fx.rng.signed() * 0.6;
-        s.r0 = 0.7;
-        s.g0 = 0.76;
-        s.b0 = 0.8;
-        s.r1 = 0.6;
-        s.g1 = 0.68;
-        s.b1 = 0.72;
-        s.alpha = fx.rng.range(0.6, 0.9);
-        s.alpha_curve = 1.5;
-        s.soft = 0.1;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_drop = (18.0 * q).round() as i32 + 6;
-    for _ in 0..n_drop {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, n.0, n.1, n.2, 0.85, 0.9);
-        let sp = fx.rng.range(2.5, 7.5);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py + 0.02;
-        s.z = pz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = p::DROPLET as f64;
-        s.size0 = fx.rng.range(0.008, 0.026);
-        s.size1 = s.size0 * 0.9;
-        s.stretch = 0.5;
-        s.life = fx.rng.range(0.4, 0.9);
-        s.drag = 0.7;
-        s.gravity = -19.0;
-        s.r0 = 0.72;
-        s.g0 = 0.78;
-        s.b0 = 0.82;
-        s.r1 = 0.66;
-        s.g1 = 0.72;
-        s.b1 = 0.76;
-        s.alpha = 0.8;
-        s.alpha_curve = 0.4;
-        s.soft = 0.05;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_mist = (3.0 * q).round() as i32 + 1;
-    for _ in 0..n_mist {
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py + 0.05;
-        s.z = pz;
-        s.vy = 0.7;
-        s.tile = p::MIST as f64;
-        s.size0 = 0.08;
-        s.size1 = fx.rng.range(0.35, 0.6);
-        s.size_curve = 0.5;
-        s.life = fx.rng.range(0.5, 0.9);
-        s.drag = 3.4;
-        s.gravity = -1.4;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.r0 = 0.78;
-        s.g0 = 0.83;
-        s.b0 = 0.86;
-        s.r1 = 0.7;
-        s.g1 = 0.75;
-        s.b1 = 0.78;
-        s.alpha = 0.4;
-        s.alpha_curve = 1.7;
-        s.soft = 0.12;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run_all(
+        fx,
+        &crate::fx::recipes::WATER,
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            // Water never reads it: the column, the droplets and the mist all
+            // leave along the normal, whichever way the bullet came in.
+            incident: (0.0, 0.0, 0.0),
+            energy: e,
+        },
+    );
     let ripple_size = fx.rng.range(0.45, 0.7);
     fx.add_decal(
         point,
@@ -1153,74 +1017,16 @@ fn water(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64) 
 /// Flesh: a dark aerosol cone, heavy droplets, spatter behind.
 /// `impacts.js:793-841`.
 fn flesh(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
-    let q = fx.pscale;
-    let (ax, ay, az) = (inc.0 * 0.75 - n.0 * 0.25, inc.1 * 0.75 - n.1 * 0.25, inc.2 * 0.75 - n.2 * 0.25);
-    let (px, py, pz) = point;
-
-    let n_mist = (9.0 * q).round() as i32 + 4;
-    for i in 0..n_mist {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, ax, ay, az, 0.95, 0.8);
-        let sp = fx.rng.range(1.2, 4.5);
-        let mut s = reset_spawn();
-        s.x = px - n.0 * 0.02;
-        s.y = py - n.1 * 0.02;
-        s.z = pz - n.2 * 0.02;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp + 0.3;
-        s.vz = vz2 * sp;
-        s.tile = (if i % 3 == 0 { p::SMOKE_A } else { p::MIST }) as f64;
-        s.size0 = fx.rng.range(0.035, 0.075) * e;
-        s.size1 = fx.rng.range(0.16, 0.34) * e;
-        s.size_curve = 0.5;
-        s.life = fx.rng.range(0.3, 0.62);
-        s.drag = fx.rng.range(4.5, 6.5);
-        s.gravity = -3.2;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 2.0;
-        s.r0 = 0.34;
-        s.g0 = 0.035;
-        s.b0 = 0.03;
-        s.r1 = 0.16;
-        s.g1 = 0.016;
-        s.b1 = 0.014;
-        s.alpha = fx.rng.range(0.6, 0.95);
-        s.alpha_curve = 1.5;
-        s.soft = 0.08;
-        s.turb = 0.04;
-        s.turb_freq = 3.0;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_drop = (14.0 * q).round() as i32 + 5;
-    for _ in 0..n_drop {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, ax, ay, az, 1.1, 1.2);
-        let sp = fx.rng.range(2.0, 8.0);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py;
-        s.z = pz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = p::DROPLET as f64;
-        s.size0 = fx.rng.range(0.007, 0.022);
-        s.size1 = s.size0;
-        s.stretch = 0.6;
-        s.life = fx.rng.range(0.35, 0.8);
-        s.drag = 0.9;
-        s.gravity = -19.0;
-        s.r0 = 0.3;
-        s.g0 = 0.03;
-        s.b0 = 0.025;
-        s.r1 = 0.22;
-        s.g1 = 0.022;
-        s.b1 = 0.018;
-        s.alpha = 0.95;
-        s.alpha_curve = 0.35;
-        s.soft = 0.05;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run_all(
+        fx,
+        &crate::fx::recipes::FLESH,
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            incident: inc,
+            energy: e,
+        },
+    );
     fx.blood_spatter_behind(point, inc);
 }
 
@@ -1247,88 +1053,16 @@ fn foliage(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (
 
 /// Fabric / rubber: dust, fibres, a tear. `impacts.js:867-916`.
 fn soft(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), rubber: bool) {
-    let q = fx.pscale;
-    let (vx, vy, vz) = reflect(inc.0, inc.1, inc.2, n.0, n.1, n.2);
-    let (rx, ry, rz) = ((vx + n.0) * 0.5, (vy + n.1) * 0.5, (vz + n.2) * 0.5);
-    let (px, py, pz) = point;
-
-    let n_dust = (6.0 * q).round() as i32 + 2;
-    for i in 0..n_dust {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, rx, ry, rz, 1.1, 0.8);
-        let sp = fx.rng.range(0.8, 3.0);
-        let mut s = reset_spawn();
-        s.x = px + n.0 * 0.02;
-        s.y = py + n.1 * 0.02;
-        s.z = pz + n.2 * 0.02;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp + 0.3;
-        s.vz = vz2 * sp;
-        s.tile = (if i % 2 == 1 { p::DUST } else { p::MIST }) as f64;
-        s.size0 = fx.rng.range(0.04, 0.08);
-        s.size1 = fx.rng.range(0.2, 0.36);
-        s.size_curve = 0.45;
-        s.life = fx.rng.range(0.4, 0.8);
-        s.drag = 3.8;
-        s.gravity = -1.2;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 1.5;
-        if rubber {
-            s.r0 = 0.1;
-            s.g0 = 0.095;
-            s.b0 = 0.09;
-            s.r1 = 0.08;
-            s.g1 = 0.078;
-            s.b1 = 0.075;
-        } else {
-            s.r0 = 0.5;
-            s.g0 = 0.45;
-            s.b0 = 0.38;
-            s.r1 = 0.42;
-            s.g1 = 0.38;
-            s.b1 = 0.32;
-        }
-        s.alpha = fx.rng.range(0.45, 0.7);
-        s.alpha_curve = 1.5;
-        s.soft = 0.09;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_spl = (5.0 * q).round() as i32 + 2;
-    for _ in 0..n_spl {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, rx, ry, rz, 1.0, 1.2);
-        let sp = fx.rng.range(1.5, 4.5);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py;
-        s.z = pz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = p::SPLINTER as f64;
-        s.size0 = fx.rng.range(0.01, 0.03);
-        s.size1 = s.size0;
-        s.life = fx.rng.range(0.6, 1.2);
-        s.drag = 2.4;
-        s.gravity = -14.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 18.0;
-        if rubber {
-            s.r0 = 0.09;
-            s.g0 = 0.085;
-            s.b0 = 0.08;
-        } else {
-            s.r0 = 0.46;
-            s.g0 = 0.41;
-            s.b0 = 0.34;
-        }
-        s.r1 = s.r0 * 0.9;
-        s.g1 = s.g0 * 0.9;
-        s.b1 = s.b0 * 0.9;
-        s.alpha_curve = 0.35;
-        s.soft = 0.06;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run_all(
+        fx,
+        [&crate::fx::recipes::FABRIC, &crate::fx::recipes::RUBBER][usize::from(rubber)],
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            incident: inc,
+            energy: 1.0,
+        },
+    );
     let tear_size = fx.rng.range(0.09, 0.15);
     let tear_roll = fx.rng.float() * TWO_PI;
     fx.add_decal(

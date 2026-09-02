@@ -33,7 +33,7 @@
 
 use crate::fx::particles::ParticleSpawn;
 use crate::fx::system::FxSystem;
-use crate::fx::util::{cone, reflect};
+use crate::fx::util::{blackbody, clamp_cone, cone, disc_on, reflect, toward_hemi};
 
 /// A value the program can read that comes from the call site rather than from
 /// an instruction.
@@ -81,11 +81,40 @@ pub enum Op {
     Unit,
     /// `rng.signed()`. Writes 1. **Draws once.**
     Signed,
-    /// `cone(rng, dir, spread, power)`. Writes 3. **Draws as `cone` does.**
+    /// `cone(rng, dir, spread, power)`. Writes 3. **Draws twice.**
     Cone {
         dir: [u16; 3],
         spread: f64,
         power: f64,
+    },
+    /// A point on a disc of radius `r` in the plane through the origin with
+    /// normal `n`. Writes 3. **Draws twice.**
+    ///
+    /// The source uses it to spread a plume's spawn points over the crater
+    /// rather than stacking them on one point, so it is a *position* offset
+    /// where [`Op::Cone`] is a direction.
+    DiscOn { normal: [u16; 3], radius: f64 },
+    /// The blackbody colour of a temperature in kelvin, normalised so its
+    /// brightest channel is 1. Writes 3. Draws nothing.
+    ///
+    /// A pure function of one register, and the register is usually itself
+    /// drawn — a spark's temperature jitters per particle — which is why the
+    /// temperature is an operand rather than a parameter.
+    Blackbody(u16),
+    /// Force a direction into the hemisphere about an axis, mirroring whatever
+    /// component points the wrong way and keeping a minimum forward bias.
+    /// Writes 3. Draws nothing.
+    TowardHemi {
+        dir: [u16; 3],
+        axis: [u16; 3],
+        bias: f64,
+    },
+    /// Pull a direction back inside a cone about an axis, if it has strayed
+    /// outside. Writes 3. Draws nothing.
+    ClampCone {
+        dir: [u16; 3],
+        axis: [u16; 3],
+        cos_max: f64,
     },
     /// `a * b`. Writes 1.
     Mul(u16, u16),
@@ -321,12 +350,51 @@ impl Program {
 
     /// A direction in a cone about `dir`. **Draws twice.**
     pub fn cone(&mut self, dir: V3, spread: f64, power: f64) -> V3 {
-        let first = self.push(Op::Cone {
+        self.triple(Op::Cone {
             dir: [dir.0 .0, dir.1 .0, dir.2 .0],
             spread,
             power,
-        });
+        })
+    }
+
+    /// Append an instruction that writes three registers, handing back all
+    /// three. The one place the `+ 1`/`+ 2` is written, so a recipe never
+    /// touches a raw register number even for the instructions that break the
+    /// one-instruction-one-register rule.
+    fn triple(&mut self, op: Op) -> V3 {
+        let first = self.push(op);
         V3(first, Reg(first.0 + 1), Reg(first.0 + 2))
+    }
+
+    /// A point on a disc of radius `r` about `normal`. **Draws twice.**
+    pub fn disc_on(&mut self, normal: V3, radius: f64) -> V3 {
+        self.triple(Op::DiscOn {
+            normal: [normal.0 .0, normal.1 .0, normal.2 .0],
+            radius,
+        })
+    }
+
+    /// The blackbody colour of a temperature register.
+    pub fn blackbody(&mut self, kelvin: Reg) -> V3 {
+        self.triple(Op::Blackbody(kelvin.0))
+    }
+
+    /// Force `dir` into the hemisphere about `axis`, keeping `bias` forward.
+    pub fn toward_hemi(&mut self, dir: V3, axis: V3, bias: f64) -> V3 {
+        self.triple(Op::TowardHemi {
+            dir: [dir.0 .0, dir.1 .0, dir.2 .0],
+            axis: [axis.0 .0, axis.1 .0, axis.2 .0],
+            bias,
+        })
+    }
+
+    /// Pull `dir` back inside a cone about `axis`.
+    pub fn clamp_cone(&mut self, dir: V3, axis: V3, cos_max: f64) -> V3 {
+        self.triple(Op::ClampCone {
+            dir: [dir.0 .0, dir.1 .0, dir.2 .0],
+            axis: [axis.0 .0, axis.1 .0, axis.2 .0],
+            cos_max,
+        })
     }
 
     /// `a * b`.
@@ -473,7 +541,15 @@ impl Op {
     /// a function rather than left implicit in the interpreter, and
     /// [`Burst::operands_resolve`] checks every recipe against it.
     pub fn writes(self) -> usize {
-        [1, 3][usize::from(matches!(self, Op::Cone { .. }))]
+        let three = matches!(
+            self,
+            Op::Cone { .. }
+                | Op::DiscOn { .. }
+                | Op::Blackbody(_)
+                | Op::TowardHemi { .. }
+                | Op::ClampCone { .. }
+        );
+        [1, 3][usize::from(three)]
     }
 
     /// The registers this instruction reads. At most three.
@@ -481,6 +557,11 @@ impl Op {
         match self {
             Op::Read(_) | Op::Range(..) | Op::Unit | Op::Signed => Vec::new(),
             Op::Cone { dir, .. } => dir.to_vec(),
+            Op::DiscOn { normal, .. } => normal.to_vec(),
+            Op::Blackbody(k) => vec![k],
+            Op::TowardHemi { dir, axis, .. } | Op::ClampCone { dir, axis, .. } => {
+                dir.iter().chain(axis.iter()).copied().collect()
+            }
             Op::Mul(a, b) | Op::Add(a, b) => vec![a, b],
             Op::Mad(a, _, b) => vec![a, b],
             Op::Scale(a, _) | Op::Offset(a, _) | Op::Mod(a, _) => vec![a],
@@ -572,6 +653,44 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
                         regs[dir[2] as usize],
                         spread,
                         power,
+                    );
+                    regs.extend([x, y, z]);
+                }
+                Op::DiscOn { normal, radius } => {
+                    let (x, y, z) = disc_on(
+                        &mut fx.rng,
+                        regs[normal[0] as usize],
+                        regs[normal[1] as usize],
+                        regs[normal[2] as usize],
+                        radius,
+                    );
+                    regs.extend([x, y, z]);
+                }
+                Op::Blackbody(k) => {
+                    let (r, g, b) = blackbody(regs[k as usize]);
+                    regs.extend([r, g, b]);
+                }
+                Op::TowardHemi { dir, axis, bias } => {
+                    let (x, y, z) = toward_hemi(
+                        regs[dir[0] as usize],
+                        regs[dir[1] as usize],
+                        regs[dir[2] as usize],
+                        regs[axis[0] as usize],
+                        regs[axis[1] as usize],
+                        regs[axis[2] as usize],
+                        bias,
+                    );
+                    regs.extend([x, y, z]);
+                }
+                Op::ClampCone { dir, axis, cos_max } => {
+                    let (x, y, z) = clamp_cone(
+                        regs[dir[0] as usize],
+                        regs[dir[1] as usize],
+                        regs[dir[2] as usize],
+                        regs[axis[0] as usize],
+                        regs[axis[1] as usize],
+                        regs[axis[2] as usize],
+                        cos_max,
                     );
                     regs.extend([x, y, z]);
                 }
