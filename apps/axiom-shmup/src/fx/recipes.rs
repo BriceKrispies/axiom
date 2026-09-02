@@ -79,6 +79,25 @@ pub static GLASS: LazyLock<Vec<Burst>> =
 pub static PLASTER: LazyLock<Vec<Burst>> =
     LazyLock::new(|| load("plaster", include_str!("recipes/plaster.burst")));
 
+/// An explosion's fire — core flash, fireball, boiling smoke.
+/// `explosions.js:35-140`.
+pub static EXPLOSION_FIRE: LazyLock<Vec<Burst>> = LazyLock::new(|| {
+    load(
+        "explosion_fire",
+        include_str!("recipes/explosion_fire.burst"),
+    )
+});
+
+/// An explosion's blast — shockwave, ground ring, debris, embers.
+/// `explosions.js:140-262`. A separate recipe because the haze ring fires
+/// between the two and draws from the same stream.
+pub static EXPLOSION_BLAST: LazyLock<Vec<Burst>> = LazyLock::new(|| {
+    load(
+        "explosion_blast",
+        include_str!("recipes/explosion_blast.burst"),
+    )
+});
+
 /// Every recipe, so a test can sweep them.
 pub fn all() -> Vec<(&'static str, &'static Burst)> {
     [
@@ -92,6 +111,8 @@ pub fn all() -> Vec<(&'static str, &'static Burst)> {
         ("rubber", &*RUBBER),
         ("glass", &*GLASS),
         ("plaster", &*PLASTER),
+        ("explosion_fire", &*EXPLOSION_FIRE),
+        ("explosion_blast", &*EXPLOSION_BLAST),
     ]
     .into_iter()
     .flat_map(|(name, bursts)| bursts.iter().map(move |b| (name, b)))
@@ -110,9 +131,10 @@ mod tests {
     /// mistake wearing a runtime costume, and this is where it gets caught.
     #[test]
     fn every_recipe_parses_into_at_least_one_burst() {
-        // Ten recipes, twenty-one bursts: foliage is a single burst, water and
-        // plaster are three each, and the rest are two.
-        assert_eq!(all().len(), 21, "the recipe set changed size");
+        // Twelve recipes, twenty-eight bursts: foliage is one, water and
+        // plaster are three each, the explosion's two halves are three and
+        // four, and the rest are two.
+        assert_eq!(all().len(), 28, "the recipe set changed size");
     }
 
     #[test]

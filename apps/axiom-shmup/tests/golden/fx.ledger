@@ -104,3 +104,11 @@ impact_plaster view_lit 0 af63bd4c8601b7df
 impact_plaster decals 2 53fe09e8b1e73157
 impact_plaster lights 4 40a7ffd9460cafd3
 impact_plaster rng 0 21aa7cd4478906ae
+explosion add 23 692e90eafa559a09
+explosion lit 37 5d20c5998685e4c3
+explosion motes 0 af63bd4c8601b7df
+explosion view_add 0 af63bd4c8601b7df
+explosion view_lit 0 af63bd4c8601b7df
+explosion decals 1 55fc8ceab69ce8f6
+explosion lights 4 9d44a75668b13828
+explosion rng 0 86417e6894f1e449

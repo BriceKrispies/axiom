@@ -220,6 +220,8 @@ impl Draft {
             "reflected" => Ok(Val::Vector(b.reflected())),
             "incident" => Ok(Val::Vector(b.incident())),
             "sun" => Ok(Val::Vector(b.sun())),
+            "up" => Ok(Val::Vector(b.up())),
+            "radius" => Ok(Val::Scalar(b.read(crate::fx::burst::Input::Radius))),
             "index" => Ok(Val::Scalar(b.read(crate::fx::burst::Input::Index))),
             "particles" => Ok(Val::Scalar(b.read(crate::fx::burst::Input::Count))),
             "energy" => Ok(Val::Scalar(b.read(crate::fx::burst::Input::Energy))),
@@ -237,7 +239,8 @@ impl Draft {
             }
             "disc_on" => {
                 let n = self.vector(arg(1), at)?;
-                Ok(Val::Vector(self.program.disc_on(n, num(arg(2), at)?)))
+                let r = self.src(arg(2), at)?;
+                Ok(Val::Vector(self.program.disc_on(n, r)))
             }
             "blackbody" => {
                 let k = self.scalar(arg(1), at)?;
@@ -254,6 +257,7 @@ impl Draft {
                 Ok(Val::Vector(self.program.clamp_cone(d, a, num(arg(3), at)?)))
             }
             "mul" => self.binary(words, at, Program::mul),
+            "div" => self.binary(words, at, Program::div),
             "add" => self.binary(words, at, Program::add),
             "sub" => self.binary(words, at, Program::sub),
             "scale" => self.scaled(words, at, Program::scale),
@@ -265,6 +269,14 @@ impl Draft {
                 let k = num(arg(2), at)?;
                 let c = self.scalar(arg(3), at)?;
                 Ok(Val::Scalar(self.program.mad(a, k, c)))
+            }
+            "cos" => {
+                let a = self.scalar(arg(1), at)?;
+                Ok(Val::Scalar(self.program.cos(a)))
+            }
+            "sin" => {
+                let a = self.scalar(arg(1), at)?;
+                Ok(Val::Scalar(self.program.sin(a)))
             }
             "dot" => {
                 let a = self.vector(arg(1), at)?;
@@ -393,6 +405,10 @@ fn literal(word: &str) -> Option<f64> {
         "SPLINTER" => Some(p::SPLINTER as f64),
         "DROPLET" => Some(p::DROPLET as f64),
         "SPLASH" => Some(p::SPLASH as f64),
+        "RING" => Some(p::RING as f64),
+        "FIRE" => Some(p::FIRE as f64),
+        "FLASH_CORE" => Some(p::FLASH_CORE as f64),
+        "FLASH_LOBE" => Some(p::FLASH_LOBE as f64),
         _ => None,
     })
 }

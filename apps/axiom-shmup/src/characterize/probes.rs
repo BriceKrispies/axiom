@@ -45,6 +45,10 @@ pub mod fx {
     ];
 
     /// The case names, so a caller can enumerate without touching `Surface`.
+    ///
+    /// `tracer` and `explosion` are not here: this list is the surface dispatch
+    /// specifically, and the ledger's own row set is what
+    /// `the_ledger_and_the_case_list_agree` checks against.
     pub const CASES: &[&str] = &SURFACE_CASE;
 
     /// The seed every impact case runs at.
@@ -79,10 +83,31 @@ pub mod fx {
         observe(SURFACE_CASE[index], &sys).witness(sys.add.raw(), 2)
     }
 
+    /// The explosion case.
+    ///
+    /// Added when the impact recipes had all moved to data and explosions were
+    /// next, because a conversion without an oracle is a rewrite with extra
+    /// steps. The radius is deliberately not the default: everything in an
+    /// explosion scales by it, so a recipe that dropped the scaling would still
+    /// look plausible at `r = 1`.
+    pub fn explosion() -> Capture {
+        let mut sys = FxSystem::test_instance(0xB007);
+        crate::fx::explosions::explode(
+            &mut sys,
+            &crate::fx::explosions::ExplosionOpts {
+                position: (2.5, 1.25, -4.0),
+                radius: 3.5,
+                up: (0.0, 1.0, 0.0),
+            },
+        );
+        observe("explosion", &sys).witness(sys.add.raw(), 3)
+    }
+
     /// Every `fx` case, in ledger order.
     pub fn all() -> Vec<Capture> {
         let mut out = vec![tracer()];
         out.extend((0..Surface::ALL.len()).map(impact));
+        out.push(explosion());
         out
     }
 }

@@ -62,6 +62,18 @@ pub enum Input {
     /// a scene-level value reaches a per-particle program at all. It arrives
     /// through the site rather than as a magic global, so a recipe run twice
     /// with the same site produces the same particles.
+    /// The axis an explosion throws along — usually straight up, but a charge
+    /// on a wall throws off the wall.
+    ///
+    /// A separate name from the surface normal rather than a reuse of it,
+    /// because a recipe that says `normal` and means "up" is the kind of
+    /// implicit contract that reads fine and is wrong once.
+    UpX,
+    UpY,
+    UpZ,
+    /// How big the event is, in metres. Nearly everything an explosion writes
+    /// scales by it, which is why it is an input and not a family of recipes.
+    Radius,
     SunX,
     SunY,
     SunZ,
@@ -110,7 +122,9 @@ pub enum Op {
     /// The source uses it to spread a plume's spawn points over the crater
     /// rather than stacking them on one point, so it is a *position* offset
     /// where [`Op::Cone`] is a direction.
-    DiscOn { normal: [u16; 3], radius: f64 },
+    /// The radius is a [`Src`] rather than a literal because an explosion's is
+    /// `radius * k` and its radius is only known when the charge goes off.
+    DiscOn { normal: [u16; 3], radius: Src },
     /// The blackbody colour of a temperature in kelvin, normalised so its
     /// brightest channel is 1. Writes 3. Draws nothing.
     ///
@@ -141,6 +155,15 @@ pub enum Op {
     Add(u16, u16),
     /// `a - b`. Writes 1.
     Sub(u16, u16),
+    /// `a / b`. Writes 1.
+    ///
+    /// The one place a burst divides is a ring: `index / count` is where round
+    /// the circle this particle sits, which is a ratio and not a scale.
+    Div(u16, u16),
+    /// `cos(a)`. Writes 1.
+    Cos(u16),
+    /// `sin(a)`. Writes 1.
+    Sin(u16),
     /// `dot(a, b)`. Writes 1.
     Dot { a: [u16; 3], b: [u16; 3] },
     /// `max(a, k)`. Writes 1.
@@ -422,6 +445,11 @@ impl Program {
         self.read3(Input::SunX, Input::SunY, Input::SunZ)
     }
 
+    /// The axis an explosion throws along.
+    pub fn up(&mut self) -> V3 {
+        self.read3(Input::UpX, Input::UpY, Input::UpZ)
+    }
+
     fn read3(&mut self, x: Input, y: Input, z: Input) -> V3 {
         V3(self.read(x), self.read(y), self.read(z))
     }
@@ -459,8 +487,8 @@ impl Program {
         V3(first, Reg(first.0 + 1), Reg(first.0 + 2))
     }
 
-    /// A point on a disc of radius `r` about `normal`. **Draws twice.**
-    pub fn disc_on(&mut self, normal: V3, radius: f64) -> V3 {
+    /// A point on a disc of radius `radius` about `normal`. **Draws twice.**
+    pub fn disc_on(&mut self, normal: V3, radius: Src) -> V3 {
         self.triple(Op::DiscOn {
             normal: [normal.0 .0, normal.1 .0, normal.2 .0],
             radius,
@@ -514,6 +542,21 @@ impl Program {
     /// `a - b`.
     pub fn sub(&mut self, a: Reg, b: Reg) -> Reg {
         self.push(Op::Sub(a.0, b.0))
+    }
+
+    /// `a / b`.
+    pub fn div(&mut self, a: Reg, b: Reg) -> Reg {
+        self.push(Op::Div(a.0, b.0))
+    }
+
+    /// `cos(a)`.
+    pub fn cos(&mut self, a: Reg) -> Reg {
+        self.push(Op::Cos(a.0))
+    }
+
+    /// `sin(a)`.
+    pub fn sin(&mut self, a: Reg) -> Reg {
+        self.push(Op::Sin(a.0))
     }
 
     /// `dot(a, b)`.
@@ -702,6 +745,11 @@ pub struct Site {
     /// The world direction toward the sun. Zero when a recipe never reads it,
     /// which is every recipe but plaster's.
     pub sun: (f64, f64, f64),
+    /// The axis an explosion throws along. Straight up for an impact, which
+    /// never reads it.
+    pub up: (f64, f64, f64),
+    /// The size of the event. One for an impact, which never reads it.
+    pub radius: f64,
 }
 
 /// The per-particle values [`Input`] can reach that are not part of the site:
@@ -731,6 +779,27 @@ impl Site {
             incident,
             energy,
             sun: fx.sun_world(),
+            up: (0.0, 1.0, 0.0),
+            radius: 1.0,
+        }
+    }
+
+    /// The site of an explosion: a point, the axis it throws along, and how big
+    /// it is. No surface, so no normal and no incident direction.
+    pub fn blast(
+        fx: &FxSystem,
+        point: (f64, f64, f64),
+        up: (f64, f64, f64),
+        radius: f64,
+    ) -> Self {
+        Self {
+            point,
+            normal: up,
+            incident: (0.0, 0.0, 0.0),
+            energy: 1.0,
+            sun: fx.sun_world(),
+            up,
+            radius,
         }
     }
 
@@ -748,6 +817,10 @@ impl Site {
             Input::IncidentX => self.incident.0,
             Input::IncidentY => self.incident.1,
             Input::IncidentZ => self.incident.2,
+            Input::UpX => self.up.0,
+            Input::UpY => self.up.1,
+            Input::UpZ => self.up.2,
+            Input::Radius => self.radius,
             Input::SunX => self.sun.0,
             Input::SunY => self.sun.1,
             Input::SunZ => self.sun.2,
@@ -784,12 +857,17 @@ impl Op {
         match self {
             Op::Const(_) | Op::Read(_) | Op::Range(..) | Op::Unit | Op::Signed => Vec::new(),
             Op::Cone { dir, .. } => dir.to_vec(),
-            Op::DiscOn { normal, .. } => normal.to_vec(),
+            Op::DiscOn { normal, radius } => normal
+                .iter()
+                .copied()
+                .chain(radius.reg())
+                .collect(),
             Op::Blackbody(k) => vec![k],
             Op::TowardHemi { dir, axis, .. } | Op::ClampCone { dir, axis, .. } => {
                 dir.iter().chain(axis.iter()).copied().collect()
             }
-            Op::Mul(a, b) | Op::Add(a, b) | Op::Sub(a, b) => vec![a, b],
+            Op::Mul(a, b) | Op::Add(a, b) | Op::Sub(a, b) | Op::Div(a, b) => vec![a, b],
+            Op::Cos(a) | Op::Sin(a) => vec![a],
             Op::Dot { a, b } => a.iter().chain(b.iter()).copied().collect(),
             Op::Max(a, _) | Op::Gate { probe: a, .. } => vec![a],
             Op::Mad(a, _, b) => vec![a, b],
@@ -963,7 +1041,7 @@ fn eval(
                         regs[normal[0] as usize],
                         regs[normal[1] as usize],
                         regs[normal[2] as usize],
-                        radius,
+                        radius.read(&regs),
                     );
                     regs.extend([x, y, z]);
                 }
@@ -999,6 +1077,9 @@ fn eval(
                 Op::Scale(a, k) => regs.push(regs[a as usize] * k),
                 Op::Add(a, b) => regs.push(regs[a as usize] + regs[b as usize]),
                 Op::Sub(a, b) => regs.push(regs[a as usize] - regs[b as usize]),
+                Op::Div(a, b) => regs.push(regs[a as usize] / regs[b as usize]),
+                Op::Cos(a) => regs.push(regs[a as usize].cos()),
+                Op::Sin(a) => regs.push(regs[a as usize].sin()),
                 Op::Dot { a, b } => {
                     let d = (0..3)
                         .map(|k| regs[a[k] as usize] * regs[b[k] as usize])
@@ -1106,6 +1187,8 @@ mod tests {
             incident: (0.3, -0.9, 0.3),
             energy: 1.0,
             sun: (0.2, 0.9, -0.1),
+            up: (0.0, 1.0, 0.0),
+            radius: 1.0,
         }
     }
 
