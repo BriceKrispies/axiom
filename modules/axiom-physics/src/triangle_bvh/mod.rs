@@ -29,8 +29,7 @@
 //! different node bounds, a different traversal order, and different
 //! first-hit-wins results for a ray that grazes two coplanar triangles.
 
-use axiom_math::DAabb;
-use axiom_math::DVec3;
+use axiom_math::{DAabb, DSegment, DTriangle, DVec3};
 
 /// Bins per split axis.
 const BINS: usize = 12;
@@ -55,6 +54,29 @@ const BOUND_PAD: f64 = 1e-5;
 /// Substituted for a zero ray-direction component before taking a reciprocal,
 /// so the slab test yields a signed infinity rather than a NaN.
 const RAY_EPSILON: f64 = 1e-30;
+/// A contact closer than this has no usable direction, so the face normal is
+/// all there is to go on.
+const CONTACT_DEGENERATE: f64 = 1e-6;
+/// A closest-point direction whose agreement with the face normal falls below
+/// this is treated as pointing into the solid — a deep contact — and the face
+/// normal is used instead.
+const FACE_NORMAL_FALLBACK_DOT: f64 = 0.05;
+/// Extra reach when gathering sweep candidates, so a triangle the capsule
+/// grazes is not culled by the broad box before the narrow test sees it.
+const SWEEP_SKIN: f64 = 0.002;
+/// Conservative-advancement iteration cap. The step is exact in the limit; this
+/// bounds how long an asymptotic approach may take.
+const SWEEP_ITERATIONS: u32 = 48;
+/// A gap this small counts as touching.
+const SWEEP_TOLERANCE: f64 = 1.0e-4;
+/// Below this separation the capsule axis runs through the face itself.
+const AXIS_THROUGH_FACE: f64 = 1e-12;
+/// Closing speed above which a touch is *blocking* rather than resting.
+const CLOSING_EPSILON: f64 = 1e-6;
+/// Closing speed at or below which the capsule is not approaching at all.
+const RECEDING_EPSILON: f64 = 1e-7;
+/// Smallest advancement step, so a vanishing one still makes progress.
+const MINIMUM_STEP: f64 = 1e-7;
 
 /// What a ray hit.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -597,6 +619,285 @@ fn best_split(bins: &[Bin; BINS], count: usize, parent_area: f64) -> Option<usiz
         })
         .map(|(_, b)| b)
     }
+/// Capsule queries — the pair a character controller lives on.
+impl TriangleBvh {
+    /// Triangles whose bounds meet `query`, in traversal order.
+    ///
+    /// Materialised rather than streamed because both callers want to sweep the
+    /// list more than once and the order is part of the answer: ties between two
+    /// equally-near triangles go to whichever the traversal reached first, so a
+    /// different order is a different (equally correct, but not identical)
+    /// result.
+    fn candidates(&self, query: DAabb) -> Vec<u32> {
+        let mut found: Vec<u32> = Vec::new();
+        let mut stack: Vec<u32> = (self.node_count > 0).then(|| vec![0u32]).unwrap_or_default();
+        // Each node is pushed at most once.
+        (0..self.node_count.max(1) * 2).for_each(|_| {
+            stack.pop().map(|node| {
+                let o = node as usize * 6;
+                let bounds = DAabb::new(
+                    widen3(&self.node_bounds[o..o + 3]),
+                    widen3(&self.node_bounds[o + 3..o + 6]),
+                );
+                bounds.intersects(query).then(|| {
+                    let count = self.node_meta[node as usize * 2 + 1];
+                    let first = self.node_meta[node as usize * 2] as usize;
+                    (count > 0)
+                        .then(|| {
+                            found.extend(
+                                self.order[first..first + count as usize]
+                                    .iter()
+                                    .filter(|&&t| DAabb::new(
+                                        widen3(&self.triangle_bounds[t as usize * 6..t as usize * 6 + 3]),
+                                        widen3(&self.triangle_bounds[t as usize * 6 + 3..t as usize * 6 + 6]),
+                                    )
+                                    .intersects(query)),
+                            );
+                        })
+                        .unwrap_or_else(|| {
+                            stack.push(first as u32);
+                            stack.push(first as u32 + 1);
+                        });
+                });
+            });
+        });
+        found
+    }
+
+    /// Whether a capsule — the segment `axis` swollen by `radius` — meets the
+    /// soup.
+    pub(crate) fn overlaps_capsule(&self, axis: DSegment, radius: f64) -> bool {
+        self.contacts_capsule(axis, radius).is_some()
+    }
+
+    /// The deepest contact between a capsule and the soup, or `None` when they
+    /// are apart.
+    ///
+    /// The normal points **out of the surface, towards the capsule**, and the
+    /// point is on the triangle.
+    pub(crate) fn contacts_capsule(&self, axis: DSegment, radius: f64) -> Option<SoupContact> {
+        let swollen = DAabb::new(
+            DVec3::new(
+                axis.start.x.min(axis.end.x) - radius,
+                axis.start.y.min(axis.end.y) - radius,
+                axis.start.z.min(axis.end.z) - radius,
+            ),
+            DVec3::new(
+                axis.start.x.max(axis.end.x) + radius,
+                axis.start.y.max(axis.end.y) + radius,
+                axis.start.z.max(axis.end.z) + radius,
+            ),
+        );
+
+        self.candidates(swollen)
+            .into_iter()
+            .filter_map(|tri| {
+                let near = axis.closest_to_triangle(self.triangle_of(tri));
+                (near.distance_squared < radius * radius).then(|| {
+                    let distance = near.distance();
+                    SoupContact {
+                        triangle: tri,
+                        depth: radius - distance,
+                        point: near.on_second,
+                        normal: self.contact_normal(tri, near.on_first.subtract(near.on_second), distance),
+                        axis_parameter: near.first_parameter,
+                    }
+                })
+            })
+            // Deepest wins. `fold` rather than `max_by` because a partial order
+            // over floats has no total `max`, and picking the first of two equal
+            // depths keeps the result a function of traversal order alone.
+            .fold(None, |best: Option<SoupContact>, c| {
+                let keep = best.map_or(true, |b| c.depth > b.depth);
+                [best, Some(c)][usize::from(keep)]
+            })
+    }
+
+    /// The outward normal for a contact, given the vector from the triangle to
+    /// the capsule axis and its length.
+    ///
+    /// Normally that direction *is* the normal. But a deep contact — an axis
+    /// that has passed through the face — produces a direction pointing back
+    /// into the solid, which would push the capsule further in. When the
+    /// direction disagrees with the face normal, the face normal wins; and when
+    /// the axis lies exactly on the face there is no direction at all, so the
+    /// face normal is all there is.
+    ///
+    /// **This makes winding load-bearing.** The face normal comes from the
+    /// vertex order, so a triangle wound the wrong way reports a contact normal
+    /// pointing into the surface, and anything resolving against it is pushed
+    /// through rather than out. A soup is expected to be consistently wound,
+    /// and there is no way to detect that it is not — a single triangle carries
+    /// no evidence of which side is outside.
+    fn contact_normal(&self, tri: u32, away: DVec3, distance: f64) -> DVec3 {
+        let face = self.normal(tri);
+        let unit = away.mul_scalar(1.0 / nonzero(distance));
+        let usable = (distance > CONTACT_DEGENERATE) & (unit.dot(face) >= FACE_NORMAL_FALLBACK_DOT);
+        [face, unit][usize::from(usable)]
+    }
+
+    /// One triangle as a [`DTriangle`].
+    fn triangle_of(&self, tri: u32) -> DTriangle {
+        let [a, b, c] = self.triangle(tri);
+        DTriangle { a, b, c }
+    }
+
+    /// How far a capsule may travel along `motion` before it meets the soup.
+    ///
+    /// `None` when nothing blocks it. **A capsule already resting on a surface
+    /// is not blocked by it** unless the motion closes on it: a controller
+    /// standing on the floor has to be able to slide along it, and a sweep that
+    /// reported a zero-distance hit every frame would stall the instant it stood
+    /// on anything.
+    pub(crate) fn sweep_capsule(
+        &self,
+        axis: DSegment,
+        radius: f64,
+        motion: DVec3,
+    ) -> Option<SoupSweep> {
+        let travel = motion.length();
+        let direction = motion.mul_scalar(1.0 / nonzero(travel));
+        let reach = radius + SWEEP_SKIN;
+        let swept = DAabb::new(
+            DVec3::new(
+                axis.start.x.min(axis.end.x).min(axis.start.x + motion.x).min(axis.end.x + motion.x) - reach,
+                axis.start.y.min(axis.end.y).min(axis.start.y + motion.y).min(axis.end.y + motion.y) - reach,
+                axis.start.z.min(axis.end.z).min(axis.start.z + motion.z).min(axis.end.z + motion.z) - reach,
+            ),
+            DVec3::new(
+                axis.start.x.max(axis.end.x).max(axis.start.x + motion.x).max(axis.end.x + motion.x) + reach,
+                axis.start.y.max(axis.end.y).max(axis.start.y + motion.y).max(axis.end.y + motion.y) + reach,
+                axis.start.z.max(axis.end.z).max(axis.start.z + motion.z).max(axis.end.z + motion.z) + reach,
+            ),
+        );
+
+        (travel > 0.0)
+            .then(|| {
+                self.candidates(swept).into_iter().fold(None, |best: Option<SoupSweep>, tri| {
+                    let limit = best.map_or(travel, |b| b.distance);
+                    let found = self
+                        .advance_to_contact(tri, axis, radius, direction, limit)
+                        .map(|distance| SoupSweep {
+                            distance,
+                            triangle: tri,
+                            normal: self.impact_normal(tri, axis, direction, distance),
+                        });
+                    // Strictly nearer, so ties go to the triangle the traversal
+                    // reached first.
+                    let keep = found.is_some_and(|f| f.distance < limit);
+                    [best, found][usize::from(keep)]
+                })
+            })
+            .flatten()
+    }
+
+    /// Conservative advancement of a capsule towards one triangle.
+    ///
+    /// Steps the capsule forward by however far it can go without the (convex)
+    /// separation between it and the triangle reaching zero, which is exact in
+    /// the limit and monotone in practice. `None` when the triangle is not
+    /// reached within `limit`.
+    fn advance_to_contact(
+        &self,
+        tri: u32,
+        axis: DSegment,
+        radius: f64,
+        direction: DVec3,
+        limit: f64,
+    ) -> Option<f64> {
+        let triangle = self.triangle_of(tri);
+        // A plane-slab prefilter: the signed distance over the capsule's axis is
+        // linear in `t`, so the whole sweep is rejected with two dot products.
+        let face = self.normal(tri);
+        let signed = [axis.start, axis.end].map(|p| p.subtract(triangle.a).dot(face));
+        let travelled = direction.dot(face) * limit;
+        let low = signed[0].min(signed[1]) + travelled.min(0.0);
+        let high = signed[0].max(signed[1]) + travelled.max(0.0);
+
+        ((low <= radius) & (high >= -radius))
+            .then(|| {
+                (0..SWEEP_ITERATIONS)
+                    .try_fold(0.0_f64, |t, _| {
+                        let offset = direction.mul_scalar(t);
+                        let moved = DSegment {
+                            start: axis.start.add(offset),
+                            end: axis.end.add(offset),
+                        };
+                        let near = moved.closest_to_triangle(triangle);
+                        let gap = near.distance() - radius;
+                        let separation = near.on_second.subtract(near.on_first);
+                        let length = separation.length();
+                        let closing = direction.dot(separation.mul_scalar(1.0 / nonzero(length)));
+
+                        // The axis runs through the face: already as deep as it
+                        // gets, and there is no separating direction to step
+                        // along.
+                        let through = length < AXIS_THROUGH_FACE;
+                        // Touching. Only a *blocking* touch counts; see the
+                        // method doc for why a resting capsule must not be one.
+                        let touching = gap <= SWEEP_TOLERANCE;
+                        let blocked = through | (touching & (closing > CLOSING_EPSILON));
+                        // Separation is non-decreasing along a non-closing
+                        // direction, so it will never be reached.
+                        let receding = !touching & (closing <= RECEDING_EPSILON);
+
+                        let step = (gap / closing).max(MINIMUM_STEP);
+                        let next = t + step;
+                        // The loop ends when the capsule is touching, receding,
+                        // through the face, or has run past `limit`. It reports
+                        // a hit only when that ending was a *blocking* one --
+                        // `touching` alone is a capsule resting on a surface,
+                        // and reporting that as a hit is what stalls a
+                        // controller the moment it stands on the floor.
+                        let stop = blocked | touching | receding | (next >= limit);
+                        [Ok(next), Err(blocked.then_some(t))][usize::from(stop)]
+                    })
+                    .err()
+                    .flatten()
+            })
+            .flatten()
+    }
+
+    /// The outward normal at the configuration a sweep stopped in.
+    fn impact_normal(&self, tri: u32, axis: DSegment, direction: DVec3, distance: f64) -> DVec3 {
+        let offset = direction.mul_scalar(distance);
+        let moved = DSegment {
+            start: axis.start.add(offset),
+            end: axis.end.add(offset),
+        };
+        let near = moved.closest_to_triangle(self.triangle_of(tri));
+        self.contact_normal(
+            tri,
+            near.on_first.subtract(near.on_second),
+            near.distance(),
+        )
+    }
+}
+
+/// A penetration contact between a capsule and the soup.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SoupContact {
+    pub(crate) triangle: u32,
+    /// How far the capsule has sunk past the surface.
+    pub(crate) depth: f64,
+    /// On the triangle.
+    pub(crate) point: DVec3,
+    /// Out of the surface, towards the capsule.
+    pub(crate) normal: DVec3,
+    /// Where along the capsule's axis the contact sits, `0..1`.
+    pub(crate) axis_parameter: f64,
+}
+
+/// Where a swept capsule first meets the soup.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SoupSweep {
+    /// Distance travelled along the motion before contact.
+    pub(crate) distance: f64,
+    pub(crate) triangle: u32,
+    /// Out of the surface, towards the capsule.
+    pub(crate) normal: DVec3,
+}
+
 /// One triangle's derived quantities, all in `f64` before storage truncates.
 struct Derived {
     normal: DVec3,
@@ -652,346 +953,4 @@ fn surface_area(min: DVec3, max: DVec3) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{BvhHit, TriangleBvh, LEAF_SIZE};
-    use axiom_math::DVec3;
-
-    /// Deterministic pseudo-random `f32`s in `[-1, 1)`.
-    fn noise(n: usize) -> Vec<f32> {
-        let mut s = 0x1234_5678_9abc_def0_u64;
-        (0..n)
-            .map(|_| {
-                s = s
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1_442_695_040_888_963_407);
-                ((s >> 40) as f32 / (1u32 << 24) as f32) * 2.0 - 1.0
-            })
-            .collect()
-    }
-
-    /// `rows * cols` quads on the XZ plane, two triangles each, with a little
-    /// vertical jitter so the centroids actually spread on all three axes.
-    fn terrain(rows: usize, cols: usize) -> Vec<f32> {
-        let jitter = noise(rows * cols);
-        let mut out = Vec::new();
-        for r in 0..rows {
-            for c in 0..cols {
-                let (x0, z0) = (c as f32, r as f32);
-                let (x1, z1) = (x0 + 1.0, z0 + 1.0);
-                let y = jitter[r * cols + c] * 0.25;
-                out.extend([x0, y, z0, x1, y, z0, x1, y, z1]);
-                out.extend([x0, y, z0, x1, y, z1, x0, y, z1]);
-            }
-        }
-        out
-    }
-
-    /// The answer, computed the slow way: test every triangle, keep the nearest.
-    fn brute_force(
-        tree: &TriangleBvh,
-        origin: DVec3,
-        direction: DVec3,
-        max_distance: f64,
-        accept: &impl Fn(u32) -> bool,
-    ) -> Option<BvhHit> {
-        (0..tree.triangle_count() as u32)
-            .filter(|t| accept(*t))
-            .filter_map(|t| tree.intersect(t, origin, direction))
-            .filter(|h| h.distance < max_distance)
-            .fold(None, |best: Option<BvhHit>, h| {
-                match best {
-                    Some(b) if b.distance <= h.distance => Some(b),
-                    _ => Some(h),
-                }
-            })
-    }
-
-    // =================================================================
-    // Structure
-    // =================================================================
-
-    #[test]
-    fn an_empty_soup_builds_an_empty_tree_and_hits_nothing() {
-        let tree = TriangleBvh::build(&[]);
-        assert_eq!(tree.triangle_count(), 0);
-        assert_eq!(tree.node_count, 0);
-        assert_eq!(tree.max_depth, 0);
-        assert_eq!(
-            tree.raycast(DVec3::ZERO, DVec3::new(0.0, 0.0, 1.0), 100.0, |_| true),
-            None
-        );
-    }
-
-    /// A buffer that is not a whole number of triangles keeps the whole ones.
-    #[test]
-    fn a_truncated_buffer_keeps_the_triangles_that_are_complete() {
-        let mut soup = terrain(1, 1);
-        soup.truncate(soup.len() - 4);
-        assert_eq!(TriangleBvh::build(&soup).triangle_count(), 1);
-    }
-
-    #[test]
-    fn a_soup_that_fits_one_leaf_is_a_single_node() {
-        let tree = TriangleBvh::build(&terrain(1, 2));
-        assert!(tree.triangle_count() <= LEAF_SIZE);
-        assert_eq!(tree.node_count, 1);
-        assert_eq!(tree.max_depth, 0);
-    }
-
-    #[test]
-    fn a_larger_soup_actually_splits() {
-        let tree = TriangleBvh::build(&terrain(8, 8));
-        assert_eq!(tree.triangle_count(), 128);
-        assert!(tree.node_count > 1, "{} node(s)", tree.node_count);
-        assert!(tree.max_depth > 0);
-    }
-
-    /// **The invariant a broken partition breaks.** Every triangle must appear
-    /// in exactly one leaf, and the leaves must tile the whole index range with
-    /// no gap and no overlap.
-    #[test]
-    fn the_leaves_tile_every_triangle_exactly_once() {
-        let tree = TriangleBvh::build(&terrain(9, 7));
-        let total = tree.triangle_count();
-
-        let mut seen = vec![0u32; total];
-        let mut covered = 0usize;
-        (0..tree.node_count).for_each(|n| {
-            let count = tree.node_meta[n * 2 + 1];
-            let first = tree.node_meta[n * 2] as usize;
-            if count > 0 {
-                covered += count as usize;
-                tree.order[first..first + count as usize]
-                    .iter()
-                    .for_each(|&t| seen[t as usize] += 1);
-            }
-        });
-
-        assert_eq!(covered, total, "leaf runs do not cover every slot");
-        assert!(
-            seen.iter().all(|&n| n == 1),
-            "every triangle should appear once; got {seen:?}"
-        );
-    }
-
-    #[test]
-    fn the_order_is_a_permutation_of_the_soup() {
-        let tree = TriangleBvh::build(&terrain(6, 6));
-        let mut sorted = (&tree.order).to_vec();
-        sorted.sort_unstable();
-        assert_eq!(sorted, (0..tree.triangle_count() as u32).collect::<Vec<_>>());
-    }
-
-    /// A node's bounds must contain its triangles, or traversal will cull a
-    /// triangle the ray genuinely hits.
-    #[test]
-    fn every_node_encloses_the_triangles_beneath_it() {
-        let tree = TriangleBvh::build(&terrain(7, 5));
-        (0..tree.node_count).for_each(|n| {
-            let count = tree.node_meta[n * 2 + 1];
-            if count > 0 {
-                let first = tree.node_meta[n * 2] as usize;
-                let o = n * 6;
-                tree.order[first..first + count as usize].iter().for_each(|&t| {
-                    let b = tree.triangle_box(t);
-                    (0..3).for_each(|k| {
-                        assert!(
-                            f64::from(tree.node_bounds[o + k]) <= b[k],
-                            "node {n} min[{k}] excludes triangle {t}"
-                        );
-                        assert!(
-                            f64::from(tree.node_bounds[o + 3 + k]) >= b[k + 3],
-                            "node {n} max[{k}] excludes triangle {t}"
-                        );
-                    });
-                });
-            }
-        });
-    }
-
-    #[test]
-    fn the_bounds_enclose_the_whole_soup() {
-        let tree = TriangleBvh::build(&terrain(4, 4));
-        let b = tree.bounds();
-        assert!(b.min.x <= 0.0 && b.max.x >= 4.0, "{b:?}");
-        assert!(b.min.z <= 0.0 && b.max.z >= 4.0, "{b:?}");
-    }
-
-    #[test]
-    fn building_the_same_soup_twice_gives_the_same_tree() {
-        let soup = terrain(6, 5);
-        assert_eq!(TriangleBvh::build(&soup), TriangleBvh::build(&soup));
-    }
-
-    // =================================================================
-    // Queries — checked against the slow answer
-    // =================================================================
-
-    /// **The test that matters.** A tree can be wrong in ways no structural
-    /// assertion catches — bounds a hair too tight, a partition that loses a
-    /// triangle to the wrong side, a traversal that prunes too eagerly — and
-    /// every one of them shows up as a ray that misses something it should hit.
-    /// So: many rays, from many angles, compared against testing every triangle.
-    #[test]
-    fn every_ray_agrees_with_testing_every_triangle() {
-        let tree = TriangleBvh::build(&terrain(9, 9));
-        let r = noise(6 * 400);
-        let mut checked = 0usize;
-        let mut hits = 0usize;
-
-        for c in r.chunks_exact(6) {
-            let origin = DVec3::new(
-                f64::from(c[0]) * 6.0 + 4.0,
-                f64::from(c[1]) * 4.0 + 3.0,
-                f64::from(c[2]) * 6.0 + 4.0,
-            );
-            // `normalize_or_zero` handles a degenerate direction by returning
-            // zero, and a zero direction is a legitimate thing to ask about — so
-            // there is no guard here to skip one. The sampler does not produce
-            // one anyway, which is exactly why a guard would be dead code.
-            let direction =
-                DVec3::new(f64::from(c[3]), f64::from(c[4]) - 0.5, f64::from(c[5]))
-                    .normalize_or_zero();
-
-            let fast = tree.raycast(origin, direction, 50.0, |_| true);
-            let slow = brute_force(&tree, origin, direction, 50.0, &|_| true);
-            assert_eq!(fast, slow, "origin {origin:?} direction {direction:?}");
-            checked += 1;
-            hits += usize::from(fast.is_some());
-        }
-
-        assert!(checked > 300, "only checked {checked} rays");
-        assert!(hits > 30, "only {hits} of {checked} rays hit anything — test is not exercising the tree");
-    }
-
-    /// The predicate has to be applied during traversal, not after: a rejected
-    /// triangle must not shorten the ray for whatever is behind it.
-    #[test]
-    fn a_filtered_ray_finds_what_is_behind_the_rejected_triangle() {
-        // Two stacked triangles; the ray points down through both.
-        let soup = [
-            0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 0.0, 2.0, 2.0, //
-            0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0,
-        ];
-        let tree = TriangleBvh::build(&soup);
-        let origin = DVec3::new(0.4, 5.0, 0.4);
-        let down = DVec3::new(0.0, -1.0, 0.0);
-
-        let all = tree.raycast(origin, down, 20.0, |_| true).expect("hits the top");
-        assert!((all.distance - 3.0).abs() < 1e-9, "{all:?}");
-
-        let lower = tree
-            .raycast(origin, down, 20.0, |t| t != all.triangle)
-            .expect("hits the one below");
-        assert!((lower.distance - 5.0).abs() < 1e-9, "{lower:?}");
-        assert_ne!(lower.triangle, all.triangle);
-    }
-
-    #[test]
-    fn rejecting_everything_finds_nothing() {
-        let tree = TriangleBvh::build(&terrain(4, 4));
-        let hit = tree.raycast(
-            DVec3::new(1.5, 5.0, 1.5),
-            DVec3::new(0.0, -1.0, 0.0),
-            20.0,
-            |_| false,
-        );
-        assert_eq!(hit, None);
-    }
-
-    #[test]
-    fn a_ray_pointing_away_from_the_soup_misses() {
-        let tree = TriangleBvh::build(&terrain(4, 4));
-        let hit = tree.raycast(
-            DVec3::new(1.5, 5.0, 1.5),
-            DVec3::new(0.0, 1.0, 0.0),
-            20.0,
-            |_| true,
-        );
-        assert_eq!(hit, None);
-    }
-
-    #[test]
-    fn a_ray_that_stops_short_of_the_surface_misses() {
-        let tree = TriangleBvh::build(&terrain(4, 4));
-        let origin = DVec3::new(1.5, 5.0, 1.5);
-        let down = DVec3::new(0.0, -1.0, 0.0);
-        assert!(tree.raycast(origin, down, 20.0, |_| true).is_some());
-        assert_eq!(tree.raycast(origin, down, 1.0, |_| true), None);
-    }
-
-    /// A zero component in the direction must not produce a NaN in the slab
-    /// test — an axis-aligned ray is the common case, not an edge case.
-    #[test]
-    fn an_axis_aligned_ray_is_not_defeated_by_a_zero_component() {
-        let tree = TriangleBvh::build(&terrain(5, 5));
-        let hit = tree.raycast(
-            DVec3::new(2.5, 8.0, 2.5),
-            DVec3::new(0.0, -1.0, 0.0),
-            50.0,
-            |_| true,
-        );
-        assert!(hit.is_some(), "straight down should hit the ground");
-    }
-
-    #[test]
-    fn front_and_back_faces_are_distinguished() {
-        let soup = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0];
-        let tree = TriangleBvh::build(&soup);
-        let above = tree
-            .raycast(DVec3::new(0.4, 1.0, 0.4), DVec3::new(0.0, -1.0, 0.0), 5.0, |_| true)
-            .expect("from above");
-        let below = tree
-            .raycast(DVec3::new(0.4, -1.0, 0.4), DVec3::new(0.0, 1.0, 0.0), 5.0, |_| true)
-            .expect("from below");
-        assert_ne!(above.front_face, below.front_face);
-    }
-
-    #[test]
-    fn a_ray_parallel_to_a_triangle_does_not_hit_it() {
-        let soup = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0];
-        let tree = TriangleBvh::build(&soup);
-        let hit = tree.raycast(
-            DVec3::new(-1.0, 0.0, 0.5),
-            DVec3::new(1.0, 0.0, 0.0),
-            10.0,
-            |_| true,
-        );
-        assert_eq!(hit, None, "coplanar ray");
-    }
-
-    // =================================================================
-    // Degenerate geometry
-    // =================================================================
-
-    /// Every centroid at one point: no split separates anything, so the node
-    /// stays a leaf however many triangles it holds.
-    #[test]
-    fn a_cluster_with_no_centroid_spread_stays_one_leaf() {
-        let one = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
-        let soup: Vec<f32> = (0..20).flat_map(|_| one).collect();
-        let tree = TriangleBvh::build(&soup);
-        assert_eq!(tree.triangle_count(), 20);
-        assert_eq!(tree.node_count, 1, "identical centroids cannot be split");
-    }
-
-    /// A zero-area triangle has no normal to normalise; it gets a unit stand-in
-    /// rather than a NaN, so a caller reading it back gets something usable.
-    #[test]
-    fn a_degenerate_triangle_gets_a_unit_normal_rather_than_a_nan() {
-        let soup = [1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0];
-        let tree = TriangleBvh::build(&soup);
-        let n = tree.normal(0);
-        assert!(n.x.is_finite() && n.y.is_finite() && n.z.is_finite(), "{n:?}");
-        assert!((n.length() - 1.0).abs() < 1e-9, "{n:?}");
-    }
-
-    #[test]
-    fn a_triangle_reads_back_the_corners_it_was_given() {
-        let soup = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-        let [a, b, c] = TriangleBvh::build(&soup).triangle(0);
-        assert_eq!((a.x, a.y, a.z), (1.0, 2.0, 3.0));
-        assert_eq!((b.x, b.y, b.z), (4.0, 5.0, 6.0));
-        assert_eq!((c.x, c.y, c.z), (7.0, 8.0, 9.0));
-    }
-}
+mod tests;

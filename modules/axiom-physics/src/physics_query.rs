@@ -45,7 +45,8 @@ use crate::physics_collider_shape::PhysicsColliderShape;
 use crate::physics_hit::PhysicsHit;
 use crate::physics_world::PhysicsWorld;
 use crate::query_hit::QueryHit;
-use crate::query_overlap::overlaps_capsule;
+use crate::query_overlap::{overlaps_capsule, soup_overlap};
+use crate::query_sweep::soup_sweep;
 use crate::query_ray::{ray_shape, soup_ray};
 use crate::query_sweep::sweep_shape;
 
@@ -166,7 +167,13 @@ impl<'a> PhysicsQuery<'a> {
                     .resolved()
                     .iter()
                     .filter(|r| r.active)
-                    .filter(|r| overlaps_capsule(r.shape, r.center, r.rotation, &query))
+                    .filter(|r| {
+                        // A soup answers through `soup_overlap`; the table
+                        // reports `false` for one.
+                        r.soup
+                            .is_some_and(|s| soup_overlap(s, r.center, r.rotation, &query))
+                            | overlaps_capsule(r.shape, r.center, r.rotation, &query)
+                    })
                     .map(|r| r.body)
                     .collect();
                 handles.sort();
@@ -196,7 +203,9 @@ impl<'a> PhysicsQuery<'a> {
                     .iter()
                     .filter(|r| r.active & !r.is_trigger)
                     .filter_map(|r| {
-                        sweep_shape(r.shape, r.center, r.rotation, &query, motion)
+                        r.soup
+                            .and_then(|s| soup_sweep(s, r.center, r.rotation, &query, motion))
+                            .or_else(|| sweep_shape(r.shape, r.center, r.rotation, &query, motion))
                             .map(|found| tag(r, &found, travel))
                     })
                     .collect();

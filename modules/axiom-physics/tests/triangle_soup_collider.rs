@@ -20,11 +20,16 @@ fn world() -> PhysicsApi {
     PhysicsApi::with_config(Vec3::new(0.0, -9.8, 0.0), 8, 64, 64, 1, true, r(0.0), r(0.05)).unwrap()
 }
 
-/// A flat `size × size` floor at `y = 0`, as two triangles.
+/// A flat `size × size` floor at `y = 0`, as two triangles wound so their
+/// normals point **up**.
+///
+/// The winding is load-bearing, not cosmetic: a deep contact falls back to the
+/// face normal, so a floor wound the other way reports contacts that push a body
+/// down through it.
 fn floor(size: f32) -> Vec<f32> {
     vec![
-        -size, 0.0, -size, size, 0.0, -size, size, 0.0, size, //
-        -size, 0.0, -size, size, 0.0, size, -size, 0.0, size,
+        -size, 0.0, -size, -size, 0.0, size, size, 0.0, -size, //
+        size, 0.0, size, size, 0.0, -size, -size, 0.0, size,
     ]
 }
 
@@ -200,23 +205,32 @@ fn attaching_to_a_body_that_does_not_exist_is_refused() {
         .is_err());
 }
 
-/// The other two query tables carry a soup entry so they stay exhaustive, and
-/// both report nothing: a static soup answers rays today and is not yet swept or
-/// overlapped against. These pin that as a stated behaviour rather than an
-/// accident, so the day it changes, a test says so.
 #[test]
-fn a_soup_is_not_yet_overlapped_or_swept_against() {
+fn a_capsule_overlapping_the_soup_reports_its_body() {
+    let mut px = world();
+    let ground = attach(&mut px, Transform::from_translation(Vec3::ZERO), &floor(5.0));
+
+    // Straddling the floor.
+    assert_eq!(
+        px.overlap_capsule(Vec3::ZERO, Quat::IDENTITY, m(1.0), m(1.0)),
+        vec![ground]
+    );
+    assert_eq!(px.overlap_sphere(Vec3::ZERO, m(2.0)), vec![ground]);
+
+    // Well clear of it.
+    assert!(px
+        .overlap_capsule(Vec3::new(0.0, 20.0, 0.0), Quat::IDENTITY, m(1.0), m(1.0))
+        .is_empty());
+}
+
+#[test]
+fn a_capsule_swept_into_the_soup_stops_on_it() {
     let mut px = world();
     attach(&mut px, Transform::from_translation(Vec3::ZERO), &floor(5.0));
 
-    // A capsule sitting right on the floor overlaps nothing.
-    assert!(px
-        .overlap_capsule(Vec3::new(0.0, 0.0, 0.0), Quat::IDENTITY, m(1.0), m(1.0))
-        .is_empty());
-    assert!(px.overlap_sphere(Vec3::ZERO, m(2.0)).is_empty());
-
-    // ...and a capsule driven down through it passes straight through.
-    assert!(px
+    // Centre 4 up, half-height 0.5 and radius 0.5, so the capsule's lowest point
+    // is 3 above the floor and it travels 3 of its 8.
+    let hit = px
         .capsule_cast(
             Vec3::new(0.0, 4.0, 0.0),
             Quat::IDENTITY,
@@ -224,5 +238,41 @@ fn a_soup_is_not_yet_overlapped_or_swept_against() {
             m(0.5),
             Vec3::new(0.0, -8.0, 0.0),
         )
-        .is_none());
+        .expect("it should land on the floor");
+    assert!(
+        (hit.distance().get() - 3.0).abs() < 1e-2,
+        "expected to fall 3m, got {}",
+        hit.distance().get()
+    );
+    assert!(hit.normal().y > 0.9, "the floor pushes up: {:?}", hit.normal());
+}
+
+/// **The case that freezes a controller if it is wrong.** A capsule already
+/// resting on the floor, moved sideways, is not blocked by the floor — it
+/// slides. A sweep reporting a zero-distance hit here would stall anything
+/// standing on anything.
+#[test]
+fn a_capsule_resting_on_the_soup_slides_along_it() {
+    let mut px = world();
+    attach(&mut px, Transform::from_translation(Vec3::ZERO), &floor(5.0));
+
+    // Resting means the capsule's SURFACE touches the floor, so its centre sits
+    // `half_height + radius` above it — not `radius`. Getting that wrong puts the
+    // axis itself on the face, which is a deep contact rather than a resting one.
+    let resting = Vec3::new(0.0, 1.0, 0.0);
+    assert!(
+        px.raycast(resting, Vec3::new(0.0, -1.0, 0.0), m(2.0)).is_some(),
+        "the floor really is directly below"
+    );
+    assert!(
+        px.capsule_cast(
+            resting,
+            Quat::IDENTITY,
+            m(0.5),
+            m(0.5),
+            Vec3::new(4.0, 0.0, 0.0),
+        )
+        .is_none(),
+        "sliding along a surface must not be blocked by it"
+    );
 }

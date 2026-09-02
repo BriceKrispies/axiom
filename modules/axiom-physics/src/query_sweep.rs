@@ -28,6 +28,9 @@ use axiom_math::{Capsule, Hit, Quat, Segment, Triangle, Vec3};
 use crate::collider_capsule::world_capsule;
 use crate::collider_obb::{obb_triangles, world_obb};
 use crate::physics_collider_shape::PhysicsColliderShape;
+use crate::query_overlap::{local_capsule, soup_overlap};
+use crate::triangle_bvh::TriangleBvh;
+use axiom_math::DVec3;
 use crate::physics_shape_kind::PhysicsShapeKind;
 use crate::query_hit::QueryHit;
 use crate::query_overlap::overlaps_capsule;
@@ -179,6 +182,43 @@ fn sweep_plane_shape(
 /// A heightfield is explicitly unsupported by shape casting — never hit. See
 /// [`crate::query_ray`] for why this is an exclusion rather than an
 /// approximation.
+/// Where a swept capsule first meets a triangle soup, which [`SWEEP_TABLE`]
+/// cannot reach. The collider-level escape, as for rays and overlap.
+///
+/// A capsule already resting on the soup is **not** blocked by it unless the
+/// motion closes on it — see `TriangleBvh::sweep_capsule`. Reporting a
+/// zero-distance hit for a body standing on the floor is what freezes a
+/// controller the moment it stands on anything.
+pub(crate) fn soup_sweep(
+    soup: &TriangleBvh,
+    center: Vec3,
+    rotation: Quat,
+    query: &Capsule,
+    motion: Vec3,
+) -> Option<QueryHit> {
+    rotation.inverse().ok().and_then(|inverse| {
+        local_capsule(center, rotation, query).and_then(|(axis, radius)| {
+            let local_motion = DVec3::from_single(inverse.rotate(motion));
+            soup.sweep_capsule(axis, radius, local_motion).map(|found| {
+                let travelled = found.distance as f32;
+                let along = motion.length();
+                // Back into world space: `Hit::time` is the fraction of the
+                // motion consumed, not a distance, and the normal is turned by
+                // the body's rotation.
+                let time = travelled / [along, 1.0][usize::from(along == 0.0)];
+                let hit = Hit::new(
+                    time,
+                    query.segment().point_at(0.0).add(motion.mul_scalar(time)),
+                    rotation.rotate(found.normal.to_single()),
+                );
+                // A sweep that started already overlapping is a back-face
+                // contact, the same rule `sweep_shape` applies.
+                QueryHit::new(hit, !soup_overlap(soup, center, rotation, query))
+            })
+        })
+    })
+}
+
 /// As [`sweep_heightfield_shape`]: the soup is not reachable through the flat
 /// signature, so the entry keeps the table exhaustive and states the gap.
 fn sweep_triangle_soup_shape(

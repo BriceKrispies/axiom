@@ -34,6 +34,8 @@ use axiom_math::{Capsule, Quat, Sphere, Vec3};
 use crate::collider_capsule::world_capsule;
 use crate::collider_obb::{obb_triangles, world_obb};
 use crate::physics_collider_shape::PhysicsColliderShape;
+use crate::triangle_bvh::TriangleBvh;
+use axiom_math::{DSegment, DVec3};
 use crate::physics_shape_kind::PhysicsShapeKind;
 
 /// The exact overlap function for one shape kind, against a query capsule.
@@ -120,6 +122,44 @@ fn overlap_plane_shape(
 }
 
 /// A heightfield is explicitly unsupported by overlap — never reported.
+/// Whether a capsule overlaps a triangle soup, which [`OVERLAP_TABLE`] cannot
+/// reach — the same collider-level escape [`crate::query_ray::soup_ray`] uses,
+/// and for the same reason: the flat signature sees only a shape's scalars.
+///
+/// The query goes into the body's local space rather than the soup coming out of
+/// it: rotating one capsule is cheaper than rotating a level.
+pub(crate) fn soup_overlap(
+    soup: &TriangleBvh,
+    center: Vec3,
+    rotation: Quat,
+    query: &Capsule,
+) -> bool {
+    local_capsule(center, rotation, query)
+        .is_some_and(|(axis, radius)| soup.overlaps_capsule(axis, radius))
+}
+
+/// A query capsule expressed in a collider's local space.
+///
+/// `None` when the rotation cannot be inverted: there is no local space to ask
+/// the question in, and answering against the un-rotated soup would answer a
+/// different question.
+pub(crate) fn local_capsule(
+    center: Vec3,
+    rotation: Quat,
+    query: &Capsule,
+) -> Option<(DSegment, f64)> {
+    rotation.inverse().ok().map(|inverse| {
+        let segment = query.segment();
+        (
+            DSegment {
+                start: DVec3::from_single(inverse.rotate(segment.point_at(0.0).subtract(center))),
+                end: DVec3::from_single(inverse.rotate(segment.point_at(1.0).subtract(center))),
+            },
+            f64::from(query.radius()),
+        )
+    })
+}
+
 /// As [`overlap_heightfield_shape`]: the soup is not reachable through the flat
 /// signature, so the entry keeps the table exhaustive and states the gap.
 fn overlap_triangle_soup_shape(
