@@ -3,6 +3,7 @@
 use axiom_field::FieldGraph;
 use axiom_proc_core::NodeEval;
 
+use crate::combine::{merge, trs};
 use crate::implicit::meta_surface;
 use crate::mesh_buffer::MeshBuffer;
 use crate::primitives::{cube, cylinder, grid, sphere};
@@ -19,7 +20,7 @@ type MeshOpFn =
 
 /// The dispatch table. Its order mirrors [`crate::MeshOp`] so `op as usize`
 /// selects the operator — a table index, never a `match`.
-const OPS: [MeshOpFn; 12] = [
+const OPS: [MeshOpFn; 14] = [
     cube,
     cylinder,
     grid,
@@ -32,6 +33,8 @@ const OPS: [MeshOpFn; 12] = [
     triangulate,
     sphere,
     meta_surface,
+    merge,
+    trs,
 ];
 
 /// Evaluate one node against an empty field table — every operator but

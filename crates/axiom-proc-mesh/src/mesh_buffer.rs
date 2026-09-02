@@ -1,6 +1,6 @@
 //! The neutral mesh buffer a mesh recipe evaluates to.
 
-use axiom_math::{Vec2, Vec3};
+use axiom_math::{Vec2, Vec3, Vec4};
 
 /// The largest vertex count a mesh operator may produce. Generators clamp their
 /// subdivision so no recipe can ask for an unbounded mesh; operators that would
@@ -14,6 +14,13 @@ pub const MAX_VERTS: usize = 100_000;
 /// A mesh may optionally carry **skin streams** — a `joints` (four bone indices)
 /// and `weights` (four blend weights) entry per vertex — for skeletal skinning.
 /// Both are empty on a static mesh and are ignored by every non-skinned path.
+///
+/// It may also carry a **colour stream**: one linear RGBA per vertex. That is not
+/// decoration. A procedural kit paints wear, grime and baked ambient occlusion
+/// into vertex colour, and without a channel to put them in, a recipe can
+/// produce the *shape* of a weathered wall but not its weathering — which is
+/// most of what makes it read as one. Empty on a mesh that carries none, and
+/// ignored by every path that does not sample it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshBuffer {
     positions: Vec<Vec3>,
@@ -22,6 +29,7 @@ pub struct MeshBuffer {
     indices: Vec<u32>,
     joints: Vec<[u16; 4]>,
     weights: Vec<[f32; 4]>,
+    colors: Vec<Vec4>,
 }
 
 impl MeshBuffer {
@@ -48,6 +56,7 @@ impl MeshBuffer {
                 indices,
                 joints: Vec::new(),
                 weights: Vec::new(),
+                colors: Vec::new(),
             })
     }
 
@@ -117,6 +126,62 @@ impl MeshBuffer {
     /// Whether this mesh carries skin streams (is deformed by a skeleton).
     pub fn is_skinned(&self) -> bool {
         !self.joints.is_empty()
+    }
+
+    /// The per-vertex linear RGBA colours; empty when the mesh carries none.
+    pub fn colors(&self) -> &[Vec4] {
+        &self.colors
+    }
+
+    /// Whether this mesh carries a colour stream.
+    pub fn has_colors(&self) -> bool {
+        !self.colors.is_empty()
+    }
+
+    /// Attach a colour stream. `None` unless there is exactly one colour per
+    /// vertex — a partially-coloured mesh has no defined meaning, and silently
+    /// padding it would be the "authored channel quietly discarded" defect this
+    /// stream exists to avoid.
+    pub fn with_colors(self, colors: Vec<Vec4>) -> Option<Self> {
+        (colors.len() == self.positions.len())
+            .then_some(())
+            .map(move |()| Self { colors, ..self })
+    }
+
+    /// The same mesh with its colour stream removed.
+    pub fn without_colors(self) -> Self {
+        Self {
+            colors: Vec::new(),
+            ..self
+        }
+    }
+
+    /// Rebuild with new geometry, carrying this mesh's colour and skin streams
+    /// forward.
+    ///
+    /// The constructor every vertex-count-preserving operator uses. `from_parts`
+    /// deliberately produces an uncoloured mesh, so an operator that rebuilt
+    /// through it would *drop* the colours its input carried — and it would do so
+    /// silently, which is exactly how an authored channel goes missing. `None`
+    /// under the same conditions as [`Self::from_parts`], or if the vertex count
+    /// changed while a carried stream is present.
+    pub fn respecified(
+        &self,
+        positions: Vec<Vec3>,
+        normals: Vec<Vec3>,
+        uvs: Vec<Vec2>,
+        indices: Vec<u32>,
+    ) -> Option<Self> {
+        let same_count = positions.len() == self.positions.len();
+        let carries = self.has_colors() | self.is_skinned();
+        Self::from_parts(positions, normals, uvs, indices)
+            .filter(|_| same_count | !carries)
+            .map(|m| Self {
+                colors: self.colors.clone(),
+                joints: self.joints.clone(),
+                weights: self.weights.clone(),
+                ..m
+            })
     }
 }
 

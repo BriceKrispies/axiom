@@ -49,6 +49,16 @@ pub enum MeshOp {
     /// smooth-union blend radius (floored to a tiny epsilon). At least one capsule
     /// is required (`>= 10` params, `(len - 3)` a multiple of 7).
     MetaSurface = 11,
+    /// **Merge** — concatenate every input mesh into one buffer, rebasing
+    /// indices. Takes no params and any number of inputs. Appended at 12 rather
+    /// than inserted, because an opcode is a wire format: renumbering an
+    /// existing one silently reinterprets every stored recipe.
+    Merge = 12,
+    /// **Trs** — translate, rotate (Euler XYZ, radians) and scale.
+    /// Params `[tx,ty,tz, rx,ry,rz, sx,sy,sz]`. Distinct from `Transform`,
+    /// which is translate + scale only; widening that one would have read an
+    /// existing graph's scale as a rotation and collapsed the mesh to a point.
+    Trs = 13,
 }
 
 #[cfg(test)]

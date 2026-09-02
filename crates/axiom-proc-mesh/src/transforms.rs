@@ -36,7 +36,7 @@ pub(crate) fn transform(
                 )
             })
             .collect();
-        MeshBuffer::from_parts(
+        src.respecified(
             positions,
             src.normals().to_vec(),
             src.uvs().to_vec(),
@@ -106,7 +106,7 @@ pub(crate) fn bevel(
                 )
             })
             .collect();
-        MeshBuffer::from_parts(
+        src.respecified(
             positions,
             src.normals().to_vec(),
             src.uvs().to_vec(),
@@ -135,7 +135,7 @@ pub(crate) fn bend(
                 )
             })
             .collect();
-        MeshBuffer::from_parts(
+        src.respecified(
             positions,
             src.normals().to_vec(),
             src.uvs().to_vec(),
@@ -204,7 +204,7 @@ pub(crate) fn displace(
                 })
                 .collect();
             displaced.and_then(|positions| {
-                MeshBuffer::from_parts(
+                src.respecified(
                     positions,
                     src.normals().to_vec(),
                     src.uvs().to_vec(),
@@ -227,7 +227,7 @@ pub(crate) fn uv_project(
             .iter()
             .map(|p| Vec2::new(p.x * s, p.z * s))
             .collect();
-        MeshBuffer::from_parts(
+        src.respecified(
             src.positions().to_vec(),
             src.normals().to_vec(),
             uvs,
@@ -244,7 +244,7 @@ pub(crate) fn triangulate(
     _fields: &[FieldGraph],
 ) -> Option<MeshBuffer> {
     ctx.inputs().first().and_then(|src| {
-        MeshBuffer::from_parts(
+        src.respecified(
             src.positions().to_vec(),
             src.normals().to_vec(),
             src.uvs().to_vec(),

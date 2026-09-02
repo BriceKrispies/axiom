@@ -24,6 +24,7 @@
 //!   [`MAX_VERTS`] caps output, so a recipe can never ask for an unbounded mesh.
 //!   The transform/deform operators are deliberately simple v0 forms.
 
+mod combine;
 mod dispatch;
 mod implicit;
 mod mc_tables;
