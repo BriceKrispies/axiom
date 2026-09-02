@@ -68,10 +68,10 @@ Hashing bit patterns is what makes this survive `-0.0` and `NaN` — the trap
 
 ## The witness dumps
 
-A digest that fails tells you nothing about *which slot* moved. So for a bounded
-witness set — **the first two emissions of every burst, and every emission of any
-burst with ≤ 4 emissions** — the ledger also writes the full raw buffer as hex
-words to `tests/golden/witness/<case>.hex`.
+A digest that fails tells you nothing about *which slot* moved. So a case may
+carry its first few emissions verbatim — `Capture::witness(raw, n)`, today `n = 2`
+for the impacts and `n = 3` for the tracer — written as hex words to
+`tests/golden/witness/<case>.hex`.
 
 That is the `tracers.rs` "all 96 buffer values" proof, generalised, and it is
 bounded: the world's 585,630 triangles are digested, never dumped.
@@ -83,23 +83,23 @@ Verbatim — this is the whole mechanism:
 ```rust
 #[cfg(test)]
 mod tests {
-    use crate::characterize::{Ledger, probe};
+    use crate::characterize::{probes, Ledger};
 
     #[test]
     fn the_table_emits_exactly_what_the_hand_written_version_did() {
-        let ledger = Ledger::area("fx");            // include_str! of tests/golden/fx.ledger
-        probe::fx::impact_concrete().assert_matches(&ledger);
+        let ledger = Ledger::fx();       // include_str! of tests/golden/fx.ledger
+        probes::fx::impact(0).assert_matches(&ledger);   // 0 = Surface::ALL[0]
     }
 }
 ```
 
-`probe::fx::impact_concrete()` is written by the orchestrator **before** the
-fan-out and is frozen. The agent does not invent the probe, does not invent the
-expected values, and does not hand-copy a number.
+`probes::fx::impact(i)` is written by the orchestrator **before** the fan-out and
+is frozen. The agent does not invent the probe, does not invent the expected
+values, and does not hand-copy a number.
 
-`Ledger::area` is an `include_str!`: no runtime file IO, no working-directory
-dependence, and a missing golden is a **compile error** rather than a silent skip.
-Because nobody adds a probe, nobody edits `probes.rs` — the last shared-file
+`Ledger::fx()` is an `include_str!`: no runtime file IO, no working-directory
+dependence, and a missing golden file is a **compile error** rather than a silent
+skip. Because nobody adds a probe, nobody edits `probes.rs` — the last shared-file
 collision is gone.
 
 ## The whole-game witness — the single most valuable line in the ledger
@@ -117,6 +117,20 @@ A per-recipe golden catches a local error. **Only this catches a stream shift
 caused by agent A that surfaces in agent B's subsystem** — the failure class this
 programme has and the port did not. It will be the test that fails most often and
 localises worst, and it is worth every bit of that.
+
+## What it cost, measured
+
+The standing suite runs in ~30s in a debug build for 13 cases. **That is not the
+hashing**, which is what it looks like: every case pays two 512×512 procedural
+atlas bakes inside `FxSystem::new` (`bake_particle_atlas`, `bake_decal_atlas`) —
+about 2.3s per case. Bounding the fingerprint to `instance_count()` rather than
+the whole preallocated ring changed it by nothing measurable.
+
+That bound is still right, and for a different reason: `particles.rs` states in
+bold that every reader must bound by `instance_count()`, never `capacity`,
+because a slot past it has never been written and a zero-filled record is *not*
+inert. If the suite ever needs to be fast, the lever is caching the atlas per
+seed — it is a pure function of one.
 
 ## Regeneration
 

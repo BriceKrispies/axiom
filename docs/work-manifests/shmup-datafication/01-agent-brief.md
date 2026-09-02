@@ -131,8 +131,22 @@ fourth slot kind to make one file fit.
 - The driver: one loop over the table, supplying only what the call site knows.
 - A doc comment on the table naming what it is indexed by (`Surface::ALL`,
   emission order, band index) and why the order is not a preference.
-- A test in the same file calling
-  `probe::<area>::<case>().assert_matches(&Ledger::area("<area>"))`.
+- A test in the same file, of exactly this shape:
+
+  ```rust
+  use crate::characterize::{probes, Ledger};
+
+  #[test]
+  fn the_table_emits_exactly_what_the_hand_written_version_did() {
+      let ledger = Ledger::fx();
+      probes::fx::impact(index).assert_matches(&ledger);
+  }
+  ```
+
+  `probes::fx::impact(i)` takes an index into `Surface::ALL`;
+  `probes::fx::tracer()` and `probes::fx::all()` also exist. `Ledger::fx()` is
+  an `include_str!` of the committed golden, so a missing row is a compile-time
+  or panic-time error, never a silent skip.
 - A test for **every** conditional field the table now expresses — the
   `warmth_tints_the_streak_but_not_the_head` shape at `tracers.rs:238`.
 - The source citation header (`//! Ported from Claude-of-Duty …`) preserved
