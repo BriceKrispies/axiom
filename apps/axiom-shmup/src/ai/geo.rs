@@ -368,7 +368,7 @@ pub fn loft_into(out: &mut Mesh, rings: &[Ring], opts: LoftOpts) {
         for j in 0..k {
             let pt = ring.pts[j];
             let mut v = V3::new(pt[0] * s[0], ring.y.unwrap_or(0.0), pt[1] * s[1]);
-            v = v.apply_quat(q);
+            v = q.rotate(v);
             let v = V3::new(v.x + o[0], v.y + o[1], v.z + o[2]);
             arr[j * 3] = v.x;
             arr[j * 3 + 1] = v.y;
@@ -465,16 +465,16 @@ pub fn path_frames(points: &[[f64; 3]], up_ref: [f64; 3]) -> Vec<Q> {
         let a = points[i.saturating_sub(1)];
         let b = points[(i + 1).min(points.len() - 1)];
         let mut dir = V3::new(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-        if dir.length_sq() < 1e-12 {
+        if dir.length_squared() < 1e-12 {
             dir = V3::new(0.0, 1.0, 0.0);
         }
-        let dir = dir.normalize();
+        let dir = dir.normalize_or_zero();
         let mut up = V3::from_array(up_ref);
         if up.dot(dir).abs() > 0.97 {
             up = V3::new(1.0, 0.0, 0.0);
         }
-        let x = dir.cross(up).normalize();
-        let z = x.cross(dir).normalize();
+        let x = dir.cross(up).normalize_or_zero();
+        let z = x.cross(dir).normalize_or_zero();
         // `m.makeBasis(x, dir, z)` then `setFromRotationMatrix(m)` — the
         // matrix is never materialised; `Q::from_basis` is that exact pair.
         frames.push(Q::from_basis(x, dir, z));
@@ -954,7 +954,7 @@ pub fn transform_mesh(m: &mut Mesh, matrix: &M4) {
         m.p[i * 3] = v.x;
         m.p[i * 3 + 1] = v.y;
         m.p[i * 3 + 2] = v.z;
-        let v = apply_matrix3(&nm, V3::new(m.n[i * 3], m.n[i * 3 + 1], m.n[i * 3 + 2])).normalize();
+        let v = apply_matrix3(&nm, V3::new(m.n[i * 3], m.n[i * 3 + 1], m.n[i * 3 + 2])).normalize_or_zero();
         m.n[i * 3] = v.x;
         m.n[i * 3 + 1] = v.y;
         m.n[i * 3 + 2] = v.z;

@@ -137,7 +137,7 @@ fn dim(v: f64) -> f32 {
 /// not a widening of the API to reach an internal.
 pub fn geo_apply(g: &mut Geo, m: M4) {
     for p in g.pos.chunks_exact_mut(3) {
-        let v = V3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])).apply_matrix4(m);
+        let v = m.transform_point(V3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])));
         p[0] = v.x as f32;
         p[1] = v.y as f32;
         p[2] = v.z as f32;
@@ -148,13 +148,13 @@ pub fn geo_apply(g: &mut Geo, m: M4) {
     let nm = normal_matrix(m);
     for n in g.normal.chunks_exact_mut(3) {
         let v = V3::new(f64::from(n[0]), f64::from(n[1]), f64::from(n[2]));
-        // `Vector3.applyNormalMatrix(m)` = `applyMatrix3(m).normalize()`.
+        // `Vector3.applyNormalMatrix(m)` = `applyMatrix3(m).normalize_or_zero()`.
         let r = V3::new(
             nm[0] * v.x + nm[3] * v.y + nm[6] * v.z,
             nm[1] * v.x + nm[4] * v.y + nm[7] * v.z,
             nm[2] * v.x + nm[5] * v.y + nm[8] * v.z,
         )
-        .normalize();
+        .normalize_or_zero();
         n[0] = r.x as f32;
         n[1] = r.y as f32;
         n[2] = r.z as f32;
@@ -993,7 +993,7 @@ impl Arm {
         let l1 = opts.upper * scale;
         let l2 = opts.fore * scale;
         let shoulder = V3::new(side * opts.shoulder_x, opts.shoulder_y, opts.shoulder_z);
-        let pole = V3::new(side * 0.46, -0.86, 0.22).normalize();
+        let pole = V3::new(side * 0.46, -0.86, 0.22).normalize_or_zero();
 
         let mut arm = Arm {
             side,
@@ -1205,7 +1205,7 @@ impl Arm {
         let local = M4::compose(n.position, n.quaternion, n.scale);
         let world = match n.parent {
             None => local,
-            Some(p) => M4::multiply_matrices(self.nodes[p].matrix_world, local),
+            Some(p) => M4::multiply(self.nodes[p].matrix_world, local),
         };
         self.nodes[i].matrix_world = world;
         if update_children {
@@ -1522,10 +1522,12 @@ impl Arm {
     /// the point itself in arm-root space. `gapAt`, `hands.js:705-712`.
     fn gap_at(&mut self, joint: usize, l: [f64; 3], ctx: &FitCtx) -> (f64, V3) {
         self.update_world_matrix(joint, true, true);
-        let p = V3::new(l[0], l[1], l[2])
-            .apply_matrix4(self.nodes[joint].matrix_world)
-            .apply_matrix4(ctx.inv);
-        let mut d = p.sub(ctx.ax0);
+        let p = ctx.inv.transform_point(
+            self.nodes[joint]
+                .matrix_world
+                .transform_point(V3::new(l[0], l[1], l[2])),
+        );
+        let mut d = p.subtract(ctx.ax0);
         d = d.add_scaled(ctx.axis, -d.dot(ctx.axis));
         (d.length() - ctx.radius, p)
     }
@@ -1616,7 +1618,7 @@ impl Arm {
         let ctx = FitCtx {
             inv: self.nodes[root].matrix_world.invert(),
             ax0: V3::new(axis_point[0], axis_point[1], axis_point[2]),
-            axis: V3::new(axis_dir[0], axis_dir[1], axis_dir[2]).normalize(),
+            axis: V3::new(axis_dir[0], axis_dir[1], axis_dir[2]).normalize_or_zero(),
             radius,
             clearance,
         };
@@ -1818,18 +1820,17 @@ impl Arm {
             if self.meshes[mi].color.len() != count * 3 {
                 self.meshes[mi].color = vec![0.0f32; count * 3];
             }
-            let m = M4::multiply_matrices(inv, self.nodes[node].matrix_world);
+            let m = M4::multiply(inv, self.nodes[node].matrix_world);
             for i in 0..count {
                 let pos = &self.meshes[mi].geo.pos;
-                let p = V3::new(
+                let p = m.transform_point(V3::new(
                     f64::from(pos[i * 3]),
                     f64::from(pos[i * 3 + 1]),
                     f64::from(pos[i * 3 + 2]),
-                )
-                .apply_matrix4(m);
+                ));
                 let mut closest = f64::INFINITY;
                 for c in contacts {
-                    let d2 = p.distance_to_squared(*c);
+                    let d2 = p.distance_squared(*c);
                     if d2 < closest {
                         closest = d2;
                     }
@@ -1921,18 +1922,18 @@ impl Arm {
     /// wrong here because every joint position is authored in the rig's local
     /// space.
     pub fn aim_bone(dir: V3, up: V3) -> Q {
-        let bz = dir.scale(-1.0).normalize(); // local +Z is opposite the bone
+        let bz = dir.mul_scalar(-1.0).normalize_or_zero(); // local +Z is opposite the bone
         let mut by = up.add_scaled(bz, -up.dot(bz));
-        if by.length_sq() < 1e-9 {
+        if by.length_squared() < 1e-9 {
             // Degenerate roll reference: pick any axis that is not parallel to
             // the bone.
             by = V3::new(0.0, 1.0, 0.0).add_scaled(bz, -bz.y);
-            if by.length_sq() < 1e-9 {
+            if by.length_squared() < 1e-9 {
                 by = V3::new(1.0, 0.0, 0.0).add_scaled(bz, -bz.x);
             }
         }
-        by = by.normalize();
-        let bx = by.cross(bz).normalize();
+        by = by.normalize_or_zero();
+        let bx = by.cross(bz).normalize_or_zero();
         Q::from_basis(bx, by, bz)
     }
 
@@ -1950,32 +1951,32 @@ impl Arm {
         self.hand_pos = target_pos;
         self.hand_quat = target_quat;
 
-        let mut t = target_pos.sub(self.shoulder);
+        let mut t = target_pos.subtract(self.shoulder);
         let mut d = t.length();
         let max_d = (self.l1 + self.l2) * 0.995;
         let min_d = (self.l1 - self.l2).abs() * 1.05 + 1e-4;
         if d > max_d {
-            t = t.scale(max_d / d);
+            t = t.mul_scalar(max_d / d);
             d = max_d;
         } else if d < min_d {
             t = if d < 1e-5 {
                 V3::new(0.0, 0.0, -min_d)
             } else {
-                t.scale(min_d / d)
+                t.mul_scalar(min_d / d)
             };
             d = min_d;
         }
         // `_dir.copy(_t).divideScalar(d)`, and `Vector3.divideScalar(s)` is
         // `multiplyScalar(1 / s)` — the reciprocal is formed first, so this is
         // not `t.x / d`.
-        let dir = t.scale(1.0 / d);
+        let dir = t.mul_scalar(1.0 / d);
 
         // Circle of possible elbow positions; pick the point toward the pole.
         let a = (self.l1 * self.l1 - self.l2 * self.l2 + d * d) / (2.0 * d);
         let h = (self.l1 * self.l1 - a * a).max(0.0).sqrt();
         let pole = self.pole;
         let mut perp = pole.add_scaled(dir, -pole.dot(dir));
-        if perp.length_sq() < 1e-8 {
+        if perp.length_squared() < 1e-8 {
             // `hands.js:1023`'s `_perp.set(side, -1, 0).addScaledVector(_dir, 0)`
             // adds a zero-scaled vector, which is a literal no-op; the real
             // projection is the line after it. Ported as the two statements
@@ -1984,7 +1985,7 @@ impl Arm {
             let seed = V3::new(self.side, -1.0, 0.0);
             perp = seed.add_scaled(dir, -seed.dot(dir));
         }
-        perp = perp.normalize();
+        perp = perp.normalize_or_zero();
         let elbow = self.shoulder.add_scaled(dir, a).add_scaled(perp, h);
 
         // Upper arm: shoulder -> elbow. The elbow pad sits on the bone's +Y,
@@ -1993,8 +1994,8 @@ impl Arm {
         let (upper_pivot, fore_pivot) = (self.upper_pivot, self.fore_pivot);
         self.upper_pos = shoulder;
         self.nodes[upper_pivot].position = shoulder;
-        let hp = elbow.sub(shoulder);
-        if hp.length_sq() > 1e-12 {
+        let hp = elbow.subtract(shoulder);
+        if hp.length_squared() > 1e-12 {
             let q = Self::aim_bone(hp, perp);
             self.upper_quat = q;
             self.nodes[upper_pivot].quaternion = q;
@@ -2004,9 +2005,9 @@ impl Arm {
         // cuff and the wrist line up with the glove.
         self.fore_pos = elbow;
         self.nodes[fore_pivot].position = elbow;
-        let up = V3::new(0.0, 1.0, 0.0).apply_quat(target_quat);
-        let hp2 = target_pos.sub(elbow);
-        if hp2.length_sq() > 1e-12 {
+        let up = target_quat.rotate(V3::new(0.0, 1.0, 0.0));
+        let hp2 = target_pos.subtract(elbow);
+        if hp2.length_squared() > 1e-12 {
             let q = Self::aim_bone(hp2, up);
             self.fore_quat = q;
             self.nodes[fore_pivot].quaternion = q;

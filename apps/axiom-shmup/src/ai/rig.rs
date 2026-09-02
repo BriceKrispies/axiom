@@ -88,22 +88,22 @@ const HAND: f64 = 0.095;
 fn solve_elbow(s_in: [f64; 3], w_in: [f64; 3], l1: f64, l2: f64, pole: [f64; 3]) -> V3 {
     let s = V3::from_array(s_in);
     let w = V3::from_array(w_in);
-    let mut axis = w.sub(s);
+    let mut axis = w.subtract(s);
     let d = (l1 + l2 - 1e-4).min(((l1 - l2).abs() + 1e-4).max(axis.length()));
-    axis = axis.normalize();
+    axis = axis.normalize_or_zero();
     let a = (l1 * l1 - l2 * l2 + d * d) / (2.0 * d);
     let h = (0.0f64).max(l1 * l1 - a * a).sqrt();
-    let p = V3::from_array(pole).normalize();
+    let p = V3::from_array(pole).normalize_or_zero();
     // component of the pole perpendicular to the bone axis
     let mut perp = p.add_scaled(axis, -p.dot(axis));
-    if perp.length_sq() < 1e-8 {
+    if perp.length_squared() < 1e-8 {
         // `perp.set(0, -1, 0).addScaledVector(axis, -axis.y * -1)` — the
         // source's double negation, transcribed as written (`-axis.y * -1`
         // *is* `axis.y`, which is the correct perpendicular projection of
         // `(0,-1,0)`; the spelling is kept so this diffs against the source).
         perp = V3::new(0.0, -1.0, 0.0).add_scaled(axis, -axis.y * -1.0);
     }
-    perp = perp.normalize();
+    perp = perp.normalize_or_zero();
     s.add_scaled(axis, a).add_scaled(perp, h)
 }
 
@@ -114,11 +114,11 @@ fn solve_elbow(s_in: [f64; 3], w_in: [f64; 3], l1: f64, l2: f64, pole: [f64; 3])
 /// Bore line of the carried weapon in bind pose: origin. `rig.js:54`.
 pub const BORE_ORIGIN: [f64; 3] = [-0.148, 1.398, -0.078];
 
-/// Bore direction, `new THREE.Vector3(0.115, -0.10, 1).normalize()`
+/// Bore direction, `new THREE.Vector3(0.115, -0.10, 1).normalize_or_zero()`
 /// (`rig.js:55-58`). A `LazyLock`, not a `const`: `f64::sqrt` is not a stable
 /// `const fn`.
 pub static BORE_DIR: LazyLock<[f64; 3]> = LazyLock::new(|| {
-    let v = V3::new(0.115, -0.10, 1.0).normalize();
+    let v = V3::new(0.115, -0.10, 1.0).normalize_or_zero();
     [v.x, v.y, v.z]
 });
 
@@ -317,7 +317,7 @@ impl Rig {
                     // leaf with an explicit direction: hang it off the parent
                     let pi = parent[i] as usize;
                     let base = bind_pos[pi];
-                    let d = V3::from_array(spec.leaf_dir.expect("leaf spec has spec[4]")).normalize();
+                    let d = V3::from_array(spec.leaf_dir.expect("leaf spec has spec[4]")).normalize_or_zero();
                     [
                         base.x + d.x * LEAF_STUB,
                         base.y + d.y * LEAF_STUB,
@@ -351,32 +351,32 @@ impl Rig {
                             for k in kids {
                                 acc = acc.add(bind_pos[*k]);
                             }
-                            tail = acc.scale(1.0 / kids.len() as f64);
+                            tail = acc.mul_scalar(1.0 / kids.len() as f64);
                         }
                     }
                 }
             } else {
                 let d = match spec.leaf_dir {
-                    Some(ld) => V3::from_array(ld).normalize(),
-                    None => bind_pos[i].sub(bind_pos[parent[i] as usize]).normalize(),
+                    Some(ld) => V3::from_array(ld).normalize_or_zero(),
+                    None => bind_pos[i].subtract(bind_pos[parent[i] as usize]).normalize_or_zero(),
                 };
                 tail = bind_pos[i].add_scaled(d, LEAF_STUB);
             }
             tail_v.push(tail);
 
-            let mut y_axis = tail.sub(bind_pos[i]);
+            let mut y_axis = tail.subtract(bind_pos[i]);
             length.push(y_axis.length());
-            if y_axis.length_sq() < 1e-10 {
+            if y_axis.length_squared() < 1e-10 {
                 y_axis = V3::new(0.0, 1.0, 0.0);
             }
-            y_axis = y_axis.normalize();
+            y_axis = y_axis.normalize_or_zero();
             let hint = spec.up.unwrap_or([0.0, 0.0, 1.0]);
             let mut up = V3::from_array(hint);
             if up.dot(y_axis).abs() > 0.985 {
                 up = V3::new(1.0, 0.0, 0.0);
             }
-            let x_axis = y_axis.cross(up).normalize();
-            let z_axis = x_axis.cross(y_axis).normalize();
+            let x_axis = y_axis.cross(up).normalize_or_zero();
+            let z_axis = x_axis.cross(y_axis).normalize_or_zero();
             // `m.makeBasis(x, y, z)` then `setFromRotationMatrix(m)`: the basis
             // vectors are the matrix's **columns** (THREE's `elements` are
             // column-major) — see the port recipe's matrix-storage-order trap.
@@ -394,7 +394,7 @@ impl Rig {
                 local_quat.push(bind_quat[i]);
             } else {
                 let inv = bind_quat[pi as usize].invert();
-                let v = bind_pos[i].sub(bind_pos[pi as usize]).apply_quat(inv);
+                let v = inv.rotate(bind_pos[i].subtract(bind_pos[pi as usize]));
                 local_pos.push(v);
                 local_quat.push(inv.multiply(bind_quat[i]));
             }

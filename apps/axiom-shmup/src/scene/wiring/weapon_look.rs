@@ -948,14 +948,14 @@ fn rig_to_world(world: M4, mirrored: bool, rig: Transform) -> Transform {
     let e = world.e;
     let column_x = V3::new(e[0], e[1], e[2]);
     let basis_x = if mirrored {
-        column_x.scale(-1.0)
+        column_x.mul_scalar(-1.0)
     } else {
         column_x
     };
     let rotation = Q::from_basis(
-        basis_x.normalize(),
-        V3::new(e[4], e[5], e[6]).normalize(),
-        V3::new(e[8], e[9], e[10]).normalize(),
+        basis_x.normalize_or_zero(),
+        V3::new(e[4], e[5], e[6]).normalize_or_zero(),
+        V3::new(e[8], e[9], e[10]).normalize_or_zero(),
     );
     let local = Vec3::new(e[12] as f32, e[13] as f32, e[14] as f32);
     let local_rotation = Quat::new(

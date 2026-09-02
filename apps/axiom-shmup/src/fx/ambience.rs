@@ -270,7 +270,7 @@ impl Default for Emitter {
 
 /// `camera.getWorldDirection(v)` for a `THREE.Camera`.
 ///
-/// `Object3D.getWorldDirection` is `set(e[8], e[9], e[10]).normalize()` — the
+/// `Object3D.getWorldDirection` is `set(e[8], e[9], e[10]).normalize_or_zero()` — the
 /// **+Z column** of the column-major world matrix — and `Camera` overrides it
 /// to `super.getWorldDirection(target).negate()` (`Camera.js:100-103`). The
 /// negate happens **after** the normalize, and this reproduces that order.
@@ -286,7 +286,7 @@ impl Default for Emitter {
 /// `normalize()` is `divideScalar(length() || 1)` — [`V3::normalize`] already
 /// carries the `|| 1`.
 pub fn camera_world_direction(m: M4) -> V3 {
-    let n = V3::new(m.e[8], m.e[9], m.e[10]).normalize();
+    let n = V3::new(m.e[8], m.e[9], m.e[10]).normalize_or_zero();
     V3::new(-n.x, -n.y, -n.z)
 }
 

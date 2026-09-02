@@ -454,7 +454,7 @@ struct Plane {
 }
 
 impl Plane {
-    /// `setComponents(x, y, z, w).normalize()`. The normalise is
+    /// `setComponents(x, y, z, w).normalize_or_zero()`. The normalise is
     /// `1 / normal.length()` and a multiply, not three divides.
     fn from_components(x: f64, y: f64, z: f64, w: f64) -> Plane {
         let inv = 1.0 / (x * x + y * y + z * z).sqrt();
@@ -1197,7 +1197,7 @@ impl AiCore {
                 }
             }
             let f = 1.0 - d / radius;
-            // `this._v.copy(a.position).sub(e.position).normalize()`
+            // `this._v.copy(a.position).sub(e.position).normalize_or_zero()`
             let mut v = [pos[0] - e.position[0], pos[1] - e.position[1], pos[2] - e.position[2]];
             let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
             let inv = 1.0 / jsmath::or_one(l);
@@ -2232,9 +2232,9 @@ impl AiCore {
         let cam = &self.camera;
         // `this._v.set(0, 0, -1).applyQuaternion(cam.quaternion)`
         let q = Q::new(cam.quaternion[0], cam.quaternion[1], cam.quaternion[2], cam.quaternion[3]);
-        let mut f = V3::new(0.0, 0.0, -1.0).apply_quat(q);
+        let mut f = q.rotate(V3::new(0.0, 0.0, -1.0));
         f.y = 0.0;
-        let f = f.normalize();
+        let f = f.normalize_or_zero();
         let (rx, rz) = (f.z, -f.x); // camera right, flattened
         let tan_h = ((cam.fov * std::f64::consts::PI) / 360.0).tan() * cam.aspect;
         let ideal = [
@@ -2352,9 +2352,9 @@ impl AiCore {
             self.camera.quaternion[2],
             self.camera.quaternion[3],
         );
-        let mut f = V3::new(0.0, 0.0, -1.0).apply_quat(q);
+        let mut f = q.rotate(V3::new(0.0, 0.0, -1.0));
         f.y = 0.0;
-        let f = f.normalize();
+        let f = f.normalize_or_zero();
         let right = [f.z, 0.0, -f.x];
         let squad = self.create_squad();
 
@@ -2447,9 +2447,9 @@ impl AiCore {
             self.camera.quaternion[2],
             self.camera.quaternion[3],
         );
-        let mut f = V3::new(0.0, 0.0, -1.0).apply_quat(q);
+        let mut f = q.rotate(V3::new(0.0, 0.0, -1.0));
         f.y = 0.0;
-        let f = f.normalize();
+        let f = f.normalize_or_zero();
         let right = [f.z, 0.0, -f.x];
         const LAYOUT: [(&str, f64, f64, f64); 3] = [
             ("vanguard", 1.9, 0.35, 0.25),

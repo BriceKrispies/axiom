@@ -255,7 +255,7 @@ impl WeaponRig {
             iron_sight: v3f(n.iron_sight),
             muzzle: v3f(n.muzzle),
             eject: v3f(n.eject),
-            eject_dir: v3f(n.eject_dir).normalize(),
+            eject_dir: v3f(n.eject_dir).normalize_or_zero(),
             optic: Some(OpticNode {
                 center: [
                     f64::from(n.optic_glass.center[0]),
@@ -466,13 +466,13 @@ fn js_hypot2(x: f64, y: f64) -> f64 {
 /// basis from a finger direction and a back-of-hand direction — the weapon
 /// grip nodes' `finger`/`back` triples feed straight into this.
 fn hand_basis(finger: V3, back: V3) -> Q {
-    let bz = finger.scale(-1.0).normalize(); // hand +Z
-    let mut by = back.sub(bz.scale(back.dot(bz)));
-    if by.length_sq() < 1e-8 {
-        by = V3::new(0.0, 1.0, 0.0).sub(bz.scale(bz.y));
+    let bz = finger.mul_scalar(-1.0).normalize_or_zero(); // hand +Z
+    let mut by = back.subtract(bz.mul_scalar(back.dot(bz)));
+    if by.length_squared() < 1e-8 {
+        by = V3::new(0.0, 1.0, 0.0).subtract(bz.mul_scalar(bz.y));
     }
-    by = by.normalize(); // hand +Y
-    let bx = by.cross(bz).normalize(); // hand +X
+    by = by.normalize_or_zero(); // hand +Y
+    let bx = by.cross(bz).normalize_or_zero(); // hand +X
     Q::from_basis(bx, by, bz)
 }
 
@@ -807,8 +807,8 @@ impl Viewmodel {
     /// (sight · adsQuat)`.
     pub fn ads_pose(sight: V3, eye_relief: f64, ads_cant: [f64; 3]) -> (V3, Q) {
         let ads_quat = Q::from_euler_xyz(ads_cant[0], ads_cant[1], ads_cant[2]);
-        let sight_local = sight.apply_quat(ads_quat);
-        let ads_pos = V3::new(0.0, 0.0, -eye_relief).sub(sight_local);
+        let sight_local = ads_quat.rotate(sight);
+        let ads_pos = V3::new(0.0, 0.0, -eye_relief).subtract(sight_local);
         (ads_pos, ads_quat)
     }
 
@@ -1171,7 +1171,7 @@ impl Viewmodel {
     fn mag_from_hand(&self, w: &WeaponRig, weight: f64) -> (V3, Q) {
         let q = self.hand_quat_l;
         let v = self.hand_pos_l;
-        let v2 = V3::new(0.0, w.mag_len * 0.62, -0.062).apply_quat(q);
+        let v2 = q.rotate(V3::new(0.0, w.mag_len * 0.62, -0.062));
         let v = v.add(v2);
         // `lerpVectors(magSeatPos, v, weight)`.
         let pos = w.mag_seat_pos.lerp(v, weight);
@@ -1184,8 +1184,8 @@ impl Viewmodel {
         // Shoulders are body-fixed: express the camera-space anchor in rig
         // space. `viewmodel.js:930-935`.
         let q_inv = self.rig_quat.invert();
-        self.arm_r.shoulder = self.shoulder_r.sub(self.rig_pos).apply_quat(q_inv);
-        self.arm_l.shoulder = self.shoulder_l.sub(self.rig_pos).apply_quat(q_inv);
+        self.arm_r.shoulder = q_inv.rotate(self.shoulder_r.subtract(self.rig_pos));
+        self.arm_l.shoulder = q_inv.rotate(self.shoulder_l.subtract(self.rig_pos));
 
         // ---- shooting hand: welded to the grip ----
         let g_r = weapon.grip_r;
@@ -1243,10 +1243,11 @@ impl Viewmodel {
         // Optic axis and lens centre, both in camera space. The weapon group
         // is a child of the rig which is a child of the anchor, so camera
         // space is just the rig transform applied to the weapon-local values.
-        let v = V3::from_array(optic.center)
-            .apply_quat(self.rig_quat)
+        let v = self
+            .rig_quat
+            .rotate(V3::from_array(optic.center))
             .add(self.rig_pos);
-        let v3 = V3::new(0.0, 0.0, -1.0).apply_quat(self.rig_quat).normalize();
+        let v3 = self.rig_quat.rotate(V3::new(0.0, 0.0, -1.0)).normalize_or_zero();
 
         // Where the axis ray from the eye crosses the lens plane.
         let s = v.dot(v3);
@@ -1254,7 +1255,7 @@ impl Viewmodel {
             self.reticle.visible = false;
             return;
         }
-        let v2 = v3.scale(s); // dot position in camera space
+        let v2 = v3.mul_scalar(s); // dot position in camera space
         // Vignette: how far off the lens centre the apparent dot lands.
         let off_x = v2.x - v.x;
         let off_y = v2.y - v.y;

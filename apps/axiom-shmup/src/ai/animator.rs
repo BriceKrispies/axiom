@@ -763,9 +763,9 @@ impl Animator {
         let q_inv = rig.bind_quat[i_hand_r].invert();
         let hand_pos = rig.bind_pos[i_hand_r];
         let to_local = |p: [f64; 3]| {
-            V3::new(p[0] - hand_pos.x, p[1] - hand_pos.y, p[2] - hand_pos.z).apply_quat(q_inv)
+            q_inv.rotate(V3::new(p[0] - hand_pos.x, p[1] - hand_pos.y, p[2] - hand_pos.z))
         };
-        let bore_local = V3::from_array(*BORE_DIR).apply_quat(q_inv).normalize();
+        let bore_local = q_inv.rotate(V3::from_array(*BORE_DIR)).normalize_or_zero();
         let muzzle_local = match weapon {
             Some(w) => to_local(w.muzzle),
             None => V3::new(0.0, 0.0, 0.4),
@@ -1118,7 +1118,7 @@ impl Animator {
     /// `_aimBone`. `animator.js:354-361`.
     fn aim_bone(&mut self, i: usize, dir: V3) {
         let wq = self.wq(i);
-        let cur = V3::new(0.0, 1.0, 0.0).apply_quat(wq);
+        let cur = wq.rotate(V3::new(0.0, 1.0, 0.0));
         let dq = quat_from_unit_vectors(cur, dir);
         self.apply_world(i, dq);
     }
@@ -1135,13 +1135,13 @@ impl Animator {
             // only on the next line (`:374`).
             let hand_q = self.wq(self.i_hand_r);
             let hand_world = self.bones.nodes[node_of(self.i_hand_r)].matrix_world;
-            let bore = self.bore_local.apply_quat(hand_q).normalize();
+            let bore = hand_q.rotate(self.bore_local).normalize_or_zero();
             let muzzle = apply_matrix4(self.muzzle_local, &hand_world);
-            let want = target.sub(muzzle);
-            if want.length_sq() < 1e-6 {
+            let want = target.subtract(muzzle);
+            if want.length_squared() < 1e-6 {
                 return;
             }
-            let want = want.normalize();
+            let want = want.normalize_or_zero();
             let dot = (1.0f64).min((-1.0f64).max(bore.dot(want)));
             let mut ang = dot.acos() * weight;
             if ang < 0.0015 {
@@ -1153,10 +1153,10 @@ impl Animator {
                 ang = max_this_iter;
             }
             let axis = bore.cross(want);
-            if axis.length_sq() < 1e-10 {
+            if axis.length_squared() < 1e-10 {
                 return;
             }
-            let axis = axis.normalize();
+            let axis = axis.normalize_or_zero();
             for (bi, f) in spread {
                 let q3 = quat_from_axis_angle(axis, ang * f);
                 self.apply_world(bi, q3);
@@ -1176,12 +1176,12 @@ impl Animator {
         let chain = [(self.i_neck, 0.4), (self.i_head, 0.6)];
         for (bi, f) in chain {
             let wq = self.wq(bi);
-            let fwd = V3::new(0.0, 0.0, 1.0).apply_quat(wq);
-            let want = target.sub(self.wp(bi));
-            if want.length_sq() < 1e-6 {
+            let fwd = wq.rotate(V3::new(0.0, 0.0, 1.0));
+            let want = target.subtract(self.wp(bi));
+            if want.length_squared() < 1e-6 {
                 return;
             }
-            let want = want.normalize();
+            let want = want.normalize_or_zero();
             let dot = (1.0f64).min((-1.0f64).max(fwd.dot(want)));
             let mut ang = dot.acos() * weight * f;
             if ang < 0.002 {
@@ -1191,10 +1191,10 @@ impl Animator {
                 ang = 0.5; // ~29 deg per bone per frame cap
             }
             let axis = fwd.cross(want);
-            if axis.length_sq() < 1e-10 {
+            if axis.length_squared() < 1e-10 {
                 continue;
             }
-            let axis = axis.normalize();
+            let axis = axis.normalize_or_zero();
             let q3 = quat_from_axis_angle(axis, ang);
             self.apply_world(bi, q3);
         }
@@ -1232,7 +1232,7 @@ impl Animator {
         };
         // pole: elbow down and out to the character's left
         let actor_q = self.bones.world_quaternion(ACTOR);
-        let pole = V3::new(0.6, -1.0, -0.25).apply_quat(actor_q);
+        let pole = actor_q.rotate(V3::new(0.6, -1.0, -0.25));
         let arm_l = self.arm_l;
         self.two_bone(arm_l, t, pole);
     }
@@ -1289,22 +1289,22 @@ impl Animator {
             let target = V3::new(ankle.x, foot_y[k].max(ankle.y - 0.001), ankle.z);
             // knee pole: forward, in the actor's facing
             let actor_q = self.bones.world_quaternion(ACTOR);
-            let pole = V3::new(if k == 0 { -0.12 } else { 0.12 }, 0.05, 1.0).apply_quat(actor_q);
+            let pole = actor_q.rotate(V3::new(if k == 0 { -0.12 } else { 0.12 }, 0.05, 1.0));
             self.two_bone(leg, target, pole);
             // roll the sole onto the ground plane
             let n = foot_n[k];
             if n.y < 0.999 {
                 let foot = leg[2];
                 let fq = self.wq(foot);
-                let up = V3::new(0.0, 0.0, 1.0).apply_quat(fq);
+                let up = fq.rotate(V3::new(0.0, 0.0, 1.0));
                 let dot = (1.0f64).min((-1.0f64).max(up.dot(n)));
                 let mut ang = dot.acos();
                 if ang > 0.35 {
                     ang = 0.35;
                 }
                 let axis = up.cross(n);
-                if axis.length_sq() > 1e-10 {
-                    let axis = axis.normalize();
+                if axis.length_squared() > 1e-10 {
+                    let axis = axis.normalize_or_zero();
                     let q3 = quat_from_axis_angle(axis, ang);
                     self.apply_world(foot, q3);
                 }
@@ -1327,12 +1327,12 @@ impl Animator {
         if l1 < 1e-5 || l2 < 1e-5 {
             return;
         }
-        let dir0 = target.sub(a);
+        let dir0 = target.subtract(a);
         let mut d = dir0.length();
         if d < 1e-5 {
             return;
         }
-        let dir = dir0.scale(1.0 / d);
+        let dir = dir0.mul_scalar(1.0 / d);
         let min = (l1 - l2).abs() + 1e-4;
         let max = l1 + l2 - 1e-4;
         d = max.min(min.max(d));
@@ -1340,27 +1340,27 @@ impl Animator {
         let h = (0.0f64).max(l1 * l1 - a_len * a_len).sqrt();
         // pole component perpendicular to the limb axis
         let mut perp = pole.add_scaled(dir, -pole.dot(dir));
-        if perp.length_sq() < 1e-8 {
+        if perp.length_squared() < 1e-8 {
             perp = V3::new(0.0, 1.0, 0.0).add_scaled(dir, -dir.y);
         }
-        let perp = perp.normalize();
+        let perp = perp.normalize_or_zero();
         // elbow/knee position
         let ex = a.x + dir.x * a_len + perp.x * h;
         let ey = a.y + dir.y * a_len + perp.y * h;
         let ez = a.z + dir.z * a_len + perp.z * h;
         // upper segment
         let to_e = V3::new(ex - a.x, ey - a.y, ez - a.z);
-        if to_e.length_sq() < 1e-10 {
+        if to_e.length_squared() < 1e-10 {
             return;
         }
-        self.aim_bone(iu, to_e.normalize());
+        self.aim_bone(iu, to_e.normalize_or_zero());
         // lower segment (world matrices refreshed by _aimBone)
         let b2 = self.wp(il);
         let to_t = V3::new(target.x - b2.x, target.y - b2.y, target.z - b2.z);
-        if to_t.length_sq() < 1e-10 {
+        if to_t.length_squared() < 1e-10 {
             return;
         }
-        self.aim_bone(il, to_t.normalize());
+        self.aim_bone(il, to_t.normalize_or_zero());
     }
 
     /* ---------------- outputs for FX / ballistics ---------------- */
@@ -1371,7 +1371,7 @@ impl Animator {
         self.muzzle_world = apply_matrix4(self.muzzle_local, &hand_world);
         self.eject_world = apply_matrix4(self.eject_local, &hand_world);
         let hand_q = self.bones.world_quaternion(node_of(self.i_hand_r));
-        self.muzzle_dir = self.bore_local.apply_quat(hand_q).normalize();
+        self.muzzle_dir = hand_q.rotate(self.bore_local).normalize_or_zero();
     }
 
     /// World position of a bone, for hitboxes and FX. `bonePos(name, out)`.

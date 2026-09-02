@@ -517,12 +517,12 @@ impl WorldSystem {
 
     /// `levelToWorld(x, y, z, out)` (`index.js:414-416`).
     pub fn level_to_world(&self, x: f64, y: f64, z: f64) -> V3 {
-        V3::new(x, y, z).apply_matrix4(self.xform)
+        self.xform.transform_point(V3::new(x, y, z))
     }
 
     /// `worldToLevel(x, y, z, out)` (`index.js:418-420`).
     pub fn world_to_level(&self, x: f64, y: f64, z: f64) -> V3 {
-        V3::new(x, y, z).apply_matrix4(self.inv)
+        self.inv.transform_point(V3::new(x, y, z))
     }
 
     /// `groundHeight(x, z)` (`index.js:423-426`) — the analytic floor height.
@@ -641,7 +641,7 @@ fn transform_box(min: [f64; 3], max: [f64; 3], m: M4) -> Bounds {
     let mut lo = V3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
     let mut hi = V3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
     for c in corners {
-        let p = c.apply_matrix4(m);
+        let p = m.transform_point(c);
         lo = V3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
         hi = V3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
     }

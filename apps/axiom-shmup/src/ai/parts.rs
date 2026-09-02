@@ -353,7 +353,7 @@ pub fn limb_tube(nz: &Noise, a: [f64; 3], b: [f64; 3], c: [f64; 3], radii: &[f64
         // round the corner slightly so the knee/elbow is not a crease
         if t > 0.34 && t < 0.66 {
             let k = 1.0 - (t - 0.5).abs() / 0.16;
-            tmp = tmp.lerp(a_v.add(c_v).scale(0.5), 0.06 * k);
+            tmp = tmp.lerp(a_v.add(c_v).mul_scalar(0.5), 0.06 * k);
         }
         pts.push([tmp.x, tmp.y, tmp.z]);
     }
@@ -375,23 +375,23 @@ pub fn limb_tube(nz: &Noise, a: [f64; 3], b: [f64; 3], c: [f64; 3], radii: &[f64
     let crease = opts.crease;
     if crease > 0.0 {
         // arc-length parameterisation of the two-segment chain
-        let ab = b_v.sub(a_v);
-        let bc = c_v.sub(b_v);
+        let ab = b_v.subtract(a_v);
+        let bc = c_v.subtract(b_v);
         let l_ab = ab.length();
         let l_bc = bc.length();
         // `divideScalar(s)` is Three's `multiplyScalar(1 / s)` — a reciprocal
         // multiply, not a division, and the two round differently.
-        let u_ab = ab.scale(1.0 / 1e-5f64.max(l_ab));
-        let u_bc = bc.scale(1.0 / 1e-5f64.max(l_bc));
+        let u_ab = ab.mul_scalar(1.0 / 1e-5f64.max(l_ab));
+        let u_bc = bc.mul_scalar(1.0 / 1e-5f64.max(l_bc));
         let total = l_ab + l_bc;
-        let bend = V3::from_array(opts.bend).normalize();
+        let bend = V3::from_array(opts.bend).normalize_or_zero();
         displace(
             &mut m,
             |x, y, z, nx, ny, nzc, _i| {
                 // distance along the chain, and how far out along the bend axis
                 let q = V3::new(x, y, z);
-                let t_ab = 0.0f64.max(l_ab.min(q.sub(a_v).dot(u_ab)));
-                let t_bc = 0.0f64.max(l_bc.min(q.sub(b_v).dot(u_bc)));
+                let t_ab = 0.0f64.max(l_ab.min(q.subtract(a_v).dot(u_ab)));
+                let t_bc = 0.0f64.max(l_bc.min(q.subtract(b_v).dot(u_bc)));
                 let s = if t_ab < l_ab - 1e-4 { t_ab } else { l_ab + t_bc };
                 let u = s / total;
                 // transverse crease bands: ridged, 5.5 cm, jittered so they are
@@ -1565,9 +1565,9 @@ pub fn boot_laces(ankle: [f64; 3]) -> Mesh {
 pub fn glove(nz: &Noise, wrist: [f64; 3], grip_axis: [f64; 3], palm_normal: [f64; 3], side: f64) -> Mesh {
     let mut out = empty_mesh();
     let w = V3::from_array(wrist);
-    let a = V3::from_array(grip_axis).normalize(); // along the grip
-    let n = V3::from_array(palm_normal).normalize(); // out of the palm
-    let s = a.cross(n).normalize(); // across the hand
+    let a = V3::from_array(grip_axis).normalize_or_zero(); // along the grip
+    let n = V3::from_array(palm_normal).normalize_or_zero(); // out of the palm
+    let s = a.cross(n).normalize_or_zero(); // across the hand
 
     // palm block
     let mut palm = box_round(
@@ -1640,9 +1640,9 @@ pub fn glove(nz: &Noise, wrist: [f64; 3], grip_axis: [f64; 3], palm_normal: [f64
 /// knuckle guard on the back of the glove.
 pub fn knuckle_guard(wrist: [f64; 3], grip_axis: [f64; 3], palm_normal: [f64; 3]) -> Mesh {
     let w = V3::from_array(wrist);
-    let a = V3::from_array(grip_axis).normalize();
-    let n = V3::from_array(palm_normal).normalize();
-    let s = a.cross(n).normalize();
+    let a = V3::from_array(grip_axis).normalize_or_zero();
+    let n = V3::from_array(palm_normal).normalize_or_zero();
+    let s = a.cross(n).normalize_or_zero();
     let mut g = box_round(
         0.026,
         0.024,

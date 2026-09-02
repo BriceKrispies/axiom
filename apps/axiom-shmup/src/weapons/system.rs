@@ -649,7 +649,7 @@ pub fn rig_from_smg(model: &SmgModel, def: &'static WeaponDef) -> WeaponRig {
         iron_sight: v3f(n.iron_sight),
         muzzle: v3f(n.muzzle),
         eject: v3f(n.eject),
-        eject_dir: v3f(n.eject_dir).normalize(),
+        eject_dir: v3f(n.eject_dir).normalize_or_zero(),
         optic: Some(OpticNode {
             center: [
                 f64::from(n.optic_glass.center[0]),
@@ -697,7 +697,7 @@ pub fn rig_from_pistol(model: &PistolModel, def: &'static WeaponDef) -> WeaponRi
         iron_sight: v3f(n.iron_sight),
         muzzle: v3f(n.muzzle),
         eject: v3f(n.eject),
-        eject_dir: v3f(n.eject_dir).normalize(),
+        eject_dir: v3f(n.eject_dir).normalize_or_zero(),
         // The pistol has iron sights only; `model.nodes.opticGlass ?? null`.
         optic: None,
         mag_seat_pos: v3f(n.mag_seat.pos),
@@ -1313,17 +1313,17 @@ impl WeaponCore {
 
         // ---- aim: camera forward + a spread cone ----
         let cam_quat = camera.aim_orientation();
-        let cam_dir = V3::new(0.0, 0.0, -1.0).apply_quat(cam_quat).normalize();
+        let cam_dir = cam_quat.rotate(V3::new(0.0, 0.0, -1.0)).normalize_or_zero();
         let mut dir = cam_dir;
         let spread_rad = self.spread * DEG;
         if spread_rad > 1e-5 {
             let (dx, dy) = self.rng.disc();
-            let right = V3::new(1.0, 0.0, 0.0).apply_quat(cam_quat);
-            let up = V3::new(0.0, 1.0, 0.0).apply_quat(cam_quat);
+            let right = cam_quat.rotate(V3::new(1.0, 0.0, 0.0));
+            let up = cam_quat.rotate(V3::new(0.0, 1.0, 0.0));
             dir = dir
                 .add_scaled(right, spread_rad.tan() * dx)
                 .add_scaled(up, spread_rad.tan() * dy)
-                .normalize();
+                .normalize_or_zero();
         }
 
         // ---- projectile ----
@@ -1485,7 +1485,7 @@ impl WeaponCore {
         // onto the anchor. `mag.updateMatrixWorld()` in the source.
         let local_pos = pre.parts.mag_pos.unwrap_or(w.mag_seat_pos);
         let local_quat = pre.parts.mag_quat.unwrap_or(w.mag_seat_quat);
-        let mag_world = M4::multiply_matrices(
+        let mag_world = M4::multiply(
             self.compose_group(pre.rig_pos, pre.rig_quat),
             M4::compose(local_pos, local_quat, V3::new(1.0, 1.0, 1.0)),
         );
@@ -1899,14 +1899,14 @@ impl WeaponCore {
     fn compose_group(&self, rig_pos: V3, rig_quat: Q) -> M4 {
         let anchor = M4::compose(self.anchor_pos, self.anchor_quat, V3::new(1.0, 1.0, 1.0));
         let rig = M4::compose(rig_pos, rig_quat, V3::new(1.0, 1.0, 1.0));
-        M4::multiply_matrices(anchor, rig)
+        M4::multiply(anchor, rig)
     }
 
     /// `muzzleWorld(out)` (`viewmodel.js:1041-1048`).
     pub fn muzzle_world(&self) -> V3 {
         match self.viewmodel.active() {
             None => V3::ZERO,
-            Some(w) => w.muzzle.apply_matrix4(self.group_matrix()),
+            Some(w) => self.group_matrix().transform_point(w.muzzle),
         }
     }
 
@@ -1914,7 +1914,7 @@ impl WeaponCore {
     pub fn eject_world(&self) -> V3 {
         match self.viewmodel.active() {
             None => V3::ZERO,
-            Some(w) => w.eject.apply_matrix4(self.group_matrix()),
+            Some(w) => self.group_matrix().transform_point(w.eject),
         }
     }
 
@@ -1924,18 +1924,18 @@ impl WeaponCore {
     pub fn eject_velocity(&self, speed: f64) -> V3 {
         match self.viewmodel.active() {
             None => V3::ZERO,
-            Some(w) => transform_direction(w.eject_dir, self.group_matrix()).scale(speed),
+            Some(w) => transform_direction(w.eject_dir, self.group_matrix()).mul_scalar(speed),
         }
     }
 
     /// `boreDir(out)` (`viewmodel.js:1066-1070`). The source normalises twice
-    /// — `transformDirection` already does, and then `.normalize()` again;
+    /// — `transformDirection` already does, and then `.normalize_or_zero()` again;
     /// transcribed as written because the second pass is not a no-op in the
     /// last bit.
     pub fn bore_dir(&self) -> V3 {
         match self.viewmodel.active() {
             None => V3::new(0.0, 0.0, -1.0),
-            Some(_) => transform_direction(V3::new(0.0, 0.0, -1.0), self.group_matrix()).normalize(),
+            Some(_) => transform_direction(V3::new(0.0, 0.0, -1.0), self.group_matrix()).normalize_or_zero(),
         }
     }
 
@@ -2195,7 +2195,7 @@ fn transform_direction(v: V3, m: M4) -> V3 {
     let x = e[0] * v.x + e[4] * v.y + e[8] * v.z;
     let y = e[1] * v.x + e[5] * v.y + e[9] * v.z;
     let z = e[2] * v.x + e[6] * v.y + e[10] * v.z;
-    V3::new(x, y, z).normalize()
+    V3::new(x, y, z).normalize_or_zero()
 }
 
 /// Triangles in a built weapon assembly — `addWeapon`'s `tris` accumulator

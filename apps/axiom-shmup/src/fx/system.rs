@@ -73,7 +73,7 @@ fn clamp_i(v: f64, a: f64, b: f64) -> usize {
 ///
 /// Three's `normalize()` is `divideScalar(length() || 1)`, hence
 /// [`crate::jsmath::or_one`]. Note that `_syncLighting` calls
-/// `.transformDirection(...).normalize()` — a *second* normalize of an
+/// `.transformDirection(...).normalize_or_zero()` — a *second* normalize of an
 /// already-unit vector. That is not a no-op in floating point (the length is
 /// `1 ± eps`, and dividing by it moves the last bits), so this port keeps
 /// both calls at those sites rather than tidying one away.
@@ -88,9 +88,9 @@ fn transform_direction(v: V3, m: M4) -> V3 {
     three_normalize(out)
 }
 
-/// `Vector3.normalize()` — `divideScalar(length() || 1)`.
+/// `Vector3.normalize_or_zero()` — `divideScalar(length() || 1)`.
 fn three_normalize(v: V3) -> V3 {
-    v.scale(1.0 / crate::jsmath::or_one(v.length()))
+    v.mul_scalar(1.0 / crate::jsmath::or_one(v.length()))
 }
 
 /// `stats`, `index.js:182`.
@@ -288,11 +288,11 @@ impl CameraFrame {
     }
     /// `Object3D.worldToLocal(v)`.
     fn world_to_local(&self, v: V3) -> V3 {
-        v.apply_matrix4(self.matrix_world_inverse)
+        self.matrix_world_inverse.transform_point(v)
     }
     /// `Object3D.localToWorld(v)`.
     fn local_to_world(&self, v: V3) -> V3 {
-        v.apply_matrix4(self.matrix_world)
+        self.matrix_world.transform_point(v)
     }
 }
 
@@ -852,7 +852,7 @@ impl FxSystem {
         let (origin, dir) = (e.origin?, e.dir?);
         self.now = now;
         let cam_pos = frame.camera.position();
-        let first_person = cam_pos.distance_to_squared(V3::new(origin.0, origin.1, origin.2)) < 2.25;
+        let first_person = cam_pos.distance_squared(V3::new(origin.0, origin.1, origin.2)) < 2.25;
         Some(self.muzzle_flash(
             now,
             frame,
@@ -1149,7 +1149,7 @@ impl FxSystem {
         // Sun direction and colour come from whatever light the renderer
         // decided is the sun, so smoke is lit by the same key as the world.
         if let Some(sun_dir) = frame.sun_dir {
-            // `.transformDirection(...).normalize()` — both, deliberately.
+            // `.transformDirection(...).normalize_or_zero()` — both, deliberately.
             self.sun_view = three_normalize(transform_direction(sun_dir, frame.camera.matrix_world_inverse));
             // `sunWorld()` (`index.js:601-610`) reads the SAME `render.sunDir`
             // and is sticky when it is absent, so latch it here rather than
@@ -1509,14 +1509,14 @@ impl FxSystem {
                 // its normal and material) rather than on the plane through
                 // the first hit.
                 let origin = p.add_scaled(n, 1.2);
-                let d = n.scale(-1.0);
+                let d = n.mul_scalar(-1.0);
                 if let Some(hit) = world.raycast((origin.x, origin.y, origin.z), (d.x, d.y, d.z), 2.6, mask::WORLD) {
                     p = V3::new(hit.point.0, hit.point.1, hit.point.2);
                     n = V3::new(hit.normal.0, hit.normal.1, hit.normal.2);
                 }
             }
         }
-        let mut d = n.scale(-1.0);
+        let mut d = n.mul_scalar(-1.0);
         // Give the incoming round a believable oblique angle. Draw order:
         // x then z (`index.js:1020-1022`).
         d.x += self.rng.signed() * 0.35;
@@ -1541,8 +1541,9 @@ impl FxSystem {
     /// is the only path that reaches `viewFlash` — i.e. the only one that
     /// lights the weapon.
     fn stage_muzzle(&mut self, frame: &FxFrame<'_>) {
-        let welded = frame.muzzle_world.filter(|m| m.length_sq() > 1e-6);
-        let pos = welded.unwrap_or_else(|| V3::new(0.16, -0.13, -0.72).apply_matrix4(frame.camera.matrix_world));
+        let welded = frame.muzzle_world.filter(|m| m.length_squared() > 1e-6);
+        let pos = welded
+            .unwrap_or_else(|| frame.camera.matrix_world.transform_point(V3::new(0.16, -0.13, -0.72)));
         let dir = transform_direction(V3::new(0.0, 0.0, -1.0), frame.camera.matrix_world);
         let now = self.now;
         self.muzzle_flash(
@@ -1561,7 +1562,7 @@ impl FxSystem {
     /// `_stageShell()`, `index.js:1061-1068`.
     fn stage_shell(&mut self, frame: &FxFrame<'_>) {
         let cam = frame.camera;
-        let pos = V3::new(0.2, -0.1, -0.45).apply_matrix4(cam.matrix_world);
+        let pos = cam.matrix_world.transform_point(V3::new(0.2, -0.1, -0.45));
         // Draw order: x, y, z.
         let vx = self.rng.range(1.3, 2.1);
         let vy = self.rng.range(1.2, 2.0);
@@ -1570,7 +1571,7 @@ impl FxSystem {
         // transform followed by subtracting the origin, NOT `transformDirection`
         // (no renormalisation, and translation cancels rather than being
         // dropped).
-        let vel = V3::new(vx, vy, vz).apply_matrix4(cam.matrix_world).sub(cam.position());
+        let vel = cam.matrix_world.transform_point(V3::new(vx, vy, vz)).subtract(cam.position());
         // `spawnShell` re-reads `ctx.time.elapsed` into `this.now`; here the
         // script runner has already set it for this frame.
         self.spawn_shell((pos.x, pos.y, pos.z), Some((vel.x, vel.y, vel.z)), ShellSpawnOpts::default());
@@ -1579,12 +1580,12 @@ impl FxSystem {
     /// `_stageTracer(target)`, `index.js:1070-1079`.
     fn stage_tracer(&mut self, frame: &FxFrame<'_>) {
         let m = frame.camera.matrix_world;
-        let from = V3::new(0.18, -0.12, -0.7).apply_matrix4(m);
+        let from = m.transform_point(V3::new(0.18, -0.12, -0.7));
         // Fire past the staged surface: a tracer that only travels three
         // metres is over in a sixtieth of a second.
         let tx = self.rng.range(-3.0, 3.0);
         let ty = self.rng.range(-0.6, 1.4);
-        let to = V3::new(tx, ty, -46.0).apply_matrix4(m);
+        let to = m.transform_point(V3::new(tx, ty, -46.0));
         self.tracer((from.x, from.y, from.z), (to.x, to.y, to.z), 250.0);
     }
 
@@ -1595,11 +1596,11 @@ impl FxSystem {
         let ax = self.rng.range(-14.0, -9.0);
         let ay = self.rng.range(-1.2, 1.4);
         let az = self.rng.range(-16.0, -8.0);
-        let from = V3::new(ax, ay, az).apply_matrix4(m);
+        let from = m.transform_point(V3::new(ax, ay, az));
         let bx = self.rng.range(9.0, 15.0);
         let by = self.rng.range(-1.4, 1.2);
         let bz = self.rng.range(-18.0, -9.0);
-        let to = V3::new(bx, by, bz).apply_matrix4(m);
+        let to = m.transform_point(V3::new(bx, by, bz));
         self.tracer((from.x, from.y, from.z), (to.x, to.y, to.z), 280.0);
     }
 
@@ -1628,9 +1629,9 @@ impl FxSystem {
                 let pitch = f64::from(i / 9 - 3) * 0.08;
                 // `.applyAxisAngle(_axisX, pitch).applyAxisAngle(_axisY, yaw)`
                 // then `transformDirection(cam.matrixWorld)`.
-                let d = V3::new(0.0, 0.0, -1.0)
-                    .apply_quat(quat_from_axis_angle(axis_x, pitch))
-                    .apply_quat(quat_from_axis_angle(axis_y, yaw));
+                let d = quat_from_axis_angle(axis_y, yaw).rotate(
+                    quat_from_axis_angle(axis_x, pitch).rotate(V3::new(0.0, 0.0, -1.0)),
+                );
                 let d = transform_direction(d, frame.camera.matrix_world);
                 let Some(hit) = world.raycast((cam_pos.x, cam_pos.y, cam_pos.z), (d.x, d.y, d.z), 40.0, mask::WORLD)
                 else {
@@ -1695,7 +1696,7 @@ impl FxSystem {
                 // plane in front of the camera and skip decals.
                 let fwd = transform_direction(V3::new(0.0, 0.0, -1.0), frame.camera.matrix_world);
                 t.point = cam_pos.add_scaled(fwd, 3.2);
-                t.normal = fwd.scale(-1.0);
+                t.normal = fwd.mul_scalar(-1.0);
                 t.surface = Surface::Concrete;
                 t.has_world = false;
                 t.distance = 3.2;
@@ -1731,7 +1732,7 @@ impl FxSystem {
                 if !(-0.12..=0.12).contains(&off) {
                     continue;
                 }
-                let rel = p.point_v3().sub(t.point);
+                let rel = p.point_v3().subtract(t.point);
                 let u = rel.dot(t.tangent);
                 let v = rel.dot(t.bitangent);
                 u_min = u_min.min(u);

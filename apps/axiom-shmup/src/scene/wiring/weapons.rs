@@ -596,9 +596,9 @@ mod tests {
     fn the_aim_basis_matches_the_rendered_camera_basis() {
         for &(pitch, yaw) in &[(0.0, 0.7), (0.4, -1.3), (-0.6, 2.4)] {
             let cam = PoseCamera::new(pose(pitch, yaw, 0.0));
-            let right = V3::new(1.0, 0.0, 0.0).apply_quat(cam.aim_orientation());
+            let right = cam.aim_orientation().rotate(V3::new(1.0, 0.0, 0.0));
             assert!(right.y.abs() < 1e-12, "yaw={yaw} pitch={pitch} banked");
-            let fwd = V3::new(0.0, 0.0, -1.0).apply_quat(cam.aim_orientation());
+            let fwd = cam.aim_orientation().rotate(V3::new(0.0, 0.0, -1.0));
             assert!((fwd.x - (-yaw.sin() * pitch.cos())).abs() < 1e-12);
             assert!((fwd.y - pitch.sin()).abs() < 1e-12);
         }

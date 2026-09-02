@@ -218,7 +218,7 @@ pub fn level_bounds() -> Aabb {
             maxz: f64::NEG_INFINITY,
         },
         |b, c| {
-            let p = c.apply_matrix4(m);
+            let p = m.transform_point(*c);
             Aabb {
                 minx: b.minx.min(p.x),
                 miny: b.miny.min(p.y),
@@ -614,9 +614,7 @@ mod tests {
         // The inverse really is one.
         let m = M4 { e: cam.matrix_world };
         let back = m.invert();
-        let p = V3::new(1.0, 3.0, -5.0)
-            .apply_matrix4(m)
-            .apply_matrix4(M4 { e: back.e });
+        let p = M4 { e: back.e }.transform_point(m.transform_point(V3::new(1.0, 3.0, -5.0)));
         assert!((p.x - 1.0).abs() < 1e-9 && (p.y - 3.0).abs() < 1e-9 && (p.z + 5.0).abs() < 1e-9);
 
         // The frustum built from it accepts a point ten metres ahead and

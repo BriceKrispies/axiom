@@ -168,6 +168,65 @@ impl DVec3 {
         self.subtract(self.floor())
     }
 
+    /// Build from a bare `[x, y, z]`.
+    ///
+    /// Ported geometry arrives as arrays far more often than as constructor
+    /// calls, and writing `DVec3::new(a[0], a[1], a[2])` at every such site is
+    /// three chances to transpose an index.
+    pub const fn from_array(a: [f64; 3]) -> Self {
+        DVec3::new(a[0], a[1], a[2])
+    }
+
+    /// `Vector3.addScaledVector(v, s)` — `self + o * s`.
+    ///
+    /// One operation, not `self.add(o.mul_scalar(s))`, because the source fuses
+    /// it and float addition is not associative: the split form rounds the
+    /// intermediate and can differ in the last bits.
+    pub const fn add_scaled(self, o: DVec3, s: f64) -> DVec3 {
+        DVec3::new(self.x + o.x * s, self.y + o.y * s, self.z + o.z * s)
+    }
+
+    /// `Vector3.lerp(v, t)` — `self + (v - self) * t`.
+    ///
+    /// Written in exactly that grouping rather than the algebraically equal
+    /// `self * (1 - t) + v * t`. The two differ in the last bits, and the second
+    /// does not reproduce `self` exactly at `t == 0`.
+    pub const fn lerp(self, o: DVec3, t: f64) -> DVec3 {
+        DVec3::new(
+            self.x + (o.x - self.x) * t,
+            self.y + (o.y - self.y) * t,
+            self.z + (o.z - self.z) * t,
+        )
+    }
+
+    /// `Vector3.distanceToSquared(v)` — `dx*dx + dy*dy + dz*dz`.
+    ///
+    /// **Not** `hypot(dx, dy, dz).powi(2)`. `hypot` scales by the largest
+    /// magnitude first to avoid overflow, so it rounds differently; substituting
+    /// it here would be a strictly better function and a different answer.
+    pub const fn distance_squared(self, o: DVec3) -> f64 {
+        let (dx, dy, dz) = (self.x - o.x, self.y - o.y, self.z - o.z);
+        dx * dx + dy * dy + dz * dz
+    }
+
+    /// Unit length, or the zero vector if there is no direction to speak of.
+    ///
+    /// The infallible companion to [`DVec3::normalize`], and the difference is
+    /// not a convenience — it is a different function. `normalize` reports a
+    /// zero-length input as an error, which is right when the caller has a
+    /// meaningful response to that. This one is `Vector3.normalize()`'s
+    /// `divideScalar(this.length() || 1)`: a zero vector stays zero and nothing
+    /// is reported.
+    ///
+    /// Ported code needs the second, because the reference has no error channel
+    /// here and a caller that never checked one cannot start checking it without
+    /// changing what the frame looks like. Reaching for `.normalize().unwrap()`
+    /// instead would turn a silent zero into a panic on the first degenerate
+    /// input.
+    pub fn normalize_or_zero(self) -> DVec3 {
+        self.mul_scalar(1.0 / crate::nonzero_or_one(self.length()))
+    }
+
     /// Narrow to the engine's interchange scalar.
     ///
     /// The single, explicit narrowing point. Naming it — rather than letting
@@ -439,5 +498,94 @@ mod precision {
         assert_eq!(v.to_single(), crate::vec3::Vec3::new(1.5, -2.25, 0.5));
         // Widening is exact, so a value that started as f32 round-trips.
         assert_eq!(DVec3::from_single(v.to_single()), v);
+    }
+}
+
+#[cfg(test)]
+mod rig_ops_tests {
+    use super::DVec3;
+
+    #[test]
+    fn from_array_keeps_the_component_order() {
+        assert_eq!(DVec3::from_array([1.0, 2.0, 3.0]), DVec3::new(1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn add_scaled_is_the_fused_form() {
+        let a = DVec3::new(1.0, 2.0, 3.0);
+        let b = DVec3::new(10.0, 20.0, 30.0);
+        assert_eq!(a.add_scaled(b, 2.0), DVec3::new(21.0, 42.0, 63.0));
+        assert_eq!(a.add_scaled(b, 0.0), a);
+    }
+
+    #[test]
+    fn lerp_hits_both_endpoints_exactly() {
+        let a = DVec3::new(0.1, -0.2, 0.3);
+        let b = DVec3::new(9.9, 8.8, -7.7);
+        // Exactly, not approximately. `self + (o - self) * t` reproduces `self`
+        // at t == 0 bit for bit; the algebraically equal `self*(1-t) + o*t` does
+        // not, and a rig at rest would jitter in the last bits every frame.
+        assert_eq!(a.lerp(b, 0.0), a);
+        assert_eq!(a.lerp(b, 1.0), b);
+        assert_eq!(a.lerp(b, 0.5), DVec3::new(5.0, 4.3, -3.7));
+    }
+
+    #[test]
+    fn distance_squared_is_the_plain_sum_of_squares() {
+        let a = DVec3::new(1.0, 2.0, 3.0);
+        let b = DVec3::new(4.0, 6.0, 15.0);
+        assert_eq!(a.distance_squared(b), 9.0 + 16.0 + 144.0);
+        assert_eq!(a.distance_squared(a), 0.0);
+    }
+
+    #[test]
+    fn normalize_or_zero_gives_a_unit_vector() {
+        let n = DVec3::new(3.0, 4.0, 0.0).normalize_or_zero();
+        assert!((n.length() - 1.0).abs() < 1e-15);
+        assert!((n.x - 0.6).abs() < 1e-15 && (n.y - 0.8).abs() < 1e-15);
+    }
+
+    /// The two normalizations are **not** bit-identical, and that is deliberate.
+    ///
+    /// [`DVec3::normalize`] divides each component by the length.
+    /// `normalize_or_zero` multiplies by the reciprocal, because that is what
+    /// `Vector3.normalize()` does (`divideScalar` is `multiplyScalar(1/s)`) and
+    /// what the ported rig is pinned to. `3 / 5` is exactly `0.6`; `3 * (1/5)`
+    /// is `0.6000000000000001`.
+    ///
+    /// This is pinned rather than left to chance because it is precisely the
+    /// kind of difference someone "cleans up" — swapping one for the other looks
+    /// like a no-op, compiles, and moves a golden.
+    #[test]
+    fn the_two_normalizations_round_differently_on_purpose() {
+        let v = DVec3::new(3.0, 4.0, 0.0);
+        let divided = v.normalize().expect("non-zero");
+        let reciprocal = v.normalize_or_zero();
+        assert_eq!(divided.x, 0.6);
+        assert_eq!(reciprocal.x, 0.6000000000000001);
+        assert_ne!(divided.x.to_bits(), reciprocal.x.to_bits());
+    }
+
+    /// The whole reason this exists beside the fallible `normalize`: a zero
+    /// vector stays zero instead of becoming an error or a NaN.
+    #[test]
+    fn normalize_or_zero_leaves_the_zero_vector_alone() {
+        assert_eq!(DVec3::ZERO.normalize_or_zero(), DVec3::ZERO);
+        assert!(DVec3::ZERO.normalize().is_err(), "the fallible one still reports it");
+    }
+
+    #[test]
+    fn normalize_or_zero_agrees_with_normalize_wherever_normalize_succeeds() {
+        for v in [
+            DVec3::new(1.0, 0.0, 0.0),
+            DVec3::new(-2.0, 5.0, 0.5),
+            DVec3::new(1e-8, 1e-8, 1e-8),
+        ] {
+            let strict = v.normalize().expect("non-zero");
+            let loose = v.normalize_or_zero();
+            assert!((strict.x - loose.x).abs() < 1e-15, "{strict:?} vs {loose:?}");
+            assert!((strict.y - loose.y).abs() < 1e-15, "{strict:?} vs {loose:?}");
+            assert!((strict.z - loose.z).abs() < 1e-15, "{strict:?} vs {loose:?}");
+        }
     }
 }
