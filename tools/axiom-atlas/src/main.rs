@@ -1581,18 +1581,27 @@ fn command_usage(cmd: &str) -> &'static str {
         "edit" => "ax edit <path> --replace <old> --with <new> [--all]
   Anchored single edit.",
         "apply" => "ax apply [<script>] [--dry-run]
-  Batch edits, escape-free, all-or-nothing.",
+  Batch edits, escape-free, all-or-nothing.
+  A `from`/`to` span runs from the START of `from` to the START of `to`, so the
+  `to` anchor is NOT consumed -- it stays in the file after the replacement.
+  Include it at the end of your `with` payload if you meant to replace it.",
         "graph" => "ax graph [<layer|module|app>]
   Deps, dependents, and the laws in force.",
         "owns" => "ax owns <path>
   Which package owns a file, its class, and its rules.",
-        "shape" => "ax shape <path regex> [--vocab] [--limit N] [--json]
+        "shape" => "ax shape <path regex> [--vocab] [--rows] [--limit N] [--json]
                       Is this code data wearing Rust, or an algorithm?
-                      Columns: literal density (content), branch density (decisions),
-                      reuse = call sites / distinct callees (the closed-vocabulary test),
-                      nodes = AST expression nodes (a lower bound on inlined graph size).
-                      --vocab names the vocabulary, tagging entries defined in the scanned set.
-                      Tests are excluded from every count.",
+                      rows    = how many rows the biggest repeated record has (the N in
+                                the Datafication Law's (N-1) x per-variant-code).
+                      frm/row = what share of that record's fields vary in SHAPE rather
+                                than just in value. 0.00 = every field one shape.
+                      READ THOSE TWO TOGETHER. Low frm/row says a table is POSSIBLE;
+                      high rows says it is WORTH IT. frm/row 0.00 at rows=3 saves
+                      nothing; rows=30 at frm/row 0.84 is an algorithm.
+                      lit/ln and reuse say only that content is PRESENT, not that it
+                      is addressable -- do not screen on them alone.
+                      --vocab names the callee vocabulary; --rows breaks frm/row down
+                      per target. Tests are excluded from every count.",
         "eol" => "ax eol [<path regex>] [--fix]
   Line endings: what is, and what should be.",
         "wgsl" => "ax wgsl [<path regex>] [--apply]
@@ -1746,19 +1755,20 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     }
 
     println!(
-        "{:>5} {:>7} {:>7} {:>6} {:>7} {:>6}  {:<9} {}",
-        "lines", "lit/ln", "br/ln", "reuse", "frm/row", "nodes", "verdict", "path"
+        "{:>5} {:>7} {:>7} {:>6} {:>5} {:>7}  {:<9} {}",
+        "lines", "lit/ln", "br/ln", "reuse", "rows", "frm/row", "verdict", "path"
     );
     shapes.iter().take(args.limit(40)).for_each(|s| {
         println!(
-            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>7} {:>6}  {:<9} {}",
+            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>5} {:>7}  {:<9} {}",
             s.code_lines,
             s.literal_density(),
             s.branch_density(),
             s.reuse(),
+            s.row_count()
+                .map_or_else(|| "-".to_owned(), |n| n.to_string()),
             s.form_ratio()
                 .map_or_else(|| "  -".to_owned(), |r| format!("{r:.2}")),
-            s.nodes,
             s.verdict().label(),
             s.path
         );
@@ -1793,10 +1803,15 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
         "`--vocab` names the closed vocabulary; `--rows` breaks frm/row down per target."
     );
     println!(
-        "frm/row = distinct right-hand-side FORMS over total writes, for every target
-         written more than once. It is the number that decides table-vs-algorithm:
-         low means many rows of one shape (a table); high means every row is its own
-         shape (an algorithm). lit/ln and reuse say content is PRESENT, not addressable."
+        "rows    = how many rows the biggest repeated record has -- the N in the \
+         Datafication Law's (N-1) x per-variant-code.\n\
+         frm/row = what share of that record's fields vary in SHAPE, not just value. \
+         0.00 means every field always has the same shape, whatever the row count; \
+         1.00 means every row is its own shape.\n\
+         Read them together: low frm/row says a table is POSSIBLE, high rows says it \
+         is WORTH IT. Either alone misleads -- frm/row 0.00 at rows=3 saves nothing, \
+         and a high row count at frm/row 0.84 is an algorithm. lit/ln and reuse say \
+         only that content is PRESENT, not that it is addressable."
     );
 
     Ok(Status::Found)

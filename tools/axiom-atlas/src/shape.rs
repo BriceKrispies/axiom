@@ -75,6 +75,25 @@ pub struct Shape {
 }
 
 impl Shape {
+    /// How many rows the biggest repeated record actually has — the `N` in the
+    /// Datafication Law's `(N - 1) x per-variant-code`.
+    ///
+    /// [`Shape::form_ratio`] is not a screen on its own, and reading it as one
+    /// is how this tool sent an agent at the wrong file. A file can score a
+    /// perfect 0.00 — every field one shape — and still be worthless to convert,
+    /// because it has three rows. `fx/tracers.rs` is exactly that: three sprites
+    /// of one shape, and converting it took the file from 105 lines to 108.
+    ///
+    /// The two numbers are only meaningful together. Low variance says a table
+    /// is *possible*; a high row count says it is *worth it*.
+    pub fn row_count(&self) -> Option<usize> {
+        self.slots
+            .values()
+            .map(|s| s.writes)
+            .max()
+            .filter(|n| *n >= 3)
+    }
+
     /// What share of a record's *row family* varies in shape.
     ///
     /// **0.0 means every field of the repeated record always has the same
