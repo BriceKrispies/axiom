@@ -50,6 +50,8 @@
 pub mod ai;
 pub mod audio;
 pub mod config;
+#[cfg(test)]
+mod characterize;
 pub mod engine;
 pub mod error;
 pub mod events;
