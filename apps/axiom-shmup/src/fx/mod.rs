@@ -50,6 +50,7 @@
 
 pub mod atlas;
 pub mod ambience;
+pub mod burst;
 pub mod decals;
 pub mod explosions;
 pub mod haze;
@@ -58,6 +59,7 @@ pub mod lights;
 pub mod muzzle;
 pub mod noise;
 pub mod particles;
+pub mod recipes;
 pub mod shells;
 pub mod system;
 pub mod tracers;

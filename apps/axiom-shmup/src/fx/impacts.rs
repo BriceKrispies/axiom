@@ -1285,40 +1285,24 @@ fn flesh(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 }
 
 /// Foliage: shredded leaf matter, no hole. `impacts.js:844-864`.
+///
+/// **The first burst in this file that is data rather than code.** The recipe
+/// is [`crate::fx::recipes::FOLIAGE`] and the interpreter is
+/// [`crate::fx::burst`]; this function is now the call that binds the impact
+/// site to it. The two forms were proved byte-identical — particles and shared
+/// random-stream state alike — before the swap, and the test that proves it is
+/// still in this file's `tests` module.
 fn foliage(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64)) {
-    let q = fx.pscale;
-    let (vx, vy, vz) = reflect(inc.0, inc.1, inc.2, n.0, n.1, n.2);
-    let (px, py, pz) = point;
-    let count = (10.0 * q).round() as i32 + 4;
-    for _ in 0..count {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, vx, vy, vz, 1.3, 1.0);
-        let sp = fx.rng.range(1.5, 5.0);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py;
-        s.z = pz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = (if fx.rng.float() < 0.5 { p::CHIP } else { p::SPLINTER }) as f64;
-        s.size0 = fx.rng.range(0.012, 0.035);
-        s.size1 = s.size0;
-        s.life = fx.rng.range(0.8, 1.6);
-        s.drag = 2.2;
-        s.gravity = -8.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 16.0;
-        s.r0 = 0.14;
-        s.g0 = 0.22;
-        s.b0 = 0.08;
-        s.r1 = 0.11;
-        s.g1 = 0.17;
-        s.b1 = 0.06;
-        s.alpha_curve = 0.4;
-        s.soft = 0.06;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run(
+        fx,
+        &crate::fx::recipes::FOLIAGE,
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            incident: inc,
+            energy: 1.0,
+        },
+    );
 }
 
 /// Fabric / rubber: dust, fibres, a tear. `impacts.js:867-916`.
@@ -1455,6 +1439,95 @@ pub fn spawn_impact(
 mod tests {
     use super::*;
     use crate::fx::system::FxSystem;
+
+    /// The data form of a burst emits exactly what the hand-written form did.
+    ///
+    /// This is the proof that [`crate::fx::burst`] is a real substitution and
+    /// not an approximation, and it is checked at the only level that can tell:
+    /// the raw interleaved particle buffers, byte for byte, **and** the state of
+    /// the shared random stream afterwards. The second half is the load-bearing
+    /// one — a burst that produces identical particles while spending a
+    /// different number of draws shifts every later effect in the frame, and no
+    /// amount of looking at the particles reveals it.
+    ///
+    /// Kept as a live test rather than deleted after the conversion, because it
+    /// is the only place the two forms are compared directly; once `foliage`'s
+    /// body is the interpreter call, the frozen ledger can only say that
+    /// *something* changed.
+    #[test]
+    fn the_foliage_recipe_and_the_hand_written_burst_agree_exactly() {
+        let point = (1.5, 2.25, -3.75);
+        let n = (0.0, 1.0, 0.0);
+        let inc = (0.30, -0.90, 0.30);
+
+        let mut hand = FxSystem::test_instance(0x5eed);
+        foliage_hand_written(&mut hand, point, n, inc);
+
+        let mut data = FxSystem::test_instance(0x5eed);
+        crate::fx::burst::run(
+            &mut data,
+            &crate::fx::recipes::FOLIAGE,
+            crate::fx::burst::Site {
+                point,
+                normal: n,
+                incident: inc,
+                energy: 1.0,
+            },
+        );
+
+        assert_eq!(hand.lit.spawned(), data.lit.spawned(), "particle count");
+        assert!(hand.lit.spawned() > 0, "the case emitted nothing");
+        assert_eq!(hand.lit.raw(), data.lit.raw(), "particle buffer");
+        assert_eq!(hand.add.raw(), data.add.raw(), "wrong pool");
+        assert_eq!(
+            hand.rng.float(),
+            data.rng.float(),
+            "the two forms spent a different number of draws"
+        );
+    }
+
+    /// `foliage` as it was transcribed, kept only so the test above has
+    /// something to compare against. Deleted with the last hand-written burst.
+    fn foliage_hand_written(
+        fx: &mut FxSystem,
+        point: (f64, f64, f64),
+        n: (f64, f64, f64),
+        inc: (f64, f64, f64),
+    ) {
+        let q = fx.pscale;
+        let (vx, vy, vz) = reflect(inc.0, inc.1, inc.2, n.0, n.1, n.2);
+        let (px, py, pz) = point;
+        let count = (10.0 * q).round() as i32 + 4;
+        for _ in 0..count {
+            let (vx2, vy2, vz2) = cone(&mut fx.rng, vx, vy, vz, 1.3, 1.0);
+            let sp = fx.rng.range(1.5, 5.0);
+            let mut s = reset_spawn();
+            s.x = px;
+            s.y = py;
+            s.z = pz;
+            s.vx = vx2 * sp;
+            s.vy = vy2 * sp;
+            s.vz = vz2 * sp;
+            s.tile = (if fx.rng.float() < 0.5 { p::CHIP } else { p::SPLINTER }) as f64;
+            s.size0 = fx.rng.range(0.012, 0.035);
+            s.size1 = s.size0;
+            s.life = fx.rng.range(0.8, 1.6);
+            s.drag = 2.2;
+            s.gravity = -8.0;
+            s.rot = fx.rng.float() * TWO_PI;
+            s.spin = fx.rng.signed() * 16.0;
+            s.r0 = 0.14;
+            s.g0 = 0.22;
+            s.b0 = 0.08;
+            s.r1 = 0.11;
+            s.g1 = 0.17;
+            s.b1 = 0.06;
+            s.alpha_curve = 0.4;
+            s.soft = 0.06;
+            s.seed = fx.rng.float();
+            fx.emit_lit(&s);
+        }
+    }
 
     #[test]
     fn every_surface_spawns_something() {
