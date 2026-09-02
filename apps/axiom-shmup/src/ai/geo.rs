@@ -1449,15 +1449,7 @@ fn index_of(names: &[String], name: &str) -> i32 {
 /// `NaN`; `clamp` panics only on a NaN *bound*, but `f64::clamp` of a NaN
 /// value returns NaN too — the shapes agree here, and the ternary is kept for
 /// diffability).
-fn clamp01(v: f64) -> f64 {
-    if v < 0.0 {
-        0.0
-    } else if v > 1.0 {
-        1.0
-    } else {
-        v
-    }
-}
+use axiom_math::clamp01;
 
 /// `segDist(px, py, pz, a, b)` (`geo.js:741-752`) — closest point on a
 /// segment and the distance to it.

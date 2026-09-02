@@ -152,10 +152,11 @@ pub fn gl_mix(a: f64, b: f64, t: f64) -> f64 {
 }
 
 /// GLSL `smoothstep(edge0, edge1, x)`.
-pub fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+/// Now [`axiom_math::smoothstep`], which additionally guards a zero-width edge.
+/// This copy divided straight through, so `edge0 == edge1` produced an infinity
+/// that the clamp then flattened to 0 or 1 depending on which side `x` fell —
+/// a step where the caller asked for a ramp.
+pub use axiom_math::smoothstep;
 
 /// `SCENE_LUX`, `atmosphere.js:54`.
 pub const SCENE_LUX: f64 = 25000.0;

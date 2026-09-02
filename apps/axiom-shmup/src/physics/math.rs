@@ -68,10 +68,15 @@ use axiom_math::{DAabb, DClosestPair, DSegment, DTriangle, DVec3};
 /// `math.js:17`.
 pub const EPS: f64 = 1e-9;
 
-/// `math.js:19-21`.
-pub fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
-    v.max(lo).min(hi)
-}
+/// `math.js:19-21`, now [`axiom_math::clamp`].
+///
+/// **This was `v.max(lo).min(hi)`, which is not what `math.js:20` says.** The
+/// source is `v < lo ? lo : v > hi ? hi : v`, a comparison chain that passes NaN
+/// through; `f64::max` is documented to *ignore* NaN and return the other
+/// operand, so this pinned a NaN to `lo`. Every other faithful copy in this app
+/// used the chain. Same class of defect as the `round_half_up` one, and found
+/// the same way — by diffing the copies against each other.
+pub use axiom_math::clamp;
 
 /// A closest-feature record. Mirrors `makeClosest()` (`math.js:23-26`).
 ///

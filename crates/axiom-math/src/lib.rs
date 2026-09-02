@@ -105,6 +105,9 @@ pub use math_api::MathApi;
 pub use approx_eq::ApproxEq;
 pub use epsilon::Epsilon;
 pub use scalar::Scalar;
+pub use scalar::{
+    clamp, clamp01, damp, lerp, smooth_unit, smoother_unit, smoothstep, smootherstep, wrap_pi,
+};
 
 pub use math_error::MathError;
 pub use math_error_code::MathErrorCode;

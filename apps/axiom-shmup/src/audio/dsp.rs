@@ -484,19 +484,9 @@ pub fn struck(
 /// `dsp.js:308-310`. Not `f64::clamp`: this is the source's ternary chain, which
 /// propagates a NaN `v` as `v` where `f64::clamp` panics on a NaN bound and
 /// returns the *upper* bound for a NaN value.
-pub fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
-    if v < lo {
-        lo
-    } else if v > hi {
-        hi
-    } else {
-        v
-    }
-}
+pub use axiom_math::clamp;
 
-pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
+pub use axiom_math::lerp;
 
 pub fn db_to_gain(db: f64) -> f64 {
     10.0f64.powf(db / 20.0)

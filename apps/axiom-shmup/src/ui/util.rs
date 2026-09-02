@@ -117,17 +117,14 @@ pub mod ease {
 
 /* ----------------------------------------------------------------- math --- */
 
-pub fn clamp(v: f64, a: f64, b: f64) -> f64 {
-    v.max(a).min(b)
-}
-
-pub fn clamp01(v: f64) -> f64 {
-    clamp(v, 0.0, 1.0)
-}
-
-pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
+/// Now [`axiom_math`]'s.
+///
+/// **`clamp` here was `v.max(a).min(b)`, which is not the same function.**
+/// `f64::max` ignores NaN and returns the other operand, so a NaN clamped to
+/// `[0, 1]` came back as `0.0`; the engine's comparison-chain form propagates it,
+/// as every other copy in this app and the source itself do. `clamp01` inherited
+/// the same divergence through this `clamp`.
+pub use axiom_math::{clamp, clamp01, lerp};
 
 pub fn inv_lerp(a: f64, b: f64, v: f64) -> f64 {
     let denom = b - a;
@@ -136,14 +133,12 @@ pub fn inv_lerp(a: f64, b: f64, v: f64) -> f64 {
     clamp01((v - a) / if denom == 0.0 { 1.0 } else { denom })
 }
 
-pub fn smoothstep(t: f64) -> f64 {
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// Framerate-independent exponential approach. `rate` = 1/e per second.
-pub fn damp(current: f64, target: f64, rate: f64, dt: f64) -> f64 {
-    target + (current - target) * (-rate * dt).exp()
-}
+/// **This `smoothstep` did not clamp**, so a `t` outside `[0, 1]` extrapolated
+/// along the Hermite curve and came back outside `[0, 1]` too. The engine's
+/// `smooth_unit` clamps, as the other four copies in this app do. Every caller
+/// here feeds it an already-normalised ratio, so the difference should be
+/// invisible — and if it is not, a test will say so rather than a frame.
+pub use axiom_math::{damp, smooth_unit as smoothstep};
 
 /// Critically-damped spring step. Mirrors `spring(current, target, holder,
 /// stiffness, damping, dt)` in the source, where `holder` is a `{ v }` object

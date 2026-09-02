@@ -106,9 +106,7 @@ fn seeded_table(rng: &mut Rng) -> ([u8; PERIOD], [DVec2; PERIOD]) {
     (table, features)
 }
 
-pub fn clamp01(v: f64) -> f64 {
-    v.clamp(0.0, 1.0)
-}
+pub use axiom_math::clamp01;
 
 /// `smoothstep(a, b, x)`, `noise.js:154-157`.
 ///
@@ -116,12 +114,7 @@ pub fn clamp01(v: f64) -> f64 {
 /// `||` only falls back when `b - a` is exactly `0` (falsy), not when it is
 /// merely small or negative. See the module doc for why the obvious "fix"
 /// would be a behaviour change.
-pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
-    let span = b - a;
-    let divisor = axiom_math::nonzero_or(span, 1e-6);
-    let t = clamp01((x - a) / divisor);
-    t * t * (3.0 - 2.0 * t)
-}
+pub use axiom_math::smoothstep;
 
 /// sRGB encode for atlases sampled as sRGB textures. `noise.js:161-164`.
 pub fn encode_srgb(v: f64) -> f64 {

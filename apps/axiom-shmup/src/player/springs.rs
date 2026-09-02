@@ -19,39 +19,16 @@ pub const TAU: f64 = std::f64::consts::TAU;
 /// `springs.js:10`.
 pub const DEG: f64 = std::f64::consts::PI / 180.0;
 
-/// `springs.js:12-14`.
-pub fn clamp(v: f64, a: f64, b: f64) -> f64 {
-    if v < a {
-        a
-    } else if v > b {
-        b
-    } else {
-        v
-    }
-}
-
-/// `springs.js:16-18`.
-pub fn clamp01(v: f64) -> f64 {
-    clamp(v, 0.0, 1.0)
-}
-
-/// `springs.js:20-22`.
-pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
-
-/// `springs.js:24-27`.
-pub fn smoothstep(t: f64) -> f64 {
-    let t = clamp01(t);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// C2-continuous ease — used for rooted mantle curves where velocity must not
-/// pop. `springs.js:29-33`.
-pub fn smootherstep(t: f64) -> f64 {
-    let t = clamp01(t);
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
+/// The scalar kit — `springs.js:12-33` — now lives in [`axiom_math`], which
+/// carries the same bodies this file did.
+///
+/// The single-argument `smoothstep`/`smootherstep` are named `smooth_unit` /
+/// `smoother_unit` there, because the engine also holds the three-argument GLSL
+/// forms and one name cannot mean both. Aliased back to the source's spelling
+/// so the call sites read as `springs.js` does.
+pub use axiom_math::{
+    clamp, clamp01, lerp, smoother_unit as smootherstep, smooth_unit as smoothstep,
+};
 
 /// `springs.js:35-39`.
 pub fn ease_out_cubic(t: f64) -> f64 {

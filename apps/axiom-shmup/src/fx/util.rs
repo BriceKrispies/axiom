@@ -208,13 +208,9 @@ pub fn disc_on(rng: &mut Rng, nx: f64, ny: f64, nz: f64, r: f64) -> (f64, f64, f
     (tx * cx + bx * cy, ty * cx + by * cy, tz * cx + bz * cy)
 }
 
-pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
+pub use axiom_math::lerp;
 
-pub fn clamp(v: f64, a: f64, b: f64) -> f64 {
-    v.clamp(a, b)
-}
+pub use axiom_math::clamp;
 
 #[cfg(test)]
 mod tests {

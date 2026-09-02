@@ -23,45 +23,20 @@ pub const TAU: f64 = std::f64::consts::TAU;
 /// `mathx.js:10`.
 pub const DEG: f64 = std::f64::consts::PI / 180.0;
 
-/// `mathx.js:12-14`.
-pub fn clamp(v: f64, a: f64, b: f64) -> f64 {
-    if v < a {
-        a
-    } else if v > b {
-        b
-    } else {
-        v
-    }
-}
+/// The scalar kit — `mathx.js:12-33` — now lives in [`axiom_math`].
+///
+/// `clamp`/`clamp01`/`lerp`/`smoothstep`/`smootherstep` were defined here and,
+/// with small variations, in eight other files across this app. They are the
+/// engine's now; these names are kept so the call sites read as the source
+/// does.
+///
+/// Two of those variations were not variations but defects, and consolidating
+/// fixed them: three files spelled `clamp` as `v.max(lo).min(hi)`, which
+/// *ignores* NaN and pins it to `lo` where the source propagates it; and one
+/// `smoothstep` lacked the `b - a || 1e-6` guard this file always had.
+pub use axiom_math::{clamp, clamp01, lerp, smootherstep, smoothstep};
 
-/// `mathx.js:16-18`.
-pub fn clamp01(v: f64) -> f64 {
-    clamp(v, 0.0, 1.0)
-}
-
-/// `mathx.js:20-22`.
-pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
-
-/// `mathx.js:24-27`. `b - a || 1e-6` guards a degenerate `a == b` range; ported
-/// as an explicit zero check since Rust has no truthiness coercion.
-pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
-    let span = b - a;
-    let span = if span == 0.0 { 1e-6 } else { span };
-    let t = clamp01((x - a) / span);
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// 5th-order smootherstep — zero 1st AND 2nd derivative at both ends.
-/// `mathx.js:30-33`.
-pub fn smootherstep(a: f64, b: f64, x: f64) -> f64 {
-    let span = b - a;
-    let span = if span == 0.0 { 1e-6 } else { span };
-    let t = clamp01((x - a) / span);
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
-
+/// The source's default `k` for [`ease_out_back`] (`mathx.js:36`, `k = 1.6`).
 /// The source's default `k` for [`ease_out_back`] (`mathx.js:36`, `k = 1.6`).
 pub const EASE_OUT_BACK_DEFAULT_K: f64 = 1.6;
 
@@ -92,9 +67,7 @@ pub fn ease_in_out_sine(t: f64) -> f64 {
 
 /// Frame-rate independent exponential approach. `rate` is the reciprocal of
 /// the time constant: how many e-folds per second. `mathx.js:58-60`.
-pub fn damp(current: f64, target: f64, rate: f64, dt: f64) -> f64 {
-    target + (current - target) * (-rate * dt).exp()
-}
+pub use axiom_math::damp;
 
 /// Critically-ish damped spring on a scalar. `f` is the natural frequency in
 /// Hz, `z` the damping ratio (1 = no overshoot, 0.5 = lively, >1 = sluggish).
@@ -377,11 +350,7 @@ impl Noise1 {
     }
 }
 
-/// Wrap an angle into (-PI, PI]. `mathx.js:226-230`.
-pub fn wrap_pi(a: f64) -> f64 {
-    let mut a = (a + std::f64::consts::PI) % TAU;
-    if a < 0.0 {
-        a += TAU;
-    }
-    a - std::f64::consts::PI
-}
+/// Wrap an angle into `[-PI, PI)` — `mathx.js:226-230`, whose own comment claims
+/// `(-PI, PI]` and is wrong in both languages: an exact half-turn comes back as
+/// `-PI`. See [`axiom_math::wrap_pi`].
+pub use axiom_math::wrap_pi;

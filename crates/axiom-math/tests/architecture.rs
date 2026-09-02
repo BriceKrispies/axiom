@@ -259,6 +259,7 @@ fn lib_exports_exactly_math_api() {
         "pub use approx_eq::ApproxEq;",
         "pub use epsilon::Epsilon;",
         "pub use scalar::Scalar;",
+        "pub use scalar::{",
         "pub use math_error::MathError;",
         "pub use math_error_code::MathErrorCode;",
         "pub use math_result::MathResult;",

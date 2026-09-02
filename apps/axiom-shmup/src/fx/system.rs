@@ -60,9 +60,7 @@ use crate::rng::Rng;
 use crate::weapons::rig_math::{M4, V3};
 use crate::world::palette::Surface;
 
-fn clamp(v: f64, a: f64, b: f64) -> f64 {
-    v.clamp(a, b)
-}
+use axiom_math::clamp;
 
 fn clamp_i(v: f64, a: f64, b: f64) -> usize {
     clamp(v, a, b).round() as usize

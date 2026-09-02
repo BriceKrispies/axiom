@@ -69,9 +69,7 @@ fn distance_to(a: V3, b: V3) -> f64 {
 }
 
 /// `MathUtils.clamp(value, min, max)`.
-fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
-    v.max(lo).min(hi)
-}
+use axiom_math::clamp;
 
 // ======================================================== CatmullRomCurve3 ==
 /// `CubicPoly` (`CatmullRomCurve3.js:3-76`).
