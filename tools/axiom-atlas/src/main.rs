@@ -44,7 +44,7 @@ use repo::Repo;
 /// Flags that never take a value.
 const BOOL_FLAGS: &[&str] = &[
     "--all", "--json", "-i", "--ignore-case", "-F", "--fixed", "--apply", "--help", "-h",
-    "--moved", "--dry-run", "--fix", "--verify", "--vocab", "--rows",
+    "--moved", "--dry-run", "--fix", "--verify", "--vocab", "--rows", "--text",
 ];
 
 /// Every flag that takes a value. A flag in neither list is a mistake, and
@@ -62,6 +62,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--path", "--lang", "--limit", "--range", "--by", "--want", "--verdict", "--tool",
     "--replace", "--with", "--root", "--out", "--since", "--agent", "--session", "--kind",
     "-A", "-B", "-C", "--context",
+    "--baseline", "--source-root", "--rev", "--min-score",
 ];
 
 // A boolean flag MUST be listed above. An unlisted `--flag` is parsed as a
