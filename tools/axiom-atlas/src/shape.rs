@@ -68,6 +68,50 @@ pub struct Shape {
     /// Names of functions *defined* in this file, so `--vocab` can tell a
     /// domain verb from a language builtin.
     pub defined: BTreeSet<String>,
+    /// Recurring assignment targets and the distinct right-hand-side forms each
+    /// takes. See [`Slot`] — this is the measurement that decides
+    /// table-versus-algorithm, and the one `reuse` cannot make.
+    pub slots: BTreeMap<String, Slot>,
+}
+
+impl Shape {
+    /// What share of a record's *row family* varies in shape.
+    ///
+    /// **0.0 means every field of the repeated record always has the same
+    /// shape** — a pure table, whatever its row count, differing only in
+    /// numbers. **1.0 means every field takes a different shape from row to
+    /// row** — an algorithm that merely shares a vocabulary.
+    ///
+    /// The row family is the fields written at least half as often as the
+    /// most-written field, i.e. the ones that actually co-occur as rows. That
+    /// restriction is load-bearing, and so is measuring a *share* rather than a
+    /// max or a mean. All three of the obvious alternatives are wrong, and each
+    /// was wrong in a way that looked fine until calibrated against files whose
+    /// answer was already known:
+    ///
+    /// * **Mean forms over writes** lets a dozen constant fields
+    ///   (`s.drag = 0.02`, one form, 27 writes) drown the one field that takes
+    ///   ten. It scored `fx/impacts.rs` as *more* table-like than
+    ///   `audio/foley.rs` — exactly inverted.
+    /// * **Max over all fields** saturates on noise: any field written twice
+    ///   with two shapes reads 1.00, so both files scored 1.00.
+    /// * **Ignoring write counts** misses the actual signal, which is not that
+    ///   some field varies but that *the frequently-written ones* do.
+    ///   `foley.rs`'s row fields are one shape over 17 writes; `impacts.rs`'s
+    ///   are nine to twelve shapes over 27.
+    ///
+    /// `None` when no field is written at least three times — there is no row
+    /// set to speak of, so the question does not arise.
+    pub fn form_ratio(&self) -> Option<f64> {
+        let peak = self.slots.values().map(|s| s.writes).max()?;
+        let family: Vec<&Slot> = self
+            .slots
+            .values()
+            .filter(|s| s.writes * 2 >= peak)
+            .collect();
+        let varies = family.iter().filter(|s| s.forms.len() > 1).count();
+        (peak >= 3).then(|| varies as f64 / family.len() as f64)
+    }
 }
 
 /// Which side of the datafication line a file falls on.
@@ -146,6 +190,13 @@ impl Walk {
         self.shape.calls += 1;
         *self.shape.vocab.entry(name).or_insert(0) += 1;
     }
+
+    /// Record one write to `target`, and the form its value took.
+    fn note_slot(&mut self, target: String, value: &syn::Expr) {
+        let slot = self.shape.slots.entry(target).or_default();
+        slot.writes += 1;
+        slot.forms.insert(form(value));
+    }
 }
 
 impl<'ast> Visit<'ast> for Walk {
@@ -197,6 +248,34 @@ impl<'ast> Visit<'ast> for Walk {
                 }
             }
             syn::Expr::MethodCall(call) => self.note_call(call.method.to_string()),
+            // The two ways a row gets filled in: a statement that writes a
+            // field, and a struct literal that names one. `impacts.rs` is the
+            // first, `foley.rs` and `tracers.rs` are the second, and the point
+            // of the measurement is to compare them on one scale.
+            // A *field* write only. `s.size0 = ...` is a row being filled in;
+            // `end = end.max(..)` is a driver accumulating, and counting the
+            // second made `audio/foley.rs` -- a genuine 12-row table whose
+            // driver happens to fold a local 27 times -- score worse than the
+            // algorithm it is supposed to be distinguished from.
+            syn::Expr::Assign(a) => {
+                let target = form(&a.left);
+                target
+                    .contains('.')
+                    .then(|| self.note_slot(target, &a.right));
+            }
+            // A struct literal's fields are the same thing said the other way,
+            // and are qualified by the struct so two unrelated types with a
+            // field of the same name do not pool.
+            syn::Expr::Struct(st) => {
+                let ty = st
+                    .path
+                    .segments
+                    .last()
+                    .map_or_else(|| "_".to_owned(), |g| g.ident.to_string());
+                st.fields
+                    .iter()
+                    .for_each(|f| self.note_slot(format!("{ty}.{}", member(&f.member)), &f.expr));
+            }
             _ => {}
         }
         syn::visit::visit_expr(self, expr);
@@ -281,6 +360,114 @@ fn code_lines(source: &str, skip: &[(usize, usize)]) -> (usize, usize) {
 
 /// Parse one file and report its shape. Returns `None` for anything `syn`
 /// cannot parse, which is reported to the caller as a skip rather than swallowed.
+/// A *slot*: one recurring assignment target, and the distinct shapes its
+/// right-hand side takes across every place it is written.
+///
+/// This is the measurement that actually decides table-versus-algorithm, and it
+/// exists because the ones next to it do not.
+///
+/// `reuse` (call sites over distinct callees) and literal density both answer
+/// "is there content here?" Neither answers "is the content *addressable*?" —
+/// and those come apart badly. `fx/impacts.rs` scores 0.76 literals/line and
+/// reuse 10.6, which reads as a table with a driver; it is 27 bursts that share
+/// a vocabulary and repeat nothing. `audio/foley.rs` scores reuse 14.0 and is a
+/// genuine 12-row table. Dispatching an agent on the first pair of numbers sends
+/// it to rewrite an algorithm as a table, which is the one outcome this
+/// programme cannot afford, because a forced conversion ships a silent RNG
+/// draw-order shift.
+///
+/// The test that does separate them: **for each target written more than once,
+/// how many distinct right-hand-side *forms* does it take?** A form is the
+/// expression with every literal replaced by `#`, so `px + n.0 * 0.012` and
+/// `px + n.0 * 0.02` are one form — they differ only in a number, which is
+/// exactly what a table row holds. `px + dvx + n.0 * off` is a different form,
+/// and a table cannot hold the difference without growing a branch.
+///
+/// One form over many rows is a table. One form per row is an algorithm wearing
+/// a table's vocabulary.
+#[derive(Debug, Default, Clone)]
+pub struct Slot {
+    pub writes: usize,
+    pub forms: BTreeSet<String>,
+}
+
+/// The structural form of an expression: its shape with every literal erased.
+///
+/// Names are kept and numbers are dropped, deliberately. A table row varies the
+/// numbers; if it has to vary which *variable* is read, it is not a row, it is a
+/// branch. That asymmetry is the whole measurement.
+fn form(expr: &syn::Expr) -> String {
+    match expr {
+        syn::Expr::Lit(_) => "#".to_owned(),
+        syn::Expr::Path(p) => p
+            .path
+            .segments
+            .last()
+            .map_or_else(|| "_".to_owned(), |s| s.ident.to_string()),
+        syn::Expr::Binary(b) => format!("{}{}{}", form(&b.left), binop(&b.op), form(&b.right)),
+        syn::Expr::Unary(u) => format!("{}{}", unop(&u.op), form(&u.expr)),
+        syn::Expr::Field(f) => format!("{}.{}", form(&f.base), member(&f.member)),
+        syn::Expr::Paren(p) => form(&p.expr),
+        syn::Expr::Group(g) => form(&g.expr),
+        syn::Expr::Reference(r) => format!("&{}", form(&r.expr)),
+        syn::Expr::Cast(c) => format!("{} as _", form(&c.expr)),
+        syn::Expr::Index(i) => format!("{}[{}]", form(&i.expr), form(&i.index)),
+        syn::Expr::Call(c) => format!("{}({})", form(&c.func), forms(c.args.iter())),
+        syn::Expr::MethodCall(m) => {
+            format!("{}.{}({})", form(&m.receiver), m.method, forms(m.args.iter()))
+        }
+        syn::Expr::Tuple(t) => format!("({})", forms(t.elems.iter())),
+        syn::Expr::Array(a) => format!("[{}]", forms(a.elems.iter())),
+        // A branch on the right-hand side is itself the finding: a row that
+        // needs one is not a row. Naming the kind rather than recursing keeps
+        // every such right-hand side distinct from every other.
+        syn::Expr::If(_) => "<if>".to_owned(),
+        syn::Expr::Match(_) => "<match>".to_owned(),
+        other => format!("<{}>", kind(other)),
+    }
+}
+
+fn forms<'a>(args: impl Iterator<Item = &'a syn::Expr>) -> String {
+    args.map(form).collect::<Vec<_>>().join(",")
+}
+
+fn member(m: &syn::Member) -> String {
+    match m {
+        syn::Member::Named(i) => i.to_string(),
+        syn::Member::Unnamed(i) => i.index.to_string(),
+    }
+}
+
+fn binop(op: &syn::BinOp) -> &'static str {
+    match op {
+        syn::BinOp::Add(_) => "+",
+        syn::BinOp::Sub(_) => "-",
+        syn::BinOp::Mul(_) => "*",
+        syn::BinOp::Div(_) => "/",
+        syn::BinOp::Rem(_) => "%",
+        _ => "?",
+    }
+}
+
+fn unop(op: &syn::UnOp) -> &'static str {
+    match op {
+        syn::UnOp::Neg(_) => "-",
+        syn::UnOp::Not(_) => "!",
+        _ => "*",
+    }
+}
+
+fn kind(e: &syn::Expr) -> &'static str {
+    match e {
+        syn::Expr::Closure(_) => "closure",
+        syn::Expr::Struct(_) => "struct",
+        syn::Expr::Block(_) => "block",
+        syn::Expr::Macro(_) => "macro",
+        syn::Expr::Range(_) => "range",
+        _ => "expr",
+    }
+}
+
 pub fn analyse(path: &str, source: &str) -> Option<Shape> {
     let parsed = syn::parse_file(source).ok()?;
 

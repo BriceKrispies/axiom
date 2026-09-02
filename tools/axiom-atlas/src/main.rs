@@ -40,7 +40,7 @@ use repo::Repo;
 /// Flags that never take a value.
 const BOOL_FLAGS: &[&str] = &[
     "--all", "--json", "-i", "--ignore-case", "-F", "--fixed", "--apply", "--help", "-h",
-    "--moved", "--vocab",
+    "--moved", "--vocab", "--rows",
 ];
 
 /// Every flag that takes a value. A flag in neither list is a mistake, and
@@ -1700,6 +1700,30 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
             )
         });
 
+    if args.has("--rows") {
+        let mut rows: Vec<(&String, &shape::Slot)> = shapes
+            .iter()
+            .flat_map(|s| s.slots.iter())
+            .filter(|(_, sl)| sl.writes > 1)
+            .collect();
+        // Worst first: the target that varies most is the one that decides
+        // whether this file can be a table at all.
+        rows.sort_by(|a, b| {
+            (b.1.forms.len(), b.1.writes)
+                .cmp(&(a.1.forms.len(), a.1.writes))
+                .then_with(|| a.0.cmp(b.0))
+        });
+        println!(
+            "{} recurring target(s); `forms` distinct right-hand-side shapes over `writes`:",
+            rows.len()
+        );
+        println!("{:>6} {:>6}  {}", "forms", "writes", "target");
+        rows.iter().take(args.limit(40)).for_each(|(name, sl)| {
+            println!("{:>6} {:>6}  {}", sl.forms.len(), sl.writes, name);
+        });
+        return Ok(Status::Found);
+    }
+
     if args.has("--vocab") {
         let vocab = shape::merge_vocab(&shapes);
         let sites: usize = vocab.iter().map(|e| e.count).sum();
@@ -1722,17 +1746,18 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     }
 
     println!(
-        "{:>5} {:>7} {:>7} {:>6} {:>6} {:>7}  {:<9} {}",
-        "lines", "lit/ln", "br/ln", "reuse", "vocab", "nodes", "verdict", "path"
+        "{:>5} {:>7} {:>7} {:>6} {:>7} {:>6}  {:<9} {}",
+        "lines", "lit/ln", "br/ln", "reuse", "frm/row", "nodes", "verdict", "path"
     );
     shapes.iter().take(args.limit(40)).for_each(|s| {
         println!(
-            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>6} {:>7}  {:<9} {}",
+            "{:>5} {:>7.2} {:>7.3} {:>6.1} {:>7} {:>6}  {:<9} {}",
             s.code_lines,
             s.literal_density(),
             s.branch_density(),
             s.reuse(),
-            s.distinct_calls(),
+            s.form_ratio()
+                .map_or_else(|| "  -".to_owned(), |r| format!("{r:.2}")),
             s.nodes,
             s.verdict().label(),
             s.path
@@ -1764,7 +1789,15 @@ fn cmd_shape(repo: &Repo, args: &Args, rec: &mut Record) -> Outcome {
     if skipped > 0 {
         println!("{skipped} file(s) skipped: could not be parsed as Rust");
     }
-    println!("`--vocab` names the closed vocabulary; see docs/engine-datafication.md §3");
+    println!(
+        "`--vocab` names the closed vocabulary; `--rows` breaks frm/row down per target."
+    );
+    println!(
+        "frm/row = distinct right-hand-side FORMS over total writes, for every target
+         written more than once. It is the number that decides table-vs-algorithm:
+         low means many rows of one shape (a table); high means every row is its own
+         shape (an algorithm). lit/ln and reuse say content is PRESENT, not addressable."
+    );
 
     Ok(Status::Found)
 }
