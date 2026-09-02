@@ -11,3 +11,12 @@
 # (e.g. a game's `tests/retro_fps/golden/`), so match a `golden/` dir at any depth.
 **/tests/golden/** binary
 **/tests/**/golden/** binary
+
+# Shader sources are pinned to LF, on every platform, and the reason is a
+# correctness one rather than a style one. Rust's lexer normalises CRLF to LF
+# INSIDE a string literal; `include_str!` normalises nothing. So a `.wgsl` file
+# that arrives CRLF on a Windows checkout hands the compiler a different string
+# than the inlined literal it replaced, silently, with nothing failing. Pinning
+# eol=lf makes the extracted file byte-identical to the constant it came from,
+# wherever it is checked out. See `ax wgsl` (tools/axiom-atlas/src/wgsl.rs).
+*.wgsl text eol=lf

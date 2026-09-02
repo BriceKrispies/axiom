@@ -62,6 +62,44 @@
 //! [`ground::DIRT`]; `macroNoise` in [`metal::METAL_BRUSHED`]; `macroF` in
 //! [`organic::FABRIC`], [`organic::BURLAP`] and [`organic::RUBBER`]. Nothing
 //! else is renamed, and no expression is regrouped.
+//!
+//! ## Where the shader text lives
+//!
+//! Each generator's WGSL is a sibling `.wgsl` file — `arch.rs`'s `CONCRETE` is
+//! `concrete.wgsl` — pulled in with `include_str!`, so the constant is still a
+//! `&'static str` known at compile time and `library_wgsl` still concatenates
+//! them. The Rust files keep the doc comment for each generator, which is where
+//! the `surfaces-*.js:NNN` provenance lives.
+//!
+//! Shader text sitting in a `.wgsl` file rather than a Rust string literal is
+//! the difference between text a WGSL formatter, highlighter and validator can
+//! read and text none of them can. Two consequences worth knowing:
+//!
+//! * `.gitattributes` pins `*.wgsl` to `eol=lf`, and that is load-bearing, not
+//!   cosmetic. Rust's lexer folds a CRLF inside a string literal to a single
+//!   LF; `include_str!` folds nothing. A CRLF checkout of these files would
+//!   hand the compiler a different string than the literal held, silently.
+//! * `ax wgsl <path> --verify` re-checks that every one of these files is still
+//!   byte-identical to the literal it replaced, against any revision.
+//!
+//! The extraction itself was mechanical (`ax wgsl --apply`), not retyped.
+//!
+//! ## None of these files is a compilable unit, and that is correct
+//!
+//! A surface body reaches for the bake header's `U`; `noise.wgsl` calls
+//! `owMod2`, which `gl_semantics.wgsl` declares. Opened alone, every one of
+//! them fails to parse. Making each whole would mean copying the 11,400-byte
+//! prelude (header + library + footer) into all eighteen — 72% boilerplate and
+//! the noise library in eighteen copies — so the complete unit is the
+//! *program*, and `axiom_gpu_backend`'s `GpuBackendApi::bake_program_wgsl` is
+//! what composes it.
+//!
+//! `tests/materials_wgsl_validates.rs` is the gate that follows from that: it
+//! composes all eighteen and runs `naga` over them, with **no GPU** — the first
+//! proof these compile that can run on a machine without an adapter, where
+//! `every_generator_compiles_and_bakes` needs a real device. It also writes each
+//! composed program to `target/wgsl-programs/`, which is the only place a
+//! complete, LSP-readable version of these shaders exists.
 
 pub mod arch;
 pub mod ground;

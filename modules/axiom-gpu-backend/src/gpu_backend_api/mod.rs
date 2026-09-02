@@ -569,13 +569,41 @@ impl GpuBackendApi {
         crate::draw2d_offscreen::render_draw2d_to_rgba(width, height, &geometry, &all_textures)
     }
 
+    /// The complete WGSL program the backend will compile for a bake:
+    /// `HEADER + library + surface + FOOTER`, the four-part splice
+    /// [`Self::bake_procedural_texture`] performs internally.
+    ///
+    /// # Why the text is published and not only executed
+    ///
+    /// A caller's shader library and its surfaces are **fragments**. Neither is
+    /// a compilable unit on its own — a surface references the header's
+    /// uniform block and the library's helpers, and the library's own pieces
+    /// reference each other — so nothing outside this module could check that a
+    /// generator is valid WGSL without building a GPU device and baking it.
+    /// That made the only available proof the most expensive one, and one that
+    /// cannot run where there is no adapter.
+    ///
+    /// Handing back the composed text splits those apart: **validity** is a
+    /// `naga` parse of this string, costing no device and no feature flag, and
+    /// **correctness** stays the parity bake. `apps/axiom-shmup`'s
+    /// `materials_wgsl_validates` is the first caller and does exactly that for
+    /// all eighteen of its generators.
+    ///
+    /// Unconditional, unlike the executor beside it: composing a string needs
+    /// no adapter, no `offscreen` feature and no `wgpu`, and a validator that
+    /// only existed on the arm that already has a GPU would be pointless.
+    pub fn bake_program_wgsl(library_wgsl: &str, surface_wgsl: &str) -> String {
+        crate::texture_bake::bake_program_wgsl(library_wgsl, surface_wgsl)
+    }
+
     /// Bake one procedural surface **on the device** into its albedo, ORM and
     /// tangent-space normal maps.
     ///
     /// `library_wgsl` is the caller's whole shader library — its noise helpers
     /// and one `ow_surface_<name>` entry per surface; `request` names which one
     /// to run and at what size, plus the per-surface parameters. The backend
-    /// splices the two, renders the surface to a full-screen quad, derives the
+    /// splices the two — see [`Self::bake_program_wgsl`] for the program that
+    /// produces — renders the surface to a full-screen quad, derives the
     /// normal from the height channel with a Sobel pass, and reads all three
     /// maps back.
     ///
@@ -828,6 +856,29 @@ mod tests {
         let device = host.device_request(true, profile);
         host.presentation_request(target, surface, descriptor, adapter, device)
             .expect("valid request")
+    }
+
+    /// The published program is the whole splice, in the source's order, and it
+    /// carries the caller's two fragments verbatim. This is the contract a
+    /// GPU-free validator depends on: if the text handed out were not exactly
+    /// what gets compiled, validating it would prove nothing about the bake.
+    #[test]
+    fn the_published_bake_program_is_the_whole_splice() {
+        let program = GpuBackendApi::bake_program_wgsl("// LIB\n", "// SURF\n");
+
+        let header = program.find("struct OwBakeUniforms").expect("header");
+        let lib = program.find("// LIB").expect("the caller's library");
+        let surf = program.find("// SURF").expect("the caller's surface");
+        let footer = program.find("fn ow_bake_fs").expect("footer");
+        assert!(
+            header < lib && lib < surf && surf < footer,
+            "HEADER + library + surface + FOOTER, got {header} {lib} {surf} {footer}"
+        );
+        assert_eq!(
+            program,
+            crate::texture_bake::bake_program_wgsl("// LIB\n", "// SURF\n"),
+            "the facade must publish the same text the executor compiles"
+        );
     }
 
     #[test]
