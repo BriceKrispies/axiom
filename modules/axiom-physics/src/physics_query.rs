@@ -46,12 +46,15 @@ use crate::physics_hit::PhysicsHit;
 use crate::physics_world::PhysicsWorld;
 use crate::query_hit::QueryHit;
 use crate::query_overlap::overlaps_capsule;
-use crate::query_ray::ray_shape;
+use crate::query_ray::{ray_shape, soup_ray};
 use crate::query_sweep::sweep_shape;
 
 /// A collider resolved against its owning body for querying.
-struct Resolved {
+struct Resolved<'a> {
     shape: PhysicsColliderShape,
+    /// The triangle soup this collider carries, if it is one. Borrowed rather
+    /// than copied: a query must not clone a level's geometry to look at it.
+    soup: Option<&'a crate::triangle_bvh::TriangleBvh>,
     center: Vec3,
     rotation: Quat,
     active: bool,
@@ -73,7 +76,7 @@ impl<'a> PhysicsQuery<'a> {
 
     /// Resolve every collider against its owning body. A collider always
     /// references a live body, so `find` always matches.
-    fn resolved(&self) -> Vec<Resolved> {
+    fn resolved(&self) -> Vec<Resolved<'_>> {
         self.world
             .colliders()
             .iter()
@@ -84,6 +87,7 @@ impl<'a> PhysicsQuery<'a> {
                     .find(|b| b.handle() == c.body())
                     .map(|b| Resolved {
                         shape: c.shape(),
+                        soup: c.soup(),
                         center: b.transform().translation,
                         rotation: b.transform().rotation,
                         active: c.enabled() & b.enabled(),
@@ -113,7 +117,11 @@ impl<'a> PhysicsQuery<'a> {
                     .iter()
                     .filter(|r| r.active & !r.is_trigger)
                     .filter_map(|r| {
-                        ray_shape(r.shape, r.center, r.rotation, &ray)
+                        // A soup answers through `soup_ray`; everything else
+                        // through the table, which returns `None` for a soup.
+                        r.soup
+                            .and_then(|s| soup_ray(s, r.center, r.rotation, &ray))
+                            .or_else(|| ray_shape(r.shape, r.center, r.rotation, &ray))
                             .filter(|found| found.hit().time() <= max)
                             .map(|found| tag(r, &found, 1.0))
                     })
@@ -776,6 +784,12 @@ mod tests {
     fn the_dispatch_tables_and_the_shape_kinds_agree_in_length() {
         // The structural guard behind the heightfield regression: every table is
         // sized by this constant, so a sixth kind cannot be half-wired.
-        assert_eq!(PhysicsShapeKind::COUNT, 5);
+        //
+        // The literal is the whole point. Every table is `[_; COUNT]`, so
+        // asserting its length against `COUNT` would be tautological; what this
+        // catches is a kind being added without anyone coming here to say they
+        // wired it. `TriangleSoup` (6) was: contact, ray, overlap and sweep all
+        // carry an entry for it, each stating what it does and does not do.
+        assert_eq!(PhysicsShapeKind::COUNT, 6);
     }
 }

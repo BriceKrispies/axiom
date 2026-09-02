@@ -8,7 +8,7 @@
 /// dispatch on `kind as usize` into function tables — never a `match` on a
 /// payload-carrying enum (the Branchless Law). The declaration order **is** the
 /// table order: `Sphere = 0`, `Box = 1`, `Capsule = 2`, `Plane = 3`,
-/// `Heightfield = 4`.
+/// `Heightfield = 4`, `TriangleSoup = 5`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PhysicsShapeKind {
     /// A sphere — finite, rounded, AABB-bounded.
@@ -25,6 +25,16 @@ pub(crate) enum PhysicsShapeKind {
     /// A static single-valued **heightfield** surface — finite (the grid's XZ
     /// footprint + height range give it a bounding box), oriented like a box.
     Heightfield,
+    /// A static **triangle soup** with a BVH over it — finite, bounded by the
+    /// soup's own extent.
+    ///
+    /// Static in the same sense a heightfield is: it is terrain, not a body.
+    /// Today it answers ray queries and generates no contacts, which is a real
+    /// state rather than a half-finished one — a level's collision geometry is
+    /// queried far more often than it is collided against, and the query side
+    /// stands on its own. The contact entries below say so explicitly instead of
+    /// leaving a hole for someone to find at runtime.
+    TriangleSoup,
 }
 
 impl PhysicsShapeKind {
@@ -39,7 +49,7 @@ impl PhysicsShapeKind {
     /// by `COUNT` (or `COUNT * COUNT` for the pairing matrix) turns that silent
     /// runtime panic into a compile error at each dispatch site, so adding a sixth
     /// kind cannot be half-done.
-    pub(crate) const COUNT: usize = 5;
+    pub(crate) const COUNT: usize = 6;
 
     /// `true` iff the shape has a finite axis-aligned bounding box (everything
     /// except [`PhysicsShapeKind::Plane`]). The broad phase reads this to decide
@@ -48,7 +58,7 @@ impl PhysicsShapeKind {
         self != PhysicsShapeKind::Plane
     }
 
-    /// The stable table index (`0..5`) used to dispatch contact generation and
+    /// The stable table index (`0..6`) used to dispatch contact generation and
     /// AABB construction without branching.
     pub(crate) fn index(self) -> usize {
         self as usize
@@ -66,6 +76,7 @@ mod tests {
         assert!(PhysicsShapeKind::Capsule.is_finite());
         assert!(!PhysicsShapeKind::Plane.is_finite());
         assert!(PhysicsShapeKind::Heightfield.is_finite());
+        assert!(PhysicsShapeKind::TriangleSoup.is_finite());
     }
 
     #[test]
@@ -75,6 +86,7 @@ mod tests {
         assert_eq!(PhysicsShapeKind::Capsule.index(), 2);
         assert_eq!(PhysicsShapeKind::Plane.index(), 3);
         assert_eq!(PhysicsShapeKind::Heightfield.index(), 4);
+        assert_eq!(PhysicsShapeKind::TriangleSoup.index(), 5);
     }
 
     #[test]
@@ -87,6 +99,7 @@ mod tests {
             PhysicsShapeKind::Capsule,
             PhysicsShapeKind::Plane,
             PhysicsShapeKind::Heightfield,
+            PhysicsShapeKind::TriangleSoup,
         ];
         assert_eq!(kinds.len(), PhysicsShapeKind::COUNT);
         assert!(kinds.iter().all(|k| k.index() < PhysicsShapeKind::COUNT));

@@ -57,44 +57,59 @@ type ContactFn =
 
 /// The branchless dispatch table, indexed by
 /// `kind_a.index() * PhysicsShapeKind::COUNT + kind_b.index()` with
-/// `Sphere = 0, Box = 1, Capsule = 2, Plane = 3, Heightfield = 4`.
+/// `Sphere = 0, Box = 1, Capsule = 2, Plane = 3, Heightfield = 4,
+/// TriangleSoup = 5`.
 ///
 /// Its length is derived from [`PhysicsShapeKind::COUNT`], so the table cannot
 /// silently fall behind the enum: adding a sixth kind makes this initializer a
 /// compile error rather than a runtime index panic.
 ///
-/// Two rows are deliberately `no_contact`. **Plane/plane**: two infinite
+/// Three rows are deliberately `no_contact`. **Plane/plane**: two infinite
 /// half-spaces either miss entirely or overlap in an unbounded region, and
 /// neither has a contact point to report. **Heightfield**: a heightfield's grid
 /// data is not reachable through the flat `ContactFn` signature, so its contacts
 /// are generated alongside the table by [`heightfield_contact`], which takes the
-/// whole collider.
+/// whole collider. **TriangleSoup**: the same, and for now not generated at all
+/// — a static mesh answers queries and is not yet collided against. Both are
+/// spelled out entry by entry rather than left to a default, so the hole is
+/// visible in the table instead of discovered at runtime.
 const CONTACT_TABLE: [ContactFn; PhysicsShapeKind::COUNT * PhysicsShapeKind::COUNT] = [
     sphere_sphere,   // (Sphere, Sphere)
     sphere_box,      // (Sphere, Box)
     sphere_capsule,  // (Sphere, Capsule)
     sphere_plane,    // (Sphere, Plane)
     no_contact,      // (Sphere, Heightfield) — see heightfield_contact
+    no_contact,      // (Sphere, TriangleSoup) — queries only, for now
     box_sphere,      // (Box, Sphere)
     box_box,         // (Box, Box)
     box_capsule,     // (Box, Capsule)
     box_plane,       // (Box, Plane)
     no_contact,      // (Box, Heightfield)
+    no_contact,      // (Box, TriangleSoup)
     capsule_sphere,  // (Capsule, Sphere)
     capsule_box,     // (Capsule, Box)
     capsule_capsule, // (Capsule, Capsule)
     capsule_plane,   // (Capsule, Plane)
     no_contact,      // (Capsule, Heightfield)
+    no_contact,      // (Capsule, TriangleSoup)
     plane_sphere,    // (Plane, Sphere)
     plane_box,       // (Plane, Box)
     plane_capsule,   // (Plane, Capsule)
     no_contact,      // (Plane, Plane) — two half-spaces bound no contact
     no_contact,      // (Plane, Heightfield)
+    no_contact,      // (Plane, TriangleSoup)
     no_contact,      // (Heightfield, Sphere) — see heightfield_contact
     no_contact,      // (Heightfield, Box)
     no_contact,      // (Heightfield, Capsule)
     no_contact,      // (Heightfield, Plane)
     no_contact,      // (Heightfield, Heightfield)
+    no_contact,      // (Heightfield, TriangleSoup)
+    no_contact,      // (TriangleSoup, Sphere) — queries only, for now
+    no_contact,      // (TriangleSoup, Box)
+    no_contact,      // (TriangleSoup, Capsule)
+    no_contact,      // (TriangleSoup, Plane)
+    no_contact,      // (TriangleSoup, Heightfield)
+    no_contact,      // (TriangleSoup, TriangleSoup)
 ];
 
 /// An unimplemented pairing — never reports a contact.

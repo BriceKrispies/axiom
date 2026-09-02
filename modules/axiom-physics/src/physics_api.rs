@@ -13,6 +13,7 @@ use crate::physics_config::PhysicsConfig;
 use crate::physics_error::PhysicsError;
 use crate::physics_event::PhysicsEvent;
 use crate::physics_heightfield::Heightfield;
+use crate::triangle_bvh::TriangleBvh;
 use crate::physics_hit::PhysicsHit;
 use crate::physics_material::PhysicsMaterial;
 use crate::physics_query::PhysicsQuery;
@@ -201,6 +202,51 @@ impl PhysicsApi {
                         .attach_heightfield_collider(body, shape, material, is_trigger, grid)
                 })
             })
+    }
+
+    /// Attach a **static triangle-soup** collider to `body`: nine floats per
+    /// triangle (`a.xyz b.xyz c.xyz`) in the body's local space, indexed by a
+    /// binned-SAH BVH so a level's collision geometry can be queried at all.
+    ///
+    /// This is the shape a level *is*. A heightfield cannot express an overhang,
+    /// a box cannot express a staircase, and the alternative every app has
+    /// reached for so far is to grow its own tree.
+    ///
+    /// Rejects a buffer holding no whole triangle, or one whose geometry has no
+    /// extent on some axis — a soup flattened to a plane has no volume for the
+    /// broad phase to reason about, and is a degenerate input rather than a
+    /// shape.
+    pub fn attach_triangle_soup_collider(
+        &mut self,
+        body: PhysicsBodyHandle,
+        positions: &[f32],
+        material: PhysicsMaterial,
+        is_trigger: bool,
+    ) -> PhysicsResult<PhysicsColliderHandle> {
+        let soup = TriangleBvh::build(positions);
+        let bounds = soup.bounds();
+        // Half-extents about the BODY origin, not about the soup's own centre:
+        // the collider is placed at the body, so a soup sitting off to one side
+        // must still be covered. Taking the larger magnitude per axis is
+        // conservative, which is the only safe direction for a broad-phase box.
+        let reach = |lo: f64, hi: f64| lo.abs().max(hi.abs()) as f32;
+        [
+            Err(PhysicsError::invalid_collider_shape(
+                "triangle soup needs at least one complete triangle",
+            )),
+            Ok(()),
+        ][usize::from(soup.triangle_count() > 0)]
+        .and_then(|()| {
+            PhysicsColliderShape::triangle_soup_shape(Vec3::new(
+                reach(bounds.min.x, bounds.max.x),
+                reach(bounds.min.y, bounds.max.y),
+                reach(bounds.min.z, bounds.max.z),
+            ))
+        })
+        .and_then(|shape| {
+            self.world
+                .attach_triangle_soup_collider(body, shape, material, is_trigger, soup)
+        })
     }
 
     /// Queue a continuous force on a dynamic body (applied at the next step).

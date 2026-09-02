@@ -4,6 +4,7 @@ use crate::physics_body_handle::PhysicsBodyHandle;
 use crate::physics_collider_handle::PhysicsColliderHandle;
 use crate::physics_collider_shape::PhysicsColliderShape;
 use crate::physics_heightfield::Heightfield;
+use crate::triangle_bvh::TriangleBvh;
 use crate::physics_material::PhysicsMaterial;
 
 /// A collider: a shape + material attached to an owning body.
@@ -23,6 +24,7 @@ pub(crate) struct PhysicsCollider {
     is_trigger: bool,
     enabled: bool,
     heightfield: Option<Heightfield>,
+    soup: Option<TriangleBvh>,
 }
 
 impl PhysicsCollider {
@@ -42,6 +44,7 @@ impl PhysicsCollider {
             is_trigger,
             enabled: true,
             heightfield: None,
+            soup: None,
         }
     }
 
@@ -62,7 +65,34 @@ impl PhysicsCollider {
             is_trigger,
             enabled: true,
             heightfield: Some(heightfield),
+            soup: None,
         }
+    }
+
+    /// Attach a triangle-soup collider carrying its BVH.
+    pub(crate) fn new_triangle_soup(
+        handle: PhysicsColliderHandle,
+        body: PhysicsBodyHandle,
+        shape: PhysicsColliderShape,
+        material: PhysicsMaterial,
+        is_trigger: bool,
+        soup: TriangleBvh,
+    ) -> Self {
+        PhysicsCollider {
+            handle,
+            body,
+            shape,
+            material,
+            is_trigger,
+            enabled: true,
+            heightfield: None,
+            soup: Some(soup),
+        }
+    }
+
+    /// The triangle soup this collider carries, if it is one.
+    pub(crate) fn soup(&self) -> Option<&TriangleBvh> {
+        self.soup.as_ref()
     }
 
     /// The heightfield grid this collider carries, if it is a heightfield.

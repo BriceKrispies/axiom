@@ -77,6 +77,7 @@ mod ids;
 mod integrator;
 mod mass_properties;
 mod physics_api;
+mod triangle_bvh;
 mod physics_body;
 mod physics_body_desc;
 mod physics_body_handle;

@@ -39,6 +39,8 @@ use crate::collider_obb::world_obb;
 use crate::physics_collider_shape::PhysicsColliderShape;
 use crate::physics_shape_kind::PhysicsShapeKind;
 use crate::query_hit::QueryHit;
+use crate::triangle_bvh::TriangleBvh;
+use axiom_math::DVec3;
 
 /// A ray/plane that is closer to parallel than this is treated as a miss.
 const PLANE_PARALLEL_EPSILON: f32 = 1.0e-7;
@@ -56,6 +58,7 @@ const RAY_TABLE: [RayFn; PhysicsShapeKind::COUNT] = [
     ray_capsule,
     ray_plane,
     ray_heightfield,
+    ray_triangle_soup,
 ];
 
 /// The exact ray hit on a collider, or `None` for a miss, dispatched branchlessly
@@ -151,6 +154,65 @@ fn ray_plane(
 
 /// A heightfield is explicitly unsupported by ray casting — never a hit. See the
 /// module docs for why this is an exclusion rather than an approximation.
+/// Ray against a triangle soup, which [`RAY_TABLE`] structurally cannot do.
+///
+/// The table's entries take a [`PhysicsColliderShape`] — a flat bag of scalars —
+/// so a shape whose geometry is a buffer has nowhere to read it from. This takes
+/// the soup directly, and the query path calls it alongside the table for the
+/// colliders that carry one. That is the same escape [`crate::contact_pair`]
+/// already uses for a heightfield's grid, for the same reason.
+///
+/// The soup is in the body's local space, so the ray goes in and the hit comes
+/// back out: rotating a ray is cheaper than rotating a hundred thousand
+/// triangles, and it keeps the stored geometry immutable.
+pub(crate) fn soup_ray(
+    soup: &TriangleBvh,
+    center: Vec3,
+    rotation: Quat,
+    ray: &Ray,
+) -> Option<QueryHit> {
+    // A rotation that cannot be inverted has no local space to cast into, so
+    // there is no hit to report. Reporting one against the un-rotated soup would
+    // be an answer to a different question.
+    rotation
+        .inverse()
+        .ok()
+        .and_then(|inverse| {
+            let local_origin = inverse.rotate(ray.origin().subtract(center));
+            let local_direction = inverse.rotate(ray.direction());
+            soup.raycast(
+                DVec3::from_single(local_origin),
+                DVec3::from_single(local_direction),
+                f64::INFINITY,
+                |_| true,
+            )
+        })
+        .map(|found| {
+            let t = found.distance as f32;
+            // The geometric normal, flipped to face the ray, so a hit from
+            // behind reports the surface the caster actually met.
+            let facing = [-1.0, 1.0][usize::from(found.front_face)];
+            let normal = rotation
+                .rotate(soup.normal(found.triangle).to_single())
+                .mul_scalar(facing);
+            QueryHit::new(Hit::new(t, ray.point_at(t), normal), found.front_face)
+        })
+}
+
+/// A triangle soup is not reachable through the flat [`RayFn`] signature,
+/// which sees only the shape's scalars. The query that *can* reach it takes the
+/// whole collider — see `PhysicsCollider::mesh`. This entry exists so the table
+/// stays exhaustive and the gap is stated rather than implied, exactly as
+/// [`ray_heightfield`] does for the same reason.
+fn ray_triangle_soup(
+    _shape: PhysicsColliderShape,
+    _center: Vec3,
+    _rotation: Quat,
+    _ray: &Ray,
+) -> Option<QueryHit> {
+    None
+}
+
 fn ray_heightfield(
     _shape: PhysicsColliderShape,
     _center: Vec3,
@@ -500,17 +562,22 @@ mod tests {
         assert!(flat_box.hit().point().y.abs() < 0.5);
         let tilted_box = ray_shape(box_shape(4.0, 0.25, 0.25), Vec3::ZERO, pitch, &down)
             .expect("the pitched slab still spans x = 2");
+        // `point` is bound rather than passed as a positional format argument: a
+        // positional argument is evaluated only when the assertion fails, so it
+        // is its own coverage region and an assertion that never fires leaves it
+        // uncovered — one region, no missing lines, invisible to
+        // `--show-missing-lines`. An inline capture of a bound local has none.
+        let point = tilted_box.hit().point();
         assert!(
-            tilted_box.hit().point().y.abs() > 1.0,
-            "a pitched slab is struck far off y = 0, got {:?}",
-            tilted_box.hit().point()
+            point.y.abs() > 1.0,
+            "a pitched slab is struck far off y = 0, got {point:?}"
         );
         let tilted_capsule = ray_shape(capsule(0.25, 4.0), Vec3::ZERO, pitch, &down)
             .expect("the pitched capsule spans x = 2");
+        let point = tilted_capsule.hit().point();
         assert!(
-            tilted_capsule.hit().point().y.abs() > 1.0,
-            "a pitched capsule is struck far off y = 0, got {:?}",
-            tilted_capsule.hit().point()
+            point.y.abs() > 1.0,
+            "a pitched capsule is struck far off y = 0, got {point:?}"
         );
     }
 }

@@ -4,6 +4,7 @@ use axiom_kernel::Ratio;
 use axiom_math::Vec3;
 
 use crate::physics_collider_shape::PhysicsColliderShape;
+use crate::physics_shape_kind::PhysicsShapeKind;
 use crate::physics_error::PhysicsError;
 use crate::physics_result::PhysicsResult;
 
@@ -99,12 +100,20 @@ impl MassProperties {
 /// A per-shape diagonal moment of inertia for a solid body of `mass`, indexed by
 /// the shape's kind so the dispatch is a function table, not a `match`.
 fn diagonal_moment(mass: f32, shape: PhysicsColliderShape) -> Vec3 {
-    const TABLE: [fn(f32, PhysicsColliderShape) -> Vec3; 5] = [
+    // Sized by `COUNT`, like every other dispatch table. It was written as a
+    // literal `5`, which is the exact failure `PhysicsShapeKind::COUNT`'s own
+    // doc warns about: "a table written as `[RayFn; 4]` while the enum grew a
+    // fifth variant compiles cleanly and panics at runtime the first time the
+    // new kind is queried". Adding `TriangleSoup` did precisely that — an index
+    // out of bounds the moment a soup collider was attached — while the four
+    // tables that *were* sized by the constant refused to compile and said so.
+    const TABLE: [fn(f32, PhysicsColliderShape) -> Vec3; PhysicsShapeKind::COUNT] = [
         sphere_moment,
         box_moment,
         capsule_moment,
         plane_moment,
         heightfield_moment,
+        triangle_soup_moment,
     ];
     TABLE[shape.kind().index()](mass, shape)
 }
@@ -144,6 +153,12 @@ fn plane_moment(_mass: f32, _shape: PhysicsColliderShape) -> Vec3 {
 /// Static heightfield: a track surface is always attached to an immovable (static)
 /// body, so its rotational resistance is irrelevant — zero moment (zero inverse
 /// inertia), exactly like a plane.
+/// A triangle soup is static terrain: no rotational extent to speak of, so no
+/// moment, exactly as for a heightfield.
+fn triangle_soup_moment(_mass: f32, _shape: PhysicsColliderShape) -> Vec3 {
+    Vec3::ZERO
+}
+
 fn heightfield_moment(_mass: f32, _shape: PhysicsColliderShape) -> Vec3 {
     Vec3::ZERO
 }

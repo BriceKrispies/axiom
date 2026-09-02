@@ -43,6 +43,7 @@ const SWEEP_TABLE: [SweepFn; PhysicsShapeKind::COUNT] = [
     sweep_capsule_shape,
     sweep_plane_shape,
     sweep_heightfield_shape,
+    sweep_triangle_soup_shape,
 ];
 
 /// Where `query` first touches a collider while travelling `motion`, dispatched
@@ -178,6 +179,18 @@ fn sweep_plane_shape(
 /// A heightfield is explicitly unsupported by shape casting — never hit. See
 /// [`crate::query_ray`] for why this is an exclusion rather than an
 /// approximation.
+/// As [`sweep_heightfield_shape`]: the soup is not reachable through the flat
+/// signature, so the entry keeps the table exhaustive and states the gap.
+fn sweep_triangle_soup_shape(
+    _shape: PhysicsColliderShape,
+    _center: Vec3,
+    _rotation: Quat,
+    _query: &Capsule,
+    _motion: Vec3,
+) -> Option<Hit> {
+    None
+}
+
 fn sweep_heightfield_shape(
     _shape: PhysicsColliderShape,
     _center: Vec3,
@@ -380,10 +393,10 @@ mod tests {
         .expect("a contained body is an immediate hit");
         assert_eq!(hit.hit().time(), 0.0);
         assert!(!hit.front_face());
+        let normal = hit.hit().normal();
         assert!(
-            (hit.hit().normal().length() - 1.0).abs() < 1.0e-5,
-            "the escape normal must be a usable unit vector, got {:?}",
-            hit.hit().normal()
+            (normal.length() - 1.0).abs() < 1.0e-5,
+            "the escape normal must be a usable unit vector, got {normal:?}"
         );
         // The nearest surface to an axis spanning y in [-1, 1] at the origin of a
         // 10-cube is a side face, 10 away — never the +X face 20 along the motion.

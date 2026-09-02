@@ -25,4 +25,5 @@ introduced_capabilities = [
   "physics-capsule-contacts",
   "physics-shape-casts",
   "physics-hit-records",
+  "physics-triangle-soup-colliders",
 ]

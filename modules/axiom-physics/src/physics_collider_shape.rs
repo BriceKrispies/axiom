@@ -128,6 +128,36 @@ impl PhysicsColliderShape {
     /// A heightfield shape, carrying the grid's local bounding half-extents (the
     /// grid data itself lives on the collider). Rejects non-finite or non-positive
     /// extents on the footprint axes.
+    /// A static triangle soup, bounded by `half_extents`.
+    ///
+    /// The soup itself lives on the collider, not here: this struct is a flat
+    /// bag of scalars that every dispatch table copies, and a triangle buffer
+    /// has no business being copied per query. What the shape carries is the
+    /// box the broad phase needs.
+    /// Zero extent on an axis is **allowed**, unlike every other finite shape
+    /// here. A floor is flat on Y, a wall is flat on X or Z, and those are the
+    /// two most common things a level's collision geometry is made of — a rule
+    /// that rejected them would reject the shape's whole reason to exist. Only
+    /// a non-finite bound is refused, because that is a broken buffer rather
+    /// than a flat one. (`heightfield_shape` draws the same line for the same
+    /// reason, allowing a perfectly flat grid.)
+    pub(crate) fn triangle_soup_shape(half_extents: Vec3) -> PhysicsResult<Self> {
+        let h = half_extents;
+        let valid = h.x.is_finite() & h.y.is_finite() & h.z.is_finite();
+        [
+            Err(PhysicsError::invalid_collider_shape(
+                "triangle soup half-extents must be finite",
+            )),
+            Ok(PhysicsColliderShape {
+                kind: PhysicsShapeKind::TriangleSoup,
+                half_extents,
+                radius: 0.0,
+                normal: Vec3::ZERO,
+                offset: 0.0,
+            }),
+        ][valid as usize]
+    }
+
     pub(crate) fn heightfield_shape(half_extents: Vec3) -> PhysicsResult<Self> {
         let h = half_extents;
         let valid = h.x.is_finite() & h.y.is_finite() & h.z.is_finite() & (h.x > 0.0) & (h.z > 0.0);

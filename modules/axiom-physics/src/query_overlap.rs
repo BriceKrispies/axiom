@@ -47,6 +47,7 @@ const OVERLAP_TABLE: [OverlapFn; PhysicsShapeKind::COUNT] = [
     overlap_capsule_shape,
     overlap_plane_shape,
     overlap_heightfield_shape,
+    overlap_triangle_soup_shape,
 ];
 
 /// Whether a collider exactly overlaps `query`, dispatched branchlessly on the
@@ -119,6 +120,17 @@ fn overlap_plane_shape(
 }
 
 /// A heightfield is explicitly unsupported by overlap — never reported.
+/// As [`overlap_heightfield_shape`]: the soup is not reachable through the flat
+/// signature, so the entry keeps the table exhaustive and states the gap.
+fn overlap_triangle_soup_shape(
+    _shape: PhysicsColliderShape,
+    _center: Vec3,
+    _rotation: Quat,
+    _query: &Capsule,
+) -> bool {
+    false
+}
+
 fn overlap_heightfield_shape(
     _shape: PhysicsColliderShape,
     _center: Vec3,
