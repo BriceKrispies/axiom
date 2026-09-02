@@ -76,7 +76,7 @@ const PRIMARY: &[&str] = &[
 ];
 
 /// Directives that supply an operation's second half.
-const SECONDARY: &[&str] = &["with", "to", "text"];
+const SECONDARY: &[&str] = &["with", "to", "through", "text"];
 
 /// True when the text is an edit script rather than a JSON batch.
 ///
@@ -305,6 +305,7 @@ fn assign(b: &mut Block, name: &str, value: String, no: usize, errors: &mut Vec<
         "with" => &mut b.op.with,
         "from" => &mut b.op.from,
         "to" => &mut b.op.to,
+        "through" => &mut b.op.through,
         "insert_before" => &mut b.op.insert_before,
         "insert_after" => &mut b.op.insert_after,
         "append" => &mut b.op.append,

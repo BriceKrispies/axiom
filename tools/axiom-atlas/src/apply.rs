@@ -48,10 +48,26 @@ pub struct EditOp {
     /// Start of a span to replace (used with `to`).
     #[serde(default)]
     pub from: Option<String>,
-    /// End of a span. The span runs from the start of `from` up to, but not
-    /// including, `to`.
+    /// End of a span, **exclusive**. The span runs from the start of `from` up
+    /// to, but not including, `to`, so the `to` anchor survives the edit.
+    ///
+    /// Reach for [`EditOp::through`] instead when you mean "replace this whole
+    /// span, both ends included" — which is nearly always what a caller
+    /// re-anchoring a function body means.
     #[serde(default)]
     pub to: Option<String>,
+    /// End of a span, **inclusive**. The span runs from the start of `from`
+    /// through the end of `through`, so the anchor is consumed with the rest.
+    ///
+    /// This exists because the exclusive form has a failure mode with no
+    /// diagnostic: a caller who re-states the `to` anchor at the end of `with`
+    /// gets it twice, and a caller who does not gets a cut that stops short.
+    /// Both write a file that is wrong in a way the tool reported as success —
+    /// which is the same class of defect as a zero-result search that is a lie.
+    /// One of the two anchoring conventions had to be spelt in the directive
+    /// name rather than left to be remembered.
+    #[serde(default)]
+    pub through: Option<String>,
     #[serde(default)]
     pub with: Option<String>,
     #[serde(default)]
@@ -162,17 +178,28 @@ fn apply_one(
         return Ok(format!("{}{new}{}", &current[..begin], &current[end..]));
     }
 
-    // Span replacement: everything from `from` up to (not including) `to`.
+    // Span replacement. `to` ends the span before its anchor; `through` ends it
+    // after. Exactly one of the two must be present.
     if let Some(from) = &op.from {
-        let to = op
-            .to
-            .as_ref()
-            .ok_or_else(|| format!("{label}: `from` needs a matching `to`"))?;
+        let (anchor, keyword, inclusive) = match (op.to.as_ref(), op.through.as_ref()) {
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "{label}: `from` takes either `to` (exclusive) or `through` (inclusive), not both"
+                ))
+            }
+            (Some(to), None) => (to, "to", false),
+            (None, Some(through)) => (through, "through", true),
+            (None, None) => {
+                return Err(format!(
+                    "{label}: `from` needs a matching `to` (exclusive) or `through` (inclusive)"
+                ))
+            }
+        };
 
         let start = locate(current, from, label, "from")?;
         let rest = &current[start + from.len()..];
-        let end_rel = locate(rest, to, label, "to")?;
-        let end = start + from.len() + end_rel;
+        let end_rel = locate(rest, anchor, label, keyword)?;
+        let end = start + from.len() + end_rel + [0, anchor.len()][usize::from(inclusive)];
 
         let new = supplied(op.with.as_ref()).unwrap_or_default();
         return Ok(format!("{}{new}{}", &current[..start], &current[end..]));
@@ -453,6 +480,46 @@ mod tests {
         let s = op(r#"{"path":"x","from":"[A]","to":"[B]","with":"[A]\nnew\n"}"#);
         let out = apply_one("head\n[A]\nold\n[B]\ntail\n", &s, None, "x").expect("applies");
         assert_eq!(out, "head\n[A]\nnew\n[B]\ntail\n");
+    }
+
+    /// `through` is the inclusive twin, and the reason it exists is the
+    /// asymmetry this test and the one above it show side by side: with `to`
+    /// the caller must re-state the closing anchor inside `with`, and with
+    /// `through` the caller must not. Forgetting either way writes a wrong file
+    /// that the tool reports as a success.
+    #[test]
+    fn a_through_span_consumes_its_closing_anchor() {
+        let s = op(r#"{"path":"x","from":"[A]","through":"[B]","with":"gone\n"}"#);
+        let out = apply_one("head\n[A]\nold\n[B]\ntail\n", &s, None, "x").expect("applies");
+        assert_eq!(out, "head\ngone\n\ntail\n");
+    }
+
+    #[test]
+    fn a_through_span_ending_at_end_of_file_takes_the_anchor_with_it() {
+        let s = op(r#"{"path":"x","from":"fn a","through":"}","with":"fn a() {}"}"#);
+        let out = apply_one("fn a() {\n  body\n}", &s, None, "x").expect("applies");
+        assert_eq!(out, "fn a() {}");
+    }
+
+    #[test]
+    fn a_span_refuses_both_end_anchors() {
+        let s = op(r#"{"path":"x","from":"[A]","to":"[B]","through":"[B]","with":"n"}"#);
+        let err = apply_one("[A]x[B]", &s, None, "x").expect_err("refuses");
+        assert!(err.contains("not both"), "{err}");
+    }
+
+    #[test]
+    fn a_span_with_no_end_anchor_says_which_two_it_wanted() {
+        let s = op(r#"{"path":"x","from":"[A]","with":"n"}"#);
+        let err = apply_one("[A]x", &s, None, "x").expect_err("refuses");
+        assert!(err.contains("`to`") && err.contains("`through`"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_through_anchor_names_the_directive_that_failed() {
+        let s = op(r#"{"path":"x","from":"[A]","through":"[Z]","with":"n"}"#);
+        let err = apply_one("[A]x[B]", &s, None, "x").expect_err("refuses");
+        assert!(err.contains("through"), "{err}");
     }
 
     #[test]

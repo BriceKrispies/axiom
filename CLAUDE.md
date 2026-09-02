@@ -157,13 +157,21 @@ scripts/ax apply .axiom-atlas/staging/change.ax --dry-run   # see the plan
 scripts/ax apply .axiom-atlas/staging/change.ax             # write it
 ```
 
-Directives: `replace`/`with`, `from`/`to`/`with`, `insert_before` or
-`insert_after` + `text`, `append`, `content`, `at <line>`/`with`, and a bare
-`all` line. Each takes
-its payload three ways — `name <<TAG … TAG` (whole lines, newline-terminated),
-`name: text` (one line, no trailing newline — right for a line fragment or an
-anchor at end of file), or `name < path` (from a repo file, for something
-enormous). `<<-TAG` chomps a fenced payload.
+Directives: `replace`/`with`, `from`/`to`/`with`, `from`/`through`/`with`,
+`insert_before` or `insert_after` + `text`, `append`, `content`,
+`at <line>`/`with`, and a bare `all` line. Each takes its payload three ways —
+`name <<TAG … TAG` (whole lines, newline-terminated), `name: text` (one line,
+no trailing newline — right for a line fragment or an anchor at end of file),
+or `name < path` (from a repo file, for something enormous). `<<-TAG` chomps a
+fenced payload.
+
+**A span takes `to` or `through`, and they differ at the closing anchor.**
+`to` is **exclusive** — the span stops *before* the anchor, which survives the
+edit, so `with` must re-state it. `through` is **inclusive** — the anchor is
+consumed with the rest. Replacing a whole function body almost always wants
+`through`. Getting this wrong writes a file duplicated or truncated at one end
+and reports success, so the two conventions are two directive names rather
+than one to remember.
 
 A JSON array on stdin still works and is still the right shape for a
 programmatic caller; the format is chosen by the first character, so nothing
