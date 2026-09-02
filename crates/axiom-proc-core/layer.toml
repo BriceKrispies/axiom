@@ -6,14 +6,19 @@ depends_on = ["recipe", "space", "entropy"]
 meaningful_dependency = """
 Proc-core adapts a recipe graph (axiom-recipe RecipeGraph/Node/Param), space's
 Address, and entropy's address-keyed stream into a deterministic graph executor.
-ProcCore validates the recipe, evaluates its nodes in dependency (id) order,
-caches each node's output so its dependents read it, and keys a per-node
-EntropyStream by (seed, SpaceApi::child(base, node), version) which it hands to a
-domain evaluator. It is generic over the output type and owns no operators - what
-a node computes is the domain layer's job.
+ProcCore validates the recipe and evaluates its nodes in dependency (id) order,
+caching each node's output so its dependents read it, and offers the two
+determinism models a generative domain can need. ProcCore::execute keys a
+per-node EntropyStream by (seed, SpaceApi::child(base, node), version), which
+lets a graph be evaluated in any order or in parallel - what a texture or a mesh
+wants. ProcCore::evaluate manufactures no stream and keeps every node's output,
+for a domain whose randomness is one sequential source shared across the frame,
+where the order of the draws is the contract. execute is written in terms of
+evaluate, so there is one walk of the graph. It is generic over the output type
+and owns no operators - what a node computes is the domain layer's job.
 """
 
-introduced_capabilities = ["ProcCore", "NodeEval", "ProcError"]
+introduced_capabilities = ["ProcCore", "NodeEval", "NodeStep", "ProcError"]
 consumed_capabilities = ["RecipeGraph", "Param", "SpaceApi", "Address", "EntropyApi", "EntropyStream"]
 
 [[proof_exports]]
@@ -23,3 +28,7 @@ must_reference = ["SpaceApi", "EntropyApi"]
 [[proof_exports]]
 export = "NodeEval"
 must_reference = ["EntropyStream", "Param"]
+
+[[proof_exports]]
+export = "NodeStep"
+must_reference = ["Param"]
