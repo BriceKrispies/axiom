@@ -143,8 +143,8 @@ pub enum Op {
     SelectLt {
         probe: u16,
         threshold: f64,
-        low: f64,
-        high: f64,
+        low: Src,
+        high: Src,
     },
 }
 
@@ -235,6 +235,24 @@ pub enum Src {
     Imm(f64),
 }
 
+impl Src {
+    fn read(self, regs: &[f64]) -> f64 {
+        match self {
+            Src::Reg(r) => regs[r as usize],
+            Src::Imm(k) => k,
+        }
+    }
+
+    /// The register this reads, if it reads one. Lets a validator treat a
+    /// register-valued operand the same wherever it appears.
+    fn reg(self) -> Option<u16> {
+        match self {
+            Src::Reg(r) => Some(r),
+            Src::Imm(_) => None,
+        }
+    }
+}
+
 /// A burst: a count, a program, and where its values go.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Burst {
@@ -245,6 +263,33 @@ pub struct Burst {
     /// `(field, value)`. Order is irrelevant — every draw has already happened
     /// by the time these are read — but two fields may name the same register,
     /// which is how `s.size1 = s.size0` is expressed.
+    pub fields: Vec<(Field, Src)>,
+    /// A second emission from the same particle, on a coin flip.
+    pub companion: Option<Companion>,
+}
+
+/// A second particle emitted from the same spawn as its parent, sometimes.
+///
+/// Glass is what this is for: a shard is thrown, and roughly half the time a
+/// bright glint rides it — *the same* position, velocity, life and spin, with a
+/// different tile, colour and intensity, into the additive pool instead of the
+/// lit one. The source expresses that by mutating the spawn record in place
+/// after the first emit and emitting it again, so the fields here are an
+/// **overlay** on the parent's, not a fresh record.
+///
+/// The gate is drawn after the parent emits, and the companion's own
+/// instructions draw only when the gate opens. That is the first place in this
+/// format where the number of draws varies per particle, and it is why the gate
+/// is part of the burst rather than something the caller arranges: the draw has
+/// to happen in exactly this position in the stream.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Companion {
+    /// The companion emits when the gate draw comes in under this.
+    pub threshold: f64,
+    /// Evaluated only when the gate opens, continuing the parent's registers.
+    pub ops: Vec<Op>,
+    pub pool: Pool,
+    /// Written over the parent's spawn record, not instead of it.
     pub fields: Vec<(Field, Src)>,
 }
 
@@ -289,6 +334,8 @@ pub struct V3(pub Reg, pub Reg, pub Reg);
 pub struct Program {
     ops: Vec<Op>,
     written: u16,
+    split: Option<usize>,
+    threshold: f64,
 }
 
 impl Program {
@@ -427,8 +474,18 @@ impl Program {
         self.push(Op::Mod(a.0, k))
     }
 
-    /// `probe < threshold ? low : high`.
+    /// `probe < threshold ? low : high`, between two literals.
     pub fn select_lt(&mut self, probe: Reg, threshold: f64, low: f64, high: f64) -> Reg {
+        self.pick(probe, threshold, Src::Imm(low), Src::Imm(high))
+    }
+
+    /// `probe < threshold ? low : high`, between two computed values.
+    ///
+    /// The register form is what lets a *range* be selected rather than only a
+    /// value: `rng.range(lo, hi)` is `lo + (hi - lo) * float()`, so a burst
+    /// whose bounds depend on a band draws once and picks its bounds, spending
+    /// the same single draw the source does whichever band it lands in.
+    pub fn pick(&mut self, probe: Reg, threshold: f64, low: Src, high: Src) -> Reg {
         self.push(Op::SelectLt {
             probe: probe.0,
             threshold,
@@ -476,15 +533,47 @@ impl Program {
         pool: Pool,
         fields: Vec<(Field, Src)>,
     ) -> Burst {
+        self.emit_with(count, pool, fields, None)
+    }
+
+    /// Close the program into a burst that sometimes emits a second particle
+    /// from the same spawn.
+    ///
+    /// The companion's instructions are the ones appended after
+    /// [`Program::companion_from`] was called, so nothing here counts an
+    /// instruction index either.
+    pub fn emit_with(
+        self,
+        count: (f64, i32),
+        pool: Pool,
+        fields: Vec<(Field, Src)>,
+        companion: Option<(Pool, Vec<(Field, Src)>)>,
+    ) -> Burst {
+        let split = self.split.unwrap_or(self.ops.len());
+        let mut ops = self.ops;
+        let tail = ops.split_off(split);
         Burst {
             count: Count {
                 factor: count.0,
                 plus: count.1,
             },
-            ops: self.ops,
+            ops,
             pool,
             fields,
+            companion: companion.map(|(pool, fields)| Companion {
+                threshold: self.threshold,
+                ops: tail,
+                pool,
+                fields,
+            }),
         }
+    }
+
+    /// Everything appended from here on belongs to the companion, and runs only
+    /// when its gate draw comes in under `threshold`.
+    pub fn companion_from(&mut self, threshold: f64) {
+        self.split = Some(self.ops.len());
+        self.threshold = threshold;
     }
 }
 
@@ -565,15 +654,28 @@ impl Op {
             Op::Mul(a, b) | Op::Add(a, b) => vec![a, b],
             Op::Mad(a, _, b) => vec![a, b],
             Op::Scale(a, _) | Op::Offset(a, _) | Op::Mod(a, _) => vec![a],
-            Op::SelectLt { probe, .. } => vec![probe],
+            Op::SelectLt {
+                probe, low, high, ..
+            } => [Some(probe), low.reg(), high.reg()]
+                .into_iter()
+                .flatten()
+                .collect(),
         }
     }
 }
 
 impl Burst {
-    /// The number of registers a run of this burst produces.
+    /// The number of registers a run of this burst produces, companion
+    /// included — the register file is sized for the widest path.
     pub fn register_count(&self) -> usize {
-        self.ops.iter().map(|op| op.writes()).sum()
+        let parent: usize = self.ops.iter().map(|op| op.writes()).sum();
+        parent
+            + self
+                .companion
+                .iter()
+                .flat_map(|c| c.ops.iter())
+                .map(|op| op.writes())
+                .sum::<usize>()
     }
 
     /// Every operand and every field reads a register written *earlier*.
@@ -583,9 +685,11 @@ impl Burst {
     /// cheap to check and there is no reason for a recipe not to be checked, so
     /// the recipe table's own test runs it over every recipe.
     pub fn operands_resolve(&self) -> bool {
+        let companion_ops = self.companion.iter().flat_map(|c| c.ops.iter());
         let ops_ok = self
             .ops
             .iter()
+            .chain(companion_ops)
             .scan(0usize, |written, op| {
                 let ok = op.operands().iter().all(|r| usize::from(*r) < *written);
                 *written += op.writes();
@@ -593,10 +697,12 @@ impl Burst {
             })
             .all(|ok| ok);
         let total = self.register_count();
-        let fields_ok = self.fields.iter().all(|(_, src)| match src {
-            Src::Reg(r) => usize::from(*r) < total,
-            Src::Imm(_) => true,
-        });
+        let companion_fields = self.companion.iter().flat_map(|c| c.fields.iter());
+        let fields_ok = self
+            .fields
+            .iter()
+            .chain(companion_fields)
+            .all(|(_, src)| src.reg().is_none_or(|r| usize::from(r) < total));
         ops_ok & fields_ok
     }
 }
@@ -630,7 +736,39 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
             count: f64::from(count),
         };
         regs.clear();
-        for op in &burst.ops {
+        regs.clear();
+        eval(fx, &burst.ops, &mut regs, &site, reflected, at);
+
+        let mut s = crate::fx::particles::reset_spawn();
+        apply(&mut s, &burst.fields, &regs);
+        emit(fx, burst.pool, &s);
+
+        // The companion's gate is drawn *after* the parent emits, and its own
+        // instructions draw only when the gate opens. This is the one place a
+        // burst's draw count varies per particle, which is exactly why the gate
+        // lives in the burst: the draw has to fall here in the stream and
+        // nowhere else.
+        burst.companion.iter().for_each(|c| {
+            let gate = fx.rng.float();
+            (gate < c.threshold).then(|| {
+                eval(fx, &c.ops, &mut regs, &site, reflected, at);
+                apply(&mut s, &c.fields, &regs);
+                emit(fx, c.pool, &s);
+            });
+        });
+    });
+}
+
+/// Evaluate a run of instructions, appending to `regs`.
+fn eval(
+    fx: &mut FxSystem,
+    ops: &[Op],
+    regs: &mut Vec<f64>,
+    site: &Site,
+    reflected: (f64, f64, f64),
+    at: Position,
+) {
+        for op in ops {
             match *op {
                 Op::Read(input) => regs.push(site.read(input, reflected, at)),
                 Op::Range(lo, hi) => {
@@ -706,25 +844,28 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
                     low,
                     high,
                 } => {
-                    let picked = [high, low][usize::from(regs[probe as usize] < threshold)];
+                    let arms = [high.read(&regs), low.read(&regs)];
+                    let picked = arms[usize::from(regs[probe as usize] < threshold)];
                     regs.push(picked);
                 }
             }
         }
+}
 
-        let mut s = crate::fx::particles::reset_spawn();
-        for (field, src) in &burst.fields {
-            let v = match src {
-                Src::Reg(r) => regs[*r as usize],
-                Src::Imm(k) => *k,
-            };
-            write(&mut s, *field, v);
-        }
-        match burst.pool {
-            Pool::Additive => fx.emit_add(&s),
-            Pool::Lit => fx.emit_lit(&s),
-        };
-    });
+/// Write a field list onto a spawn record. A companion's list overlays the
+/// parent's rather than replacing it, which is what the source does when it
+/// mutates the record in place and emits it a second time.
+fn apply(s: &mut ParticleSpawn, fields: &[(Field, Src)], regs: &[f64]) {
+    fields
+        .iter()
+        .for_each(|(field, src)| write(s, *field, src.read(regs)));
+}
+
+fn emit(fx: &mut FxSystem, pool: Pool, s: &ParticleSpawn) {
+    match pool {
+        Pool::Additive => fx.emit_add(s),
+        Pool::Lit => fx.emit_lit(s),
+    };
 }
 
 /// Run a sequence of bursts, in order.

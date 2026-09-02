@@ -873,95 +873,18 @@ fn ground(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), e: f64,
 
 /// Glass: glinting shards, fine aerosol, a crack web. `impacts.js:662-724`.
 fn glass(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
+    // Glass ignores impact energy — a pane either breaks or it does not.
     let _ = e;
-    let q = fx.pscale;
-    let (fx0, fy0, fz0) = (inc.0 * 0.8 - n.0 * 0.2, inc.1 * 0.8 - n.1 * 0.2, inc.2 * 0.8 - n.2 * 0.2);
-    let (px, py, pz) = point;
-
-    let n_shard = (14.0 * q).round() as i32 + 5;
-    for _ in 0..n_shard {
-        let back = fx.rng.float() < 0.3;
-        let (ax, ay, az) = if back { (-fx0, -fy0, -fz0) } else { (fx0, fy0, fz0) };
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, ax, ay, az, 1.0, 1.2);
-        let sp = fx.rng.range(2.5, 8.0);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py;
-        s.z = pz;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = (if fx.rng.float() < 0.4 { p::SPLINTER } else { p::CHIP }) as f64;
-        s.size0 = fx.rng.range(0.01, 0.038);
-        s.size1 = s.size0;
-        s.life = fx.rng.range(0.7, 1.4);
-        s.drag = 0.6;
-        s.gravity = -19.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 30.0;
-        s.r0 = 0.72;
-        s.g0 = 0.8;
-        s.b0 = 0.84;
-        s.r1 = 0.6;
-        s.g1 = 0.68;
-        s.b1 = 0.72;
-        s.alpha = 0.85;
-        s.alpha_curve = 0.3;
-        s.soft = 0.06;
-        s.seed = fx.rng.float();
-        // The glint riding the shard shares this spawn's kinematics with a
-        // different tile/colour — the source mutates `s` in place after the
-        // first `fx.emitLit(s)` and emits the same object again, which reads
-        // as "emit twice from one descriptor" here too.
-        fx.emit_lit(&s);
-        if fx.rng.float() < 0.55 {
-            s.tile = p::SPARK as f64;
-            s.size0 = fx.rng.range(0.01, 0.02);
-            s.size1 = s.size0;
-            s.r0 = 0.85;
-            s.g0 = 0.95;
-            s.b0 = 1.0;
-            s.i0 = fx.rng.range(3.0, 8.0);
-            s.r1 = 0.8;
-            s.g1 = 0.9;
-            s.b1 = 1.0;
-            s.i1 = 0.2;
-            s.alpha = 1.0;
-            s.alpha_curve = 1.0;
-            s.flags = 1.0;
-            fx.emit_add(&s);
-        }
-    }
-    let n_mist = (4.0 * q).round() as i32 + 1;
-    for _ in 0..n_mist {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, fx0, fy0, fz0, 1.2, 0.7);
-        let mut s = reset_spawn();
-        s.x = px;
-        s.y = py;
-        s.z = pz;
-        s.vx = vx2 * 1.6;
-        s.vy = vy2 * 1.6;
-        s.vz = vz2 * 1.6;
-        s.tile = p::MIST as f64;
-        s.size0 = 0.05;
-        s.size1 = fx.rng.range(0.28, 0.45);
-        s.size_curve = 0.45;
-        s.life = fx.rng.range(0.35, 0.7);
-        s.drag = 4.2;
-        s.gravity = -3.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.r0 = 0.8;
-        s.g0 = 0.86;
-        s.b0 = 0.9;
-        s.r1 = 0.7;
-        s.g1 = 0.76;
-        s.b1 = 0.8;
-        s.alpha = 0.5;
-        s.alpha_curve = 1.6;
-        s.soft = 0.1;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run_all(
+        fx,
+        &crate::fx::recipes::GLASS,
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            incident: inc,
+            energy: 1.0,
+        },
+    );
     let glass_tile = if fx.rng.float() < 0.5 { d::GLASS_CRACK } else { d::HOLE_GLASS };
     let glass_size = fx.rng.range(0.3, 0.55);
     let glass_roll = fx.rng.float() * TWO_PI;

@@ -780,6 +780,152 @@ pub static FABRIC: LazyLock<Vec<Burst>> = LazyLock::new(|| soft(FABRIC_PALETTE))
 /// Rubber — the same burst, nearly black.
 pub static RUBBER: LazyLock<Vec<Burst>> = LazyLock::new(|| soft(RUBBER_PALETTE));
 
+/// Glass: glinting shards and a fine aerosol. `impacts.js:662-724`.
+///
+/// The recipe that needed the companion. Roughly half the shards carry a bright
+/// glint into the additive pool — the same position, velocity, life and spin,
+/// a different tile and colour — and the source writes that by mutating the
+/// spawn record after the first emit and emitting it again. So the glint's
+/// fields overlay the shard's rather than replacing them, and its two extra
+/// draws happen only when its gate opens.
+///
+/// It is also the only recipe that *reverses* its own axis on a draw: about
+/// three shards in ten are thrown back toward the shooter rather than through
+/// the pane. Negation is a multiply by a drawn sign, which is exact.
+///
+/// The crack-web decal `impacts.js:711` writes is not here; it is a decal, and
+/// its tile is itself drawn.
+pub static GLASS: LazyLock<Vec<Burst>> = LazyLock::new(|| {
+    // Shards, with the glint riding them — `impacts.js:669-710`.
+    let mut s = Program::new();
+    let at = s.point();
+    let n = s.normal();
+    let inc = s.incident();
+    let back = s.scale3(n, -0.2);
+    let front = s.mad3(inc, 0.8, back);
+    let flip = s.unit();
+    let sign = s.select_lt(flip, 0.3, -1.0, 1.0);
+    let axis = s.mul3(front, sign);
+    let dir = s.cone(axis, 1.0, 1.2);
+    let speed = s.range(2.5, 8.0);
+    let vel = s.mul3(dir, speed);
+    let shape = s.unit();
+    let tile = s.select_lt(shape, 0.4, p::SPLINTER as f64, p::CHIP as f64);
+    let size = s.range(0.01, 0.038);
+    let life = s.range(0.7, 1.4);
+    let spun = s.unit();
+    let rot = s.scale(spun, TWO_PI);
+    let signed = s.signed();
+    let spin = s.scale(signed, 30.0);
+    let seed = s.unit();
+
+    let shard_fields = vec![
+        (Field::X, at.0.src()),
+        (Field::Y, at.1.src()),
+        (Field::Z, at.2.src()),
+        (Field::Vx, vel.0.src()),
+        (Field::Vy, vel.1.src()),
+        (Field::Vz, vel.2.src()),
+        (Field::Tile, tile.src()),
+        (Field::Size0, size.src()),
+        (Field::Size1, size.src()),
+        (Field::Life, life.src()),
+        (Field::Rot, rot.src()),
+        (Field::Spin, spin.src()),
+        (Field::Seed, seed.src()),
+        (Field::Drag, imm(0.6)),
+        (Field::Gravity, imm(-19.0)),
+        (Field::R0, imm(0.72)),
+        (Field::G0, imm(0.8)),
+        (Field::B0, imm(0.84)),
+        (Field::R1, imm(0.6)),
+        (Field::G1, imm(0.68)),
+        (Field::B1, imm(0.72)),
+        (Field::Alpha, imm(0.85)),
+        (Field::AlphaCurve, imm(0.3)),
+        (Field::Soft, imm(0.06)),
+    ];
+
+    // Everything from here belongs to the glint, and draws only if it lands.
+    s.companion_from(0.55);
+    let glint_size = s.range(0.01, 0.02);
+    let glint_i0 = s.range(3.0, 8.0);
+
+    let shards = s.emit_with(
+        (14.0, 5),
+        Pool::Lit,
+        shard_fields,
+        Some((
+            Pool::Additive,
+            vec![
+                (Field::Size0, glint_size.src()),
+                (Field::Size1, glint_size.src()),
+                (Field::I0, glint_i0.src()),
+                (Field::Tile, imm(p::SPARK as f64)),
+                (Field::R0, imm(0.85)),
+                (Field::G0, imm(0.95)),
+                (Field::B0, imm(1.0)),
+                (Field::R1, imm(0.8)),
+                (Field::G1, imm(0.9)),
+                (Field::B1, imm(1.0)),
+                (Field::I1, imm(0.2)),
+                (Field::Alpha, imm(1.0)),
+                (Field::AlphaCurve, imm(1.0)),
+                (Field::Flags, imm(1.0)),
+            ],
+        )),
+    );
+
+    // Aerosol — `impacts.js:713-723`. A fixed speed, so nothing is drawn for
+    // the velocity at all.
+    let mut m = Program::new();
+    let at = m.point();
+    let n = m.normal();
+    let inc = m.incident();
+    let back = m.scale3(n, -0.2);
+    let axis = m.mad3(inc, 0.8, back);
+    let dir = m.cone(axis, 1.2, 0.7);
+    let vel = m.scale3(dir, 1.6);
+    let size1 = m.range(0.28, 0.45);
+    let life = m.range(0.35, 0.7);
+    let spun = m.unit();
+    let rot = m.scale(spun, TWO_PI);
+    let seed = m.unit();
+
+    let mist = m.emit(
+        (4.0, 1),
+        Pool::Lit,
+        vec![
+            (Field::X, at.0.src()),
+            (Field::Y, at.1.src()),
+            (Field::Z, at.2.src()),
+            (Field::Vx, vel.0.src()),
+            (Field::Vy, vel.1.src()),
+            (Field::Vz, vel.2.src()),
+            (Field::Size1, size1.src()),
+            (Field::Life, life.src()),
+            (Field::Rot, rot.src()),
+            (Field::Seed, seed.src()),
+            (Field::Tile, imm(p::MIST as f64)),
+            (Field::Size0, imm(0.05)),
+            (Field::SizeCurve, imm(0.45)),
+            (Field::Drag, imm(4.2)),
+            (Field::Gravity, imm(-3.0)),
+            (Field::R0, imm(0.8)),
+            (Field::G0, imm(0.86)),
+            (Field::B0, imm(0.9)),
+            (Field::R1, imm(0.7)),
+            (Field::G1, imm(0.76)),
+            (Field::B1, imm(0.8)),
+            (Field::Alpha, imm(0.5)),
+            (Field::AlphaCurve, imm(1.6)),
+            (Field::Soft, imm(0.1)),
+        ],
+    );
+
+    vec![shards, mist]
+});
+
 /// The reflection and the normal, averaged — the axis ejecta follows when the
 /// debris cares about the bullet more than the surface, but not entirely.
 ///
@@ -804,6 +950,7 @@ pub fn all() -> Vec<(&'static str, &'static Burst)> {
         ("water", &*WATER),
         ("fabric", &*FABRIC),
         ("rubber", &*RUBBER),
+        ("glass", &*GLASS),
     ]
         .into_iter()
         .flat_map(|(name, bursts)| bursts.iter().map(move |b| (name, b)))
