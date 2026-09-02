@@ -51,6 +51,15 @@ pub enum Input {
     ReflectY,
     ReflectZ,
     Energy,
+    /// The index of the particle being emitted, `0..count`.
+    ///
+    /// The source uses it for phase: `i % 4 == 0` picks every fourth tile, a
+    /// delay ramp spreads a burst over several frames. It draws nothing, so it
+    /// costs the stream nothing to read.
+    Index,
+    /// How many particles this burst emits — the resolved count, so a recipe
+    /// can normalise the index into `0..1` without knowing the quality scale.
+    Count,
 }
 
 /// One instruction.
@@ -60,8 +69,6 @@ pub enum Input {
 /// that is the property the whole format exists to keep honest.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
-    /// A literal. Writes 1.
-    Const(f64),
     /// A value from the call site. Writes 1.
     Read(Input),
     /// `rng.range(lo, hi)`. Writes 1. **Draws once.**
@@ -80,6 +87,21 @@ pub enum Op {
     Mul(u16, u16),
     /// `a * k`. Writes 1.
     Scale(u16, f64),
+    /// `a + b`. Writes 1.
+    Add(u16, u16),
+    /// `a + k`. Writes 1.
+    Offset(u16, f64),
+    /// `a * k1 + k2`, the shape `px + n.x * off` takes everywhere in this
+    /// corpus. One instruction rather than a `Scale` and an `Add` because the
+    /// pair is the single most common thing a burst does, and three registers
+    /// per axis adds up fast in a format read by eye.
+    Mad(u16, f64, u16),
+    /// `a % k`. Writes 1.
+    ///
+    /// Exact on the integers it is used with, which is what lets `i % 4 == 0`
+    /// be a [`Op::SelectLt`] against `0.5` rather than an equality operator
+    /// this format would otherwise need.
+    Mod(u16, f64),
     /// Pick `low` or `high` on `probe < threshold`. Writes 1.
     ///
     /// The comparison is an instruction rather than a branch in the interpreter
@@ -119,21 +141,30 @@ pub enum Field {
     Vz,
     Size0,
     Size1,
+    SizeCurve,
     Life,
+    Delay,
     Drag,
     Gravity,
     Rot,
     Spin,
+    Stretch,
     R0,
     G0,
     B0,
+    I0,
     R1,
     G1,
     B1,
+    I1,
     Tile,
-    AlphaCurve,
     Soft,
+    Alpha,
+    AlphaCurve,
+    Turb,
+    TurbFreq,
     Seed,
+    Flags,
 }
 
 /// How many particles a burst emits.
@@ -147,17 +178,41 @@ pub struct Count {
     pub plus: i32,
 }
 
+/// Where a field's value comes from: a register the program computed, or a
+/// literal.
+///
+/// The literal arm is what keeps this format from being twice the size of the
+/// code it replaces. Most of what a burst writes is not computed at all — drag,
+/// gravity, the two ends of a colour ramp, an alpha curve. Making each of those
+/// an instruction that pushes a constant onto a register file was pure
+/// ceremony: it doubled the instruction count, it made the register numbering
+/// harder to follow by eye, and it bought nothing, because a constant has no
+/// dependencies and no draw.
+///
+/// So the field list is a **table** — field, value — and the program computes
+/// only the values that genuinely derive from a draw, the site, or the index.
+/// That is the split the earlier table-only analysis of this file missed: these
+/// bursts are neither pure tables nor pure programs, they are a table of
+/// constants with a small program feeding some of its cells.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Src {
+    /// A register the program wrote.
+    Reg(u16),
+    /// A literal, written straight through.
+    Imm(f64),
+}
+
 /// A burst: a count, a program, and where its values go.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Burst {
     pub count: Count,
-    /// Evaluated once per particle, in order.
+    /// Evaluated once per particle, in order. Only what a constant cannot say.
     pub ops: &'static [Op],
     pub pool: Pool,
-    /// `(field, register)`. Order is irrelevant — every draw has already
-    /// happened by the time these are read — but two fields may name the same
-    /// register, which is how `s.size1 = s.size0` is expressed.
-    pub fields: &'static [(Field, u16)],
+    /// `(field, value)`. Order is irrelevant — every draw has already happened
+    /// by the time these are read — but two fields may name the same register,
+    /// which is how `s.size1 = s.size0` is expressed.
+    pub fields: &'static [(Field, Src)],
 }
 
 /// Where the call site's values enter the program.
@@ -169,8 +224,16 @@ pub struct Site {
     pub energy: f64,
 }
 
+/// The per-particle values [`Input`] can reach that are not part of the site:
+/// where in the burst this particle is, and how long the burst is.
+#[derive(Debug, Clone, Copy)]
+struct Position {
+    index: f64,
+    count: f64,
+}
+
 impl Site {
-    fn read(&self, input: Input, reflected: (f64, f64, f64)) -> f64 {
+    fn read(&self, input: Input, reflected: (f64, f64, f64), at: Position) -> f64 {
         match input {
             Input::PointX => self.point.0,
             Input::PointY => self.point.1,
@@ -182,6 +245,8 @@ impl Site {
             Input::ReflectY => reflected.1,
             Input::ReflectZ => reflected.2,
             Input::Energy => self.energy,
+            Input::Index => at.index,
+            Input::Count => at.count,
         }
     }
 }
@@ -201,10 +266,11 @@ impl Op {
     /// The registers this instruction reads. At most three.
     pub fn operands(self) -> Vec<u16> {
         match self {
-            Op::Const(_) | Op::Read(_) | Op::Range(..) | Op::Unit | Op::Signed => Vec::new(),
+            Op::Read(_) | Op::Range(..) | Op::Unit | Op::Signed => Vec::new(),
             Op::Cone { dir, .. } => dir.to_vec(),
-            Op::Mul(a, b) => vec![a, b],
-            Op::Scale(a, _) => vec![a],
+            Op::Mul(a, b) | Op::Add(a, b) => vec![a, b],
+            Op::Mad(a, _, b) => vec![a, b],
+            Op::Scale(a, _) | Op::Offset(a, _) | Op::Mod(a, _) => vec![a],
             Op::SelectLt { probe, .. } => vec![probe],
         }
     }
@@ -233,7 +299,10 @@ impl Burst {
             })
             .all(|ok| ok);
         let total = self.register_count();
-        let fields_ok = self.fields.iter().all(|(_, r)| usize::from(*r) < total);
+        let fields_ok = self.fields.iter().all(|(_, src)| match src {
+            Src::Reg(r) => usize::from(*r) < total,
+            Src::Imm(_) => true,
+        });
         ops_ok & fields_ok
     }
 }
@@ -261,12 +330,15 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
     // not a place to hand the allocator work.
     let mut regs: Vec<f64> = Vec::with_capacity(burst.register_count());
 
-    for _ in 0..count {
+    (0..count).for_each(|index| {
+        let at = Position {
+            index: f64::from(index),
+            count: f64::from(count),
+        };
         regs.clear();
         for op in burst.ops {
             match *op {
-                Op::Const(v) => regs.push(v),
-                Op::Read(input) => regs.push(site.read(input, reflected)),
+                Op::Read(input) => regs.push(site.read(input, reflected, at)),
                 Op::Range(lo, hi) => {
                     let v = fx.rng.range(lo, hi);
                     regs.push(v);
@@ -292,6 +364,10 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
                 }
                 Op::Mul(a, b) => regs.push(regs[a as usize] * regs[b as usize]),
                 Op::Scale(a, k) => regs.push(regs[a as usize] * k),
+                Op::Add(a, b) => regs.push(regs[a as usize] + regs[b as usize]),
+                Op::Offset(a, k) => regs.push(regs[a as usize] + k),
+                Op::Mad(a, k, b) => regs.push(regs[a as usize] * k + regs[b as usize]),
+                Op::Mod(a, k) => regs.push(regs[a as usize] % k),
                 Op::SelectLt {
                     probe,
                     threshold,
@@ -305,14 +381,30 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
         }
 
         let mut s = crate::fx::particles::reset_spawn();
-        for (field, reg) in burst.fields {
-            write(&mut s, *field, regs[*reg as usize]);
+        for (field, src) in burst.fields {
+            let v = match src {
+                Src::Reg(r) => regs[*r as usize],
+                Src::Imm(k) => *k,
+            };
+            write(&mut s, *field, v);
         }
         match burst.pool {
             Pool::Additive => fx.emit_add(&s),
             Pool::Lit => fx.emit_lit(&s),
         };
-    }
+    });
+}
+
+/// Run a sequence of bursts, in order.
+///
+/// Almost every recipe in this corpus is more than one burst — wood throws
+/// splinters and then a resinous puff, concrete has five. They are a sequence
+/// rather than one burst with a longer program because each has its own count,
+/// its own pool and its own fields, and because the source runs them as
+/// separate loops: the second burst's draws all come after the first burst's,
+/// and the array order is what keeps that true.
+pub fn run_all(fx: &mut FxSystem, bursts: &[Burst], site: Site) {
+    bursts.iter().for_each(|burst| run(fx, burst, site));
 }
 
 fn write(s: &mut ParticleSpawn, field: Field, v: f64) {
@@ -325,20 +417,29 @@ fn write(s: &mut ParticleSpawn, field: Field, v: f64) {
         Field::Vz => s.vz = v,
         Field::Size0 => s.size0 = v,
         Field::Size1 => s.size1 = v,
+        Field::SizeCurve => s.size_curve = v,
         Field::Life => s.life = v,
+        Field::Delay => s.delay = v,
         Field::Drag => s.drag = v,
         Field::Gravity => s.gravity = v,
         Field::Rot => s.rot = v,
         Field::Spin => s.spin = v,
+        Field::Stretch => s.stretch = v,
         Field::R0 => s.r0 = v,
         Field::G0 => s.g0 = v,
         Field::B0 => s.b0 = v,
+        Field::I0 => s.i0 = v,
         Field::R1 => s.r1 = v,
         Field::G1 => s.g1 = v,
         Field::B1 => s.b1 = v,
+        Field::I1 => s.i1 = v,
         Field::Tile => s.tile = v,
-        Field::AlphaCurve => s.alpha_curve = v,
         Field::Soft => s.soft = v,
+        Field::Alpha => s.alpha = v,
+        Field::AlphaCurve => s.alpha_curve = v,
+        Field::Turb => s.turb = v,
+        Field::TurbFreq => s.turb_freq = v,
         Field::Seed => s.seed = v,
+        Field::Flags => s.flags = v,
     }
 }

@@ -811,76 +811,16 @@ fn metal(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 
 /// Wood: splinters and a brown, resinous puff. `impacts.js:546-594`.
 fn wood(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64), e: f64) {
-    let q = fx.pscale;
-    let (vx, vy, vz) = reflect(inc.0, inc.1, inc.2, n.0, n.1, n.2);
-    let (rx, ry, rz) = ((vx + n.0) * 0.5, (vy + n.1) * 0.5, (vz + n.2) * 0.5);
-    let (px, py, pz) = point;
-
-    let n_spl = (11.0 * q).round() as i32 + 4;
-    for i in 0..n_spl {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, rx, ry, rz, 0.9, 1.3);
-        let sp = fx.rng.range(2.5, 7.5);
-        let mut s = reset_spawn();
-        s.x = px + n.0 * 0.01;
-        s.y = py + n.1 * 0.01;
-        s.z = pz + n.2 * 0.01;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp;
-        s.vz = vz2 * sp;
-        s.tile = (if i % 4 == 0 { p::CHIP } else { p::SPLINTER }) as f64;
-        s.size0 = fx.rng.range(0.014, 0.045);
-        s.size1 = s.size0;
-        s.life = fx.rng.range(0.6, 1.2);
-        s.drag = 0.8;
-        s.gravity = -18.0;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 26.0;
-        s.r0 = 0.44;
-        s.g0 = 0.3;
-        s.b0 = 0.16;
-        s.r1 = 0.36;
-        s.g1 = 0.24;
-        s.b1 = 0.13;
-        s.alpha_curve = 0.25;
-        s.soft = 0.06;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
-    let n_dust = (5.0 * q).round() as i32 + 2;
-    for _ in 0..n_dust {
-        let (vx2, vy2, vz2) = cone(&mut fx.rng, rx, ry, rz, 1.1, 0.7);
-        let sp = fx.rng.range(0.6, 2.0);
-        let mut s = reset_spawn();
-        let off = fx.rng.range(0.05, 0.12);
-        s.x = px + n.0 * off;
-        s.y = py + n.1 * off;
-        s.z = pz + n.2 * off;
-        s.vx = vx2 * sp;
-        s.vy = vy2 * sp + 0.35;
-        s.vz = vz2 * sp;
-        s.tile = p::DUST as f64;
-        s.size0 = fx.rng.range(0.04, 0.09) * e;
-        s.size1 = fx.rng.range(0.24, 0.44) * e;
-        s.size_curve = 0.45;
-        s.life = fx.rng.range(0.45, 0.9);
-        s.drag = 3.4;
-        s.gravity = -0.9;
-        s.rot = fx.rng.float() * TWO_PI;
-        s.spin = fx.rng.signed() * 1.4;
-        s.r0 = 0.46;
-        s.g0 = 0.34;
-        s.b0 = 0.2;
-        s.r1 = 0.38;
-        s.g1 = 0.28;
-        s.b1 = 0.17;
-        s.alpha = fx.rng.range(0.5, 0.8);
-        s.alpha_curve = 1.5;
-        s.soft = 0.09;
-        s.turb = 0.05;
-        s.turb_freq = 2.2;
-        s.seed = fx.rng.float();
-        fx.emit_lit(&s);
-    }
+    crate::fx::burst::run_all(
+        fx,
+        &crate::fx::recipes::WOOD,
+        crate::fx::burst::Site {
+            point,
+            normal: n,
+            incident: inc,
+            energy: e,
+        },
+    );
     bullet_hole(
         fx,
         point,
