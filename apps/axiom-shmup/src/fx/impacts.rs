@@ -1233,7 +1233,7 @@ fn flesh(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f6
 /// random-stream state alike — before the swap, and the test that proves it is
 /// still in this file's `tests` module.
 fn foliage(fx: &mut FxSystem, point: (f64, f64, f64), n: (f64, f64, f64), inc: (f64, f64, f64)) {
-    crate::fx::burst::run(
+    crate::fx::burst::run_all(
         fx,
         &crate::fx::recipes::FOLIAGE,
         crate::fx::burst::Site {
@@ -1404,7 +1404,7 @@ mod tests {
         foliage_hand_written(&mut hand, point, n, inc);
 
         let mut data = FxSystem::test_instance(0x5eed);
-        crate::fx::burst::run(
+        crate::fx::burst::run_all(
             &mut data,
             &crate::fx::recipes::FOLIAGE,
             crate::fx::burst::Site {

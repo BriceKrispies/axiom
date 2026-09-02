@@ -50,6 +50,10 @@ pub enum Input {
     ReflectX,
     ReflectY,
     ReflectZ,
+    /// The incident direction — the way the bullet was travelling.
+    IncidentX,
+    IncidentY,
+    IncidentZ,
     Energy,
     /// The index of the particle being emitted, `0..count`.
     ///
@@ -207,12 +211,218 @@ pub enum Src {
 pub struct Burst {
     pub count: Count,
     /// Evaluated once per particle, in order. Only what a constant cannot say.
-    pub ops: &'static [Op],
+    pub ops: Vec<Op>,
     pub pool: Pool,
     /// `(field, value)`. Order is irrelevant — every draw has already happened
     /// by the time these are read — but two fields may name the same register,
     /// which is how `s.size1 = s.size0` is expressed.
-    pub fields: &'static [(Field, Src)],
+    pub fields: Vec<(Field, Src)>,
+}
+
+/// A register the program has written. An opaque handle, not a number.
+///
+/// The number is what the first draft of this format made the author count, and
+/// counting is exactly what an author is bad at: [`Op::Cone`] writes three
+/// registers, so an instruction index and a register index diverge after the
+/// first cone in a program, and a burst that names the wrong one still runs and
+/// still emits plausible particles. Only the frozen ledger notices, and it
+/// notices by moving a digest — which says *something* is wrong, not what.
+///
+/// A handle you receive from the instruction that wrote it cannot be
+/// miscounted. That is the entire argument for [`Program`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reg(u16);
+
+impl Reg {
+    /// This register as a field value.
+    pub const fn src(self) -> Src {
+        Src::Reg(self.0)
+    }
+}
+
+/// Three registers holding a vector, so a burst can say `cone` once instead of
+/// three times and keep the components in the order they were written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3(pub Reg, pub Reg, pub Reg);
+
+/// Builds a burst's program, handing back a [`Reg`] for every value it writes.
+///
+/// The output is still data — a [`Burst`] is a plain value with no code in it,
+/// and the endpoint of this work is a parser that produces the same value from
+/// an asset file. This is the authoring surface, and it is the same one the
+/// engine's own recipe graphs use: `RecipeGraph::add` likewise returns a handle
+/// to the node it appended rather than asking the caller to know its index.
+///
+/// Instruction order is draw order, so **the order you call these is the order
+/// the burst draws** — that is the property the whole format exists to keep, and
+/// a builder does not weaken it.
+#[derive(Debug, Default)]
+pub struct Program {
+    ops: Vec<Op>,
+    written: u16,
+}
+
+impl Program {
+    /// An empty program.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&mut self, op: Op) -> Reg {
+        let first = self.written;
+        self.written += op.writes() as u16;
+        self.ops.push(op);
+        Reg(first)
+    }
+
+    /// A value from the call site.
+    pub fn read(&mut self, input: Input) -> Reg {
+        self.push(Op::Read(input))
+    }
+
+    /// The impact point.
+    pub fn point(&mut self) -> V3 {
+        self.read3(Input::PointX, Input::PointY, Input::PointZ)
+    }
+
+    /// The surface normal.
+    pub fn normal(&mut self) -> V3 {
+        self.read3(Input::NormalX, Input::NormalY, Input::NormalZ)
+    }
+
+    /// The incident direction, reflected about the normal.
+    pub fn reflected(&mut self) -> V3 {
+        self.read3(Input::ReflectX, Input::ReflectY, Input::ReflectZ)
+    }
+
+    /// The incident direction itself.
+    pub fn incident(&mut self) -> V3 {
+        self.read3(Input::IncidentX, Input::IncidentY, Input::IncidentZ)
+    }
+
+    fn read3(&mut self, x: Input, y: Input, z: Input) -> V3 {
+        V3(self.read(x), self.read(y), self.read(z))
+    }
+
+    /// `rng.range(lo, hi)`. **Draws once.**
+    pub fn range(&mut self, lo: f64, hi: f64) -> Reg {
+        self.push(Op::Range(lo, hi))
+    }
+
+    /// `rng.float()`. **Draws once.**
+    pub fn unit(&mut self) -> Reg {
+        self.push(Op::Unit)
+    }
+
+    /// `rng.signed()`. **Draws once.**
+    pub fn signed(&mut self) -> Reg {
+        self.push(Op::Signed)
+    }
+
+    /// A direction in a cone about `dir`. **Draws twice.**
+    pub fn cone(&mut self, dir: V3, spread: f64, power: f64) -> V3 {
+        let first = self.push(Op::Cone {
+            dir: [dir.0 .0, dir.1 .0, dir.2 .0],
+            spread,
+            power,
+        });
+        V3(first, Reg(first.0 + 1), Reg(first.0 + 2))
+    }
+
+    /// `a * b`.
+    pub fn mul(&mut self, a: Reg, b: Reg) -> Reg {
+        self.push(Op::Mul(a.0, b.0))
+    }
+
+    /// `a * k`.
+    pub fn scale(&mut self, a: Reg, k: f64) -> Reg {
+        self.push(Op::Scale(a.0, k))
+    }
+
+    /// `a + b`.
+    pub fn add(&mut self, a: Reg, b: Reg) -> Reg {
+        self.push(Op::Add(a.0, b.0))
+    }
+
+    /// `a + k`.
+    pub fn offset(&mut self, a: Reg, k: f64) -> Reg {
+        self.push(Op::Offset(a.0, k))
+    }
+
+    /// `a * k + b`.
+    pub fn mad(&mut self, a: Reg, k: f64, b: Reg) -> Reg {
+        self.push(Op::Mad(a.0, k, b.0))
+    }
+
+    /// `a % k`.
+    pub fn modulo(&mut self, a: Reg, k: f64) -> Reg {
+        self.push(Op::Mod(a.0, k))
+    }
+
+    /// `probe < threshold ? low : high`.
+    pub fn select_lt(&mut self, probe: Reg, threshold: f64, low: f64, high: f64) -> Reg {
+        self.push(Op::SelectLt {
+            probe: probe.0,
+            threshold,
+            low,
+            high,
+        })
+    }
+
+    /// `v * s`, componentwise against one scalar.
+    pub fn mul3(&mut self, v: V3, s: Reg) -> V3 {
+        V3(self.mul(v.0, s), self.mul(v.1, s), self.mul(v.2, s))
+    }
+
+    /// `v * k`.
+    pub fn scale3(&mut self, v: V3, k: f64) -> V3 {
+        V3(
+            self.scale(v.0, k),
+            self.scale(v.1, k),
+            self.scale(v.2, k),
+        )
+    }
+
+    /// `a + b`.
+    pub fn add3(&mut self, a: V3, b: V3) -> V3 {
+        V3(self.add(a.0, b.0), self.add(a.1, b.1), self.add(a.2, b.2))
+    }
+
+    /// `a * k + b`, the shape a position offset along a normal takes.
+    pub fn mad3(&mut self, a: V3, k: f64, b: V3) -> V3 {
+        V3(
+            self.mad(a.0, k, b.0),
+            self.mad(a.1, k, b.1),
+            self.mad(a.2, k, b.2),
+        )
+    }
+
+    /// Close the program into a burst.
+    ///
+    /// `count` is `round(factor * pscale) + plus`, which is what decides how
+    /// many times the burst draws and therefore what every later effect in the
+    /// frame sees.
+    pub fn emit(
+        self,
+        count: (f64, i32),
+        pool: Pool,
+        fields: Vec<(Field, Src)>,
+    ) -> Burst {
+        Burst {
+            count: Count {
+                factor: count.0,
+                plus: count.1,
+            },
+            ops: self.ops,
+            pool,
+            fields,
+        }
+    }
+}
+
+/// A literal field value, so a recipe's constant table reads as a table.
+pub const fn imm(v: f64) -> Src {
+    Src::Imm(v)
 }
 
 /// Where the call site's values enter the program.
@@ -244,6 +454,9 @@ impl Site {
             Input::ReflectX => reflected.0,
             Input::ReflectY => reflected.1,
             Input::ReflectZ => reflected.2,
+            Input::IncidentX => self.incident.0,
+            Input::IncidentY => self.incident.1,
+            Input::IncidentZ => self.incident.2,
             Input::Energy => self.energy,
             Input::Index => at.index,
             Input::Count => at.count,
@@ -336,7 +549,7 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
             count: f64::from(count),
         };
         regs.clear();
-        for op in burst.ops {
+        for op in &burst.ops {
             match *op {
                 Op::Read(input) => regs.push(site.read(input, reflected, at)),
                 Op::Range(lo, hi) => {
@@ -381,7 +594,7 @@ pub fn run(fx: &mut FxSystem, burst: &Burst, site: Site) {
         }
 
         let mut s = crate::fx::particles::reset_spawn();
-        for (field, src) in burst.fields {
+        for (field, src) in &burst.fields {
             let v = match src {
                 Src::Reg(r) => regs[*r as usize],
                 Src::Imm(k) => *k,
