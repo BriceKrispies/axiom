@@ -28,16 +28,25 @@ impl ProcCore {
     /// `(seed, child(base, node), version)`. An `eval` returning `None`
     /// (unknown operator, wrong input count) is `OpFailed`; an empty recipe is
     /// `EmptyRecipe`.
+    ///
+    /// `eval` is `FnMut`, not `Fn`, so an evaluator may own mutable state — a
+    /// scene evaluator binds a recipe to a live app and must mutate it as it
+    /// goes. Every `Fn` is an `FnMut`, so this is strictly wider than the
+    /// alternative and no caller changed. The alternative was a `RefCell`
+    /// around the evaluator's state inside a `Fn` closure, which buys a runtime
+    /// borrow-panic path that nothing can provoke from a test — an
+    /// untestable branch, which the Coverage Law reads as a design signal
+    /// rather than as something to write a contrived test for.
     pub fn execute<Out, F>(
         &self,
         recipe: &RecipeGraph,
         seed: u64,
         base: &Address,
-        eval: F,
+        mut eval: F,
     ) -> ProcResult<Out>
     where
         Out: Clone,
-        F: Fn(NodeEval<'_, Out>) -> Option<Out>,
+        F: FnMut(NodeEval<'_, Out>) -> Option<Out>,
     {
         recipe
             .validate()
@@ -139,6 +148,25 @@ mod tests {
             ProcCore::new().execute(&g, 0, &SpaceApi::root(), eval),
             Err(ProcError::OpFailed)
         );
+    }
+
+    /// The whole point of `FnMut`: an evaluator that owns mutable state and
+    /// mutates it as the graph is walked. A scene evaluator does exactly this —
+    /// it binds each node into a live app — and under `Fn` it could not.
+    ///
+    /// This also pins the *order*: nodes are evaluated in id order, so the
+    /// recorded ops come out in the order the recipe declares them.
+    #[test]
+    fn a_stateful_evaluator_may_mutate_as_the_graph_is_walked() {
+        let mut visited: Vec<u16> = Vec::new();
+        let out = ProcCore::new()
+            .execute(&adder(), 7, &SpaceApi::root(), |ctx| {
+                visited.push(ctx.op());
+                eval(ctx)
+            })
+            .unwrap();
+        assert_eq!(out, 8);
+        assert_eq!(visited, vec![0, 0, 1]);
     }
 
     fn defaulted<T: Default>() -> T {
