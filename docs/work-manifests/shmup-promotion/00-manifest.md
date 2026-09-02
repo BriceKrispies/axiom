@@ -404,3 +404,79 @@ Two implementations of one primitive, one correct, and the wrong one was the one
 first promoted into the engine. Its goldens never moved, because the pathological
 input never arose in them. When consolidating a duplicated primitive, diff the
 implementations against each other, not only against the goldens.
+
+## The datafication turn
+
+The promotion program above is line-by-line lifting. It has a ceiling: executed
+perfectly it leaves the app at ~93,000 lines, because it classifies content as
+"stays in the app". A five-agent audit of the app, run with `ax shape`, says the
+ceiling is wrong — most of that content is **data written in Rust**, and the app
+has no vocabulary to say it any other way.
+
+Measured, tests excluded: **77,070 code lines**, 0.56 literals/line overall,
+0.062 branches/line. `world/props` runs at 1.53 literals per line.
+
+### What five independent audits converged on
+
+Five subsystems, five agents, three mesh gaps named by all of them. **All three
+are landed** (`c3fd78f5`):
+
+| gap | call sites found | landed as |
+|---|---|---|
+| Merge N meshes | 222 (weapons) + 222 (world) + 35 (ai) | `MeshOp::Merge` |
+| TRS with **rotation** | 118 + 97 + 18 | `MeshOp::Trs` |
+| a vertex colour stream | world/kit called it *blocking* | `MeshBuffer::colors` |
+
+`MeshOp::Transform` had no rotation at all, and `MeshBuffer` had no channel for
+the wear/grime/AO triple every kit builder writes. The subtle half of the colour
+work: `from_parts` yields an uncoloured mesh, so every existing operator would
+have dropped an authored stream silently — the same defect `01-engine-gaps.md`
+records as G4 for authored normals. Vertex-preserving ops now rebuild through
+`MeshBuffer::respecified`.
+
+On the field side, named independently by fx, ai and world/kit: **`Floor`,
+`Fract`, `Mod`** are absent from `FieldOp`'s 27, and `Noise`/`Fbm` have **no
+period parameter**, so nothing in a periodic texture library can tile. Not yet
+landed.
+
+### One premise that was wrong
+
+`materials/surfaces/` looks like the best target on every metric — 1,799 lines at
+1.66 literals/line, 0.012 branches/line. It is **infeasible**: `axiom-recipe`'s
+budget is 256 nodes and the inlined generator graphs are 2.1k–43.4k, and the
+algebra deliberately has no loops, no division and no `floor`/`fract`/`mod`.
+Those 19 generators belong in hand-written WGSL, which is the route already
+being taken. The real targets are `materials/mod.rs::LIBRARY` (957 lines, vocab
+of 7, reuse 26.7 — a table wearing Rust) and the `fx` spawn recipes, which need
+**no new ops at all**.
+
+### The spawn-recipe schema, derived and ready to execute
+
+`fx/tracers.rs` is converted and pinned by a characterization test carrying all
+96 raw buffer values (`dbc6f7f1`). It proves the pattern and, honestly, saves no
+lines: N=3, and the Datafication Law's saving is `(N-1) x per-variant-code`.
+
+`impacts.rs` is where it pays — eleven surface recipes (concrete, plaster,
+metal, wood, ground, glass, water, flesh, foliage, soft) of the same shape. Each
+is a set of **bursts**: `for _ in 0..count { ...fields...; emit }` where every
+field is either a constant or an `rng.range(lo, hi)` draw.
+
+So a burst is a table row of `Range { lo, hi }` (a constant being `lo == hi`),
+plus a count and an emit kind.
+
+**The one hard constraint, and the reason this is delicate.** The RNG draw
+*order* is load-bearing — the stream is shared with every other fx subsystem, so
+a reordered draw shifts every later effect in the frame, silently and
+invisibly. The orders differ per burst: `wood`'s splinter loop draws
+`cone, speed, size0, life, rot, spin, seed`, and its dust loop draws
+`cone, speed, off, size0, size1, life, rot, spin, seed` — the same sequence with
+`off` and `size1` inserted.
+
+They reconcile: declare **one canonical draw order** with skippable slots, where
+a `None` field consumes no draw. Both `wood` bursts satisfy it. Every burst must
+be checked against that order individually, and each conversion pinned by a
+characterization test capturing the raw buffer before the change — the method
+`fx/tracers.rs` demonstrates.
+
+Do not convert a burst without that test. A wrong draw order produces a frame
+that still looks plausible.
