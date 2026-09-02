@@ -273,6 +273,7 @@ fn lib_exports_exactly_math_api() {
         "pub use dvec3::DVec3;",
         "pub use daabb::DAabb;",
         "pub use dclosest_pair::DClosestPair;",
+        "pub use dquat::DQuat;",
         "pub use dsegment::DSegment;",
         "pub use dtriangle::{DTriangle, DTriangleHit};",
         "pub use hypot::{hypot, hypot2, hypot3, hypot4};",
