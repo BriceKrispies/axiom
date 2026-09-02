@@ -147,7 +147,11 @@ pub fn mirror_x(mesh: &Mesh) -> Mesh {
 /// so the port diffs against the source line for line.
 #[allow(clippy::too_many_arguments)]
 pub fn place(mesh: &mut Mesh, x: f64, y: f64, z: f64, rx: f64, ry: f64, rz: f64, sx: f64, sy: f64, sz: f64) {
-    let m = M4::compose([x, y, z], quat_from_euler_yxz(rx, ry, rz), [sx, sy, sz]);
+    let m = M4::compose(
+        V3::new(x, y, z),
+        quat_from_euler_yxz(rx, ry, rz),
+        V3::new(sx, sy, sz),
+    );
     compute_normals(mesh);
     transform_mesh(mesh, &m);
 }

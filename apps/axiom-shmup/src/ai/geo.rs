@@ -54,7 +54,7 @@ use crate::jsmath;
 /// warps are expressed in, re-exported so a caller that builds a `Ring` or a
 /// [`warp`] closure needs one `use` and not two. They are not defined here —
 /// [`crate::weapons::rig_math`] owns them, transcribed from three@0.180.
-pub use crate::weapons::rig_math::{Q, V3};
+pub use crate::weapons::rig_math::{M4, Q, V3};
 
 /* ------------------------------------------------------------------ */
 /* Deterministic gradient noise                                        */
@@ -827,110 +827,6 @@ pub fn warp_from(m: &mut Mesh, f: impl Fn(&mut V3, usize), from: usize) {
         m.p[i * 3] = v.x;
         m.p[i * 3 + 1] = v.y;
         m.p[i * 3 + 2] = v.z;
-    }
-}
-
-/// `THREE.Matrix4`, `f64`, in THREE's own **column-major** `elements` order
-/// (`te[0..3]` is the first column). Only the three operations `geo.js` and
-/// its callers reach for are here: [`M4::compose`] (how `parts.js`'s `place`
-/// builds one), [`M4::transform_point`] (`Vector3.applyMatrix4`) and
-/// [`M4::normal_matrix`] (`Matrix3.getNormalMatrix`).
-///
-/// This is *not* `axiom_math::Mat4` and not the cofactor shortcut
-/// `weapons::geometry::geo`/`world::geo` use for the same job: those are `f32`
-/// and algebraically-equivalent-but-differently-grouped. The character
-/// pipeline is `f64`, and float arithmetic is not associative, so the
-/// three@0.180 `Matrix3.invert()` + `transpose()` sequence is transcribed
-/// literally below rather than folded into a cofactor matrix.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct M4 {
-    /// Column-major, exactly `Matrix4.elements`.
-    pub e: [f64; 16],
-}
-
-impl M4 {
-    /// `Matrix4.compose(position, quaternion, scale)`
-    /// (`three/src/math/Matrix4.js`).
-    pub fn compose(position: [f64; 3], q: Q, scale: [f64; 3]) -> M4 {
-        let (x, y, z, w) = (q.x, q.y, q.z, q.w);
-        let (x2, y2, z2) = (x + x, y + y, z + z);
-        let (xx, xy, xz) = (x * x2, x * y2, x * z2);
-        let (yy, yz, zz) = (y * y2, y * z2, z * z2);
-        let (wx, wy, wz) = (w * x2, w * y2, w * z2);
-        let (sx, sy, sz) = (scale[0], scale[1], scale[2]);
-        M4 {
-            e: [
-                (1.0 - (yy + zz)) * sx,
-                (xy + wz) * sx,
-                (xz - wy) * sx,
-                0.0,
-                (xy - wz) * sy,
-                (1.0 - (xx + zz)) * sy,
-                (yz + wx) * sy,
-                0.0,
-                (xz + wy) * sz,
-                (yz - wx) * sz,
-                (1.0 - (xx + yy)) * sz,
-                0.0,
-                position[0],
-                position[1],
-                position[2],
-                1.0,
-            ],
-        }
-    }
-
-    /// `Vector3.applyMatrix4(m)` — including the perspective divide by
-    /// `w = 1 / (e3*x + e7*y + e11*z + e15)`, which the source does
-    /// unconditionally even for an affine matrix (where `w == 1`).
-    pub fn transform_point(&self, v: V3) -> V3 {
-        let e = &self.e;
-        let (x, y, z) = (v.x, v.y, v.z);
-        let w = 1.0 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
-        V3::new(
-            (e[0] * x + e[4] * y + e[8] * z + e[12]) * w,
-            (e[1] * x + e[5] * y + e[9] * z + e[13]) * w,
-            (e[2] * x + e[6] * y + e[10] * z + e[14]) * w,
-        )
-    }
-
-    /// `Matrix3.getNormalMatrix(m4)` = `setFromMatrix4(m4).invert().transpose()`,
-    /// transcribed step for step. Returns the `Matrix3` in THREE's
-    /// column-major `elements` order.
-    ///
-    /// `Matrix3.invert()` on a singular matrix sets **all nine entries to
-    /// zero** (it does not throw, and does not produce `Infinity`); that arm
-    /// is kept.
-    pub fn normal_matrix(&self) -> [f64; 9] {
-        let me = &self.e;
-        // `setFromMatrix4`: set(me[0], me[4], me[8], me[1], me[5], me[9],
-        // me[2], me[6], me[10]) — `set` takes row-major arguments and stores
-        // column-major, so te = [n11, n21, n31, n12, n22, n32, n13, n23, n33].
-        let te = [me[0], me[1], me[2], me[4], me[5], me[6], me[8], me[9], me[10]];
-        let (n11, n21, n31) = (te[0], te[1], te[2]);
-        let (n12, n22, n32) = (te[3], te[4], te[5]);
-        let (n13, n23, n33) = (te[6], te[7], te[8]);
-        let t11 = n33 * n22 - n32 * n23;
-        let t12 = n32 * n13 - n33 * n12;
-        let t13 = n23 * n12 - n22 * n13;
-        let det = n11 * t11 + n21 * t12 + n31 * t13;
-        if det == 0.0 {
-            return [0.0; 9];
-        }
-        let det_inv = 1.0 / det;
-        let inv = [
-            t11 * det_inv,
-            (n31 * n23 - n33 * n21) * det_inv,
-            (n32 * n21 - n31 * n22) * det_inv,
-            t12 * det_inv,
-            (n33 * n11 - n31 * n13) * det_inv,
-            (n31 * n12 - n32 * n11) * det_inv,
-            t13 * det_inv,
-            (n21 * n13 - n23 * n11) * det_inv,
-            (n22 * n11 - n21 * n12) * det_inv,
-        ];
-        // `Matrix3.transpose()`: swap te[1]<->te[3], te[2]<->te[6], te[5]<->te[7].
-        [inv[0], inv[3], inv[6], inv[1], inv[4], inv[7], inv[2], inv[5], inv[8]]
     }
 }
 
