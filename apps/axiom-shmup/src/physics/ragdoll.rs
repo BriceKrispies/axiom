@@ -104,57 +104,12 @@ thread_local! {
     static NEXT_RAGDOLL_ID: Cell<i32> = const { Cell::new(1) };
 }
 
-/* ------------------------------------------------------------------ */
-/* V8 `Math.hypot`                                                     */
-/* ------------------------------------------------------------------ */
-
-/// `Math.hypot(x, y, z)` as V8 implements it — the `MathHypot` Torque builtin
-/// (`v8/src/builtins/math.tq`), transcribed line for line.
+/// V8's `Math.hypot`, scaled and Kahan-compensated.
 ///
-/// Not `(x*x + y*y + z*z).sqrt()`: every argument is normalised by the largest
-/// magnitude first and the squares are summed with Kahan compensation, which
-/// changes the result on roughly 41% of random triples. The scaling is what
-/// makes it overflow/underflow-safe; the compensation is what makes it
-/// disagree with the naive form.
-///
-/// The capture script contains the same routine in JavaScript and asserts it
-/// against the engine's own `Math.hypot` over 500,000 triples before writing
-/// the golden, so this is a checked transcription rather than a remembered
-/// one.
-pub fn hypot3(x: f64, y: f64, z: f64) -> f64 {
-    // `absValues` in the builtin. NaN arguments leave a 0 in the slot and set
-    // a flag there; here a NaN simply fails the `> max` test and then
-    // poisons `sum`, which reaches the same NaN result.
-    let abs = [x.abs(), y.abs(), z.abs()];
-    let mut max = 0.0_f64;
-    let mut i = 0;
-    while i < 3 {
-        if abs[i] > max {
-            max = abs[i];
-        }
-        i += 1;
-    }
-    if max == f64::INFINITY {
-        return f64::INFINITY;
-    }
-    if max == 0.0 {
-        return 0.0;
-    }
-    // Kahan summation to avoid rounding errors. Normalize the numbers to the
-    // largest one to avoid overflow.
-    let mut sum = 0.0_f64;
-    let mut compensation = 0.0_f64;
-    let mut j = 0;
-    while j < 3 {
-        let n = abs[j] / max;
-        let summand = n * n - compensation;
-        let preliminary = sum + summand;
-        compensation = (preliminary - sum) - summand;
-        sum = preliminary;
-        j += 1;
-    }
-    sum.sqrt() * max
-}
+/// This file carried its own transcription of it; every other caller in the app
+/// already reaches `axiom_math::hypot3` through [`crate::jsmath`], so this was
+/// the last private copy. Same algorithm, one implementation.
+pub use axiom_math::hypot3;
 
 /// `Math.round` — rounds half towards `+Infinity`, which is **not**
 /// [`f64::round`] (half away from zero). `Math.round(-2.5)` is `-2`;
