@@ -47,6 +47,16 @@ allowed_layers = [
     # content and therefore belongs in the composition leaf. See
     # `docs/work-manifests/shmup-promotion/00-manifest.md`.
     "noise",
+    # `RecipeGraph`/`Node`/`Param` — a particle burst *is* a recipe graph
+    # (`fx::burst`), so its validation, canonical bytes and content digest come
+    # from the engine rather than from a second private format. `Param::pair`
+    # is what carries an f64 constant across two 32-bit recipe words; 70% of
+    # this port's constants are not representable in f32.
+    "recipe",
+    # `ProcCore::evaluate`/`NodeStep` — the engine's recipe executor, walked
+    # against the shared random stream this port's determinism rides on. What
+    # stays in the app is only what each operator *means* for a particle.
+    "proc-core",
     # Test-only: `RuntimeStep`, the deterministic step identity `AgentApi::step`
     # takes. `tests/player_feel.rs` drives the player through the agent
     # substrate, and one decision needs one step.

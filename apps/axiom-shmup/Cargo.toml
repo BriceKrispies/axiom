@@ -62,6 +62,34 @@ axiom-introspect = { path = "../../crates/axiom-introspect" }
 # game has to read this frame's input and write this frame's camera before the
 # engine renders. See `scene::app`'s module doc comment for the engine-side fix
 # that would remove this dependency.
+# The engine's recipe graph: `RecipeGraph`/`Node`/`Param`, and `Param::pair`,
+# the two-word carrier for an f64. A particle burst *is* a recipe graph — see
+# `fx::burst` — so the validation, the canonical bytes and the content digest
+# come from the engine rather than from a second private format.
+axiom-recipe = { path = "../../crates/axiom-recipe" }
+
+# `ProcCore::evaluate` and `NodeStep`: the engine's recipe executor, walked
+# against the shared random stream this port's determinism rides on. The app
+# supplies only what each operator *means* for a particle.
+axiom-proc-core = { path = "../../crates/axiom-proc-core" }
+
+# Deriving the burst asset schema (`fx::burst_asset`). The recipes are JSON so
+# they are content rather than source — readable, diffable and changeable
+# without a compiler.
+serde = { version = "1", features = ["derive"] }
+
+# Reads the burst recipe assets, and `tests/audio/golden.json`.
+#
+# `arbitrary_precision` is not decoration. serde_json 1.0.150 parses a decimal
+# through `zmij`, whose rounding is off by one ULP on some inputs — measured
+# here: the golden `0.20738044381141663` (an exact `f32` widened to `f64`) came
+# back as `0.20738044381141665`, one ULP high, where `str::parse::<f64>` gives
+# the correctly-rounded value. With this feature a `Number` keeps its source
+# text and `as_f64` goes through `str::parse`, so a golden compares as the exact
+# value the JavaScript printed, and a recipe constant is the exact f64 the
+# source had. Without it a burst would draw against a subtly different number.
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies.axiom-windowing]
 path = "../../modules/axiom-windowing"
 
@@ -165,19 +193,6 @@ axiom-gpu-backend = { path = "../../modules/axiom-gpu-backend", features = ["off
 # builds a real device — so a typo in a `.wgsl` file was uncatchable anywhere
 # without a GPU.
 naga = { version = "25", features = ["wgsl-in"] }
-
-# Reads `tests/audio/golden.json` — the capture of the original `src/audio/*.js`
-# running under Node. Dev-only: nothing in the shipped crate parses JSON.
-#
-# `arbitrary_precision` is not decoration. serde_json 1.0.150 parses a decimal
-# through `zmij`, whose rounding is off by one ULP on some inputs — measured
-# here: the golden `0.20738044381141663` (an exact `f32` widened to `f64`) came
-# back as `0.20738044381141665`, one ULP high, where `str::parse::<f64>` gives
-# the correctly-rounded value. With this feature a `Number` keeps its source
-# text and `as_f64` goes through `str::parse`, so a golden compares as the exact
-# value the JavaScript printed. Without it the whole-graph comparisons would
-# need a tolerance they do not deserve.
-serde_json = { version = "1", features = ["arbitrary_precision"] }
 
 # The deterministic agent substrate, and the runtime step that drives one
 # decision. Dev-only: `tests/player_feel.rs` is a review bench, not shipped

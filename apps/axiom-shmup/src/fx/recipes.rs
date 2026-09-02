@@ -36,55 +36,55 @@ use crate::fx::burst::Burst;
 /// handled at runtime and should not pretend to be: the message names the line,
 /// and `every_recipe_parses` catches it long before a player would.
 fn load(name: &str, src: &str) -> Vec<Burst> {
-    crate::fx::burst_text::parse(src).unwrap_or_else(|e| panic!("recipe `{name}`: {e}"))
+    crate::fx::burst_asset::parse(name, src).unwrap_or_else(|e| panic!("recipe `{name}`: {e}"))
 }
 
 /// Foliage: shredded leaf matter, no hole. `impacts.js:844-864`.
 pub static FOLIAGE: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("foliage", include_str!("recipes/foliage.burst")));
+    LazyLock::new(|| load("foliage", include_str!("recipes/foliage.json")));
 
 /// Wood: splinters and a brown, resinous puff. `impacts.js:546-594`.
 pub static WOOD: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("wood", include_str!("recipes/wood.burst")));
+    LazyLock::new(|| load("wood", include_str!("recipes/wood.json")));
 
 /// Flesh: a dark aerosol cone and heavy droplets. `impacts.js:793-841`.
 pub static FLESH: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("flesh", include_str!("recipes/flesh.burst")));
+    LazyLock::new(|| load("flesh", include_str!("recipes/flesh.json")));
 
 /// Wet earth: a plume and heavy clods. `impacts.js:597-659`, the dirt row.
 pub static GROUND_DIRT: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("dirt", include_str!("recipes/dirt.burst")));
+    LazyLock::new(|| load("dirt", include_str!("recipes/dirt.json")));
 
 /// Dry sand — the same burst, paler, with finer clods and more drag on them.
 pub static GROUND_SAND: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("sand", include_str!("recipes/sand.burst")));
+    LazyLock::new(|| load("sand", include_str!("recipes/sand.json")));
 
 /// Water: a column, droplets, a hanging mist. `impacts.js:727-790`.
 pub static WATER: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("water", include_str!("recipes/water.burst")));
+    LazyLock::new(|| load("water", include_str!("recipes/water.json")));
 
 /// Woven cloth — pale, dusty fibres. `impacts.js:867-916`, the fabric row.
 pub static FABRIC: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("fabric", include_str!("recipes/fabric.burst")));
+    LazyLock::new(|| load("fabric", include_str!("recipes/fabric.json")));
 
 /// Rubber — the same burst, nearly black.
 pub static RUBBER: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("rubber", include_str!("recipes/rubber.burst")));
+    LazyLock::new(|| load("rubber", include_str!("recipes/rubber.json")));
 
 /// Glass: glinting shards and a fine aerosol. `impacts.js:662-724`.
 pub static GLASS: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("glass", include_str!("recipes/glass.burst")));
+    LazyLock::new(|| load("glass", include_str!("recipes/glass.json")));
 
 /// Plaster / drywall: banded white powder, crumbs, ejecta. `impacts.js:332-410`.
 pub static PLASTER: LazyLock<Vec<Burst>> =
-    LazyLock::new(|| load("plaster", include_str!("recipes/plaster.burst")));
+    LazyLock::new(|| load("plaster", include_str!("recipes/plaster.json")));
 
 /// An explosion's fire — core flash, fireball, boiling smoke.
 /// `explosions.js:35-140`.
 pub static EXPLOSION_FIRE: LazyLock<Vec<Burst>> = LazyLock::new(|| {
     load(
         "explosion_fire",
-        include_str!("recipes/explosion_fire.burst"),
+        include_str!("recipes/explosion_fire.json"),
     )
 });
 
@@ -94,7 +94,7 @@ pub static EXPLOSION_FIRE: LazyLock<Vec<Burst>> = LazyLock::new(|| {
 pub static EXPLOSION_BLAST: LazyLock<Vec<Burst>> = LazyLock::new(|| {
     load(
         "explosion_blast",
-        include_str!("recipes/explosion_blast.burst"),
+        include_str!("recipes/explosion_blast.json"),
     )
 });
 
@@ -137,38 +137,51 @@ mod tests {
         assert_eq!(all().len(), 28, "the recipe set changed size");
     }
 
-    #[test]
-    fn every_recipe_reads_only_registers_written_before_it() {
-        all().iter().for_each(|(name, burst)| {
-            assert!(burst.operands_resolve(), "{name}");
-        });
-    }
-
     /// Every recipe's program is shorter than the table it fills.
     ///
-    /// This is the format's central claim, so it is asserted rather than
-    /// described. A burst writes twenty-odd fields and computes about half of
-    /// them; when constants were instructions the program was the longer half,
-    /// which is what made the data form bigger than the code it replaced.
+    /// The format's central claim, so it is asserted rather than described. A
+    /// burst writes twenty-odd fields and computes about half of them; when
+    /// constants were nodes the program was the longer half, which is what made
+    /// an earlier data form bigger than the code it replaced.
     #[test]
     fn a_recipe_computes_less_than_it_states() {
         all().iter().for_each(|(name, burst)| {
             let computed = burst
+                .main
                 .fields
                 .iter()
-                .filter(|(_, src)| matches!(src, Src::Reg(_)))
+                .filter(|(_, src)| matches!(src, Src::Node { .. }))
                 .count();
             assert!(
-                computed < burst.fields.len(),
+                computed < burst.main.fields.len(),
                 "{name}: every field is computed, so nothing is a constant"
             );
         });
     }
 
-    /// Foliage is the smallest recipe and the one every change to the parser is
-    /// most likely to break first, so its shape is pinned by number.
+    /// A constant reaches the graph as a pair of 32-bit words and has to come
+    /// back the *exact* `f64` the asset wrote. This is the value that proved the
+    /// point on the audio goldens: `serde_json` without `arbitrary_precision`
+    /// returns it one ULP high.
     #[test]
-    fn the_foliage_program_writes_twenty_two_registers() {
-        assert_eq!(FOLIAGE[0].register_count(), 22);
+    fn a_constant_survives_json_and_the_two_word_carrier_exactly() {
+        let awkward = 0.207_380_443_811_416_63_f64;
+        let asset = format!(
+            r#"[{{"name":"t","count":{{"factor":0.0,"plus":1}},"pool":"lit",
+                 "nodes":[{{"op":"const","value":{awkward}}}],
+                 "fields":{{"life":{{"node":0}}}}}}]"#
+        );
+        let bursts = crate::fx::burst_asset::parse("t", &asset).expect("parses");
+        let node = bursts[0].main.program.nodes().first().expect("a node");
+        let back = axiom_recipe::Param::from_pair([node.params()[0], node.params()[1]]);
+        assert_eq!(back.to_bits(), awkward.to_bits());
+    }
+
+    /// A malformed asset names its file and its line rather than panicking
+    /// somewhere unhelpful later.
+    #[test]
+    fn a_broken_asset_is_reported_not_swallowed() {
+        let err = crate::fx::burst_asset::parse("t", "not json").expect_err("refuses");
+        assert!(err.starts_with("t:"), "{err}");
     }
 }

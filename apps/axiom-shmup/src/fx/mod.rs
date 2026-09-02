@@ -51,7 +51,7 @@
 pub mod atlas;
 pub mod ambience;
 pub mod burst;
-pub mod burst_text;
+pub mod burst_asset;
 pub mod decals;
 pub mod explosions;
 pub mod haze;
