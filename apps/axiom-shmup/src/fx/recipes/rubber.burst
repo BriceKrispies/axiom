@@ -1,0 +1,103 @@
+burst rubber.0
+count 6.0 2
+pool lit
+
+# Dust — `impacts.js:874-901`.
+at = point
+n = normal
+from = mad3 n 0.02 at
+axis_r = reflected
+axis_s = add3 axis_r n
+axis = scale3 axis_s 0.5
+dir = cone axis 1.1 0.8
+speed = range 0.8 3.0
+vel = mul3 dir speed
+rise = offset vel.y 0.3
+# Odd particles are dust, even are mist. `i % 2 < 0.5` is `i % 2 == 0`,
+# which is the *even* case, so mist is the low arm.
+index = index
+phase = mod index 2.0
+tile = select phase 0.5 MIST DUST
+size0 = range 0.04 0.08
+size1 = range 0.2 0.36
+life = range 0.4 0.8
+spun = unit
+rot = scale spun 6.283185307179586
+signed = signed
+spin = scale signed 1.5
+alpha = range 0.45 0.7
+seed = unit
+
+fields
+x from.x
+y from.y
+z from.z
+vx vel.x
+vy rise
+vz vel.z
+tile tile
+size0 size0
+size1 size1
+life life
+rot rot
+spin spin
+alpha alpha
+seed seed
+size_curve 0.45
+drag 3.8
+gravity -1.2
+r0 0.1
+g0 0.095
+b0 0.09
+r1 0.08
+g1 0.078
+b1 0.075
+alpha_curve 1.5
+soft 0.09
+
+burst rubber.1
+count 5.0 2
+pool lit
+
+# Fibres — `impacts.js:903-913`. The far colour is the near one at 90%,
+# which is arithmetic on constants and therefore still a constant.
+at = point
+n = normal
+axis_r = reflected
+axis_s = add3 axis_r n
+axis = scale3 axis_s 0.5
+dir = cone axis 1.0 1.2
+speed = range 1.5 4.5
+vel = mul3 dir speed
+size = range 0.01 0.03
+life = range 0.6 1.2
+spun = unit
+rot = scale spun 6.283185307179586
+signed = signed
+spin = scale signed 18.0
+seed = unit
+
+fields
+x at.x
+y at.y
+z at.z
+vx vel.x
+vy vel.y
+vz vel.z
+size0 size
+size1 size
+life life
+rot rot
+spin spin
+seed seed
+tile SPLINTER
+drag 2.4
+gravity -14.0
+r0 0.09
+g0 0.085
+b0 0.08
+r1 0.081
+g1 0.07650000000000001
+b1 0.07200000000000001
+alpha_curve 0.35
+soft 0.06

@@ -1,0 +1,105 @@
+burst sand.0
+count 8.0 3
+pool lit
+
+# The plume — `impacts.js:604-635`. Spawn points are spread over a small
+# disc on the surface rather than stacked on the impact point, so the puff
+# reads as a crater rather than a jet.
+at = point
+n = normal
+energy = energy
+dir = cone n 0.75 0.55
+drawn = range 1.6 4.2
+speed = mul drawn energy
+spread = disc_on n 0.06
+from = add3 at spread
+lifted = offset from.y 0.01
+vel = mul3 dir speed
+index = index
+phase = mod index 3.0
+tile = select phase 0.5 SMOKE_B DUST
+near = range 0.06 0.13
+size0 = mul near energy
+far = range 0.55 1.0
+size1 = mul far energy
+life = range 0.8 1.5
+drag = range 2.2 3.2
+spun = unit
+rot = scale spun 6.283185307179586
+signed = signed
+spin = scale signed 1.1
+alpha = range 0.6 0.95
+seed = unit
+
+fields
+x from.x
+y lifted
+z from.z
+vx vel.x
+vy vel.y
+vz vel.z
+tile tile
+size0 size0
+size1 size1
+life life
+drag drag
+rot rot
+spin spin
+alpha alpha
+seed seed
+size_curve 0.5
+gravity -1.6
+r0 0.66
+g0 0.56
+b0 0.4
+r1 0.561
+g1 0.47600000000000003
+b1 0.34
+alpha_curve 1.4
+soft 0.14
+turb 0.08
+turb_freq 1.6
+
+burst sand.1
+count 13.0 5
+pool lit
+
+# Clods — `impacts.js:637-657`.
+at = point
+n = normal
+lifted = offset at.y 0.01
+dir = cone n 0.95 1.1
+speed = range 3.0 9.0
+vel = mul3 dir speed
+size = range 0.008 0.02
+life = range 0.6 1.2
+spun = unit
+rot = scale spun 6.283185307179586
+signed = signed
+spin = scale signed 20.0
+seed = unit
+
+fields
+x at.x
+y lifted
+z at.z
+vx vel.x
+vy vel.y
+vz vel.z
+size0 size
+size1 size
+life life
+rot rot
+spin spin
+seed seed
+tile CHIP
+drag 1.4
+gravity -19.0
+r0 0.528
+g0 0.44800000000000006
+b0 0.32000000000000006
+r1 0.46199999999999997
+g1 0.392
+b1 0.27999999999999997
+alpha_curve 0.3
+soft 0.06
