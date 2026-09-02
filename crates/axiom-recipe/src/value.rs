@@ -111,6 +111,45 @@ impl Param {
     pub const fn as_color(self) -> Color {
         Color::from_packed(self.0)
     }
+
+    /// Carry an `f64` across **two** consecutive parameter words: low half
+    /// first, then high.
+    ///
+    /// # Why a pair, and not a wider word
+    ///
+    /// A recipe carries values a domain wants to *store*, and some domains
+    /// compute in `f64` and cannot narrow at the recipe boundary. A ported
+    /// simulation is the clear case: 70% of one such corpus's constants are not
+    /// representable in `f32`, and for the narrower ranges among them more than
+    /// half of the values derived from them change even after being stored back
+    /// into an `f32` buffer. Rounding a constant at the boundary is not a
+    /// rounding — it computes a different function.
+    ///
+    /// The alternatives were both worse. Widening [`Param`] to 64 bits moves
+    /// every stored recipe and every digest in the tree, breaks three encodings
+    /// *defined* in `u32` words, and buys nothing where recipes are used at
+    /// scale — `axiom-field` compiles to WGSL, and WGSL has no `f64`. Tagging
+    /// the word reintroduces exactly the per-variant read this type's whole
+    /// design avoids (see this module's header).
+    ///
+    /// A slot pair costs neither. An operator already knows the layout of its
+    /// own slots — the precedent is in the tree, where a `u64` noise seed is two
+    /// consecutive words — so it reads two and recombines. **No tag, no branch,
+    /// no wire change, no digest movement.**
+    ///
+    /// This is also the named widening boundary, in the same spirit as the
+    /// single/double vector conversions: "carry this in double precision" is a
+    /// symbol you can search for, rather than a bit-shift open-coded at each
+    /// call site.
+    pub fn pair(value: f64) -> [Self; 2] {
+        let bits = value.to_bits();
+        [Self(bits as u32), Self((bits >> 32) as u32)]
+    }
+
+    /// Recombine the two words [`Param::pair`] wrote.
+    pub fn from_pair(pair: [Self; 2]) -> f64 {
+        f64::from_bits(u64::from(pair[0].0) | (u64::from(pair[1].0) << 32))
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +168,48 @@ mod tests {
         assert_eq!(p.as_int(), 4200);
         assert_eq!(p.bits(), 4200);
         assert_eq!(Param::from_bits(9).bits(), 9);
+    }
+
+    /// The pair carries every `f64` bit pattern, including the ones a narrowing
+    /// to `f32` would destroy: a value with mantissa bits below `f32`'s
+    /// precision, one whose exponent `f32` cannot hold at either end, and a
+    /// negative zero — which `f32` *can* represent but which a sloppy
+    /// recombination through an integer would flatten.
+    #[test]
+    fn a_pair_round_trips_every_double_bit_pattern() {
+        [
+            0.012_f64,
+            -8.0,
+            std::f64::consts::PI,
+            1e-300,
+            1e300,
+            -0.0,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+        ]
+        .into_iter()
+        .for_each(|v| {
+            let back = Param::from_pair(Param::pair(v));
+            assert_eq!(back.to_bits(), v.to_bits(), "{v}");
+        });
+    }
+
+    /// NaN survives as the *same* NaN. A recipe is hashed by its bytes, so a
+    /// payload that quietly canonicalises one NaN into another would move a
+    /// digest without moving any value a caller can observe.
+    #[test]
+    fn a_pair_preserves_a_nan_payload_exactly() {
+        let nan = f64::from_bits(0x7FF8_0000_DEAD_BEEF);
+        assert_eq!(Param::from_pair(Param::pair(nan)).to_bits(), nan.to_bits());
+    }
+
+    /// Low half first. Stated as a test because it is the wire order two
+    /// independently-written operators have to agree on, and nothing else in
+    /// the type says which way round it goes.
+    #[test]
+    fn a_pair_is_low_word_then_high() {
+        let p = Param::pair(f64::from_bits(0xAAAA_BBBB_CCCC_DDDD));
+        assert_eq!((p[0].bits(), p[1].bits()), (0xCCCC_DDDD, 0xAAAA_BBBB));
     }
 
     #[test]
