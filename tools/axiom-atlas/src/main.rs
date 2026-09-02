@@ -1390,7 +1390,9 @@ fn command_usage(cmd: &str) -> &'static str {
         "eol" => "ax eol [<path regex>] [--fix]
   Line endings: what is, and what should be.",
         "wgsl" => "ax wgsl [<path regex>] [--apply]
-  Inlined shader strings -> .wgsl files.",
+  Inlined shader strings -> .wgsl files.
+ax wgsl <path regex> --verify [--rev REV]
+  Prove the move kept every byte: each .wgsl vs the literal it replaced.",
         "friction" => "ax friction <what> --want <what you needed> --verdict tool|repo|unknown",
         "resolve" => "ax resolve <id> --by <what fixed it>",
         "miss" => "ax miss [--all]
