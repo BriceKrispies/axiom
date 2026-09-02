@@ -127,6 +127,13 @@
       try { gpuFacts(); } catch (e) { say("gpuFacts threw", String(e)); }
       try { say("stats", String(window.__ax_console && window.__ax_console("stats"))); }
       catch (e) { say("stats threw", String(e)); }
+      // The status line, which is where `render_scale` lives. It is set via
+      // `set_status` rather than logged, so neither `?diag=1` nor the console
+      // capture above can see it — and it is the single fact that decides
+      // whether a phone screenshot is showing a shading bug or an upscaled
+      // half-resolution frame.
+      try { say("lock", String(window.__ax_console && window.__ax_console("lock"))); }
+      catch (e) { say("lock threw", String(e)); }
       const body = lines.join("\n") + "\n\n--- console ---\n" + captured.join("\n");
       const sink = "http://" + location.hostname + ":8123/report";
       fetch(sink, { method: "POST", mode: "no-cors",
