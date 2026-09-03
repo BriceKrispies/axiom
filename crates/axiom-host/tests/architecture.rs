@@ -386,6 +386,11 @@ fn lib_exports_are_curated_set() {
         // one value so a new look knob does not widen four signatures and a
         // dozen wasm-only call sites.
         "pub use frame_render_look::FrameRenderLook;",
+        // The cloud field's own shape — octave count, domain warp, coverage-window
+        // width, density ceiling, footprint filter — authored beside the sky it
+        // belongs to. The curated set must name every export, so it is pinned
+        // here like its `FrameSky` sibling.
+        "pub use frame_cloud_detail::FrameCloudDetail;",
         "pub use frame_sky::FrameSky;",
         "pub use frame_retro_32bit::apply_frame_retro_32bit;",
         "pub use frame_retro_32bit::FrameRetro32BitProfile;",
